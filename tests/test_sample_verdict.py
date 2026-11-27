@@ -47,3 +47,11 @@ class SampleVerdictTests(unittest.TestCase):
         p.questions = [{'key':'fields:missing'}]
         p.report['unverified_sources'].append({'key':'src:verify:S3'})
         self.assertEqual(self.record(p)[0]['values'], ['1','1'])
+
+    def test_all_regions_contribute_to_the_same_sample_verdict(self):
+        p = self.planner()
+        rows = [{"sym": "V", "row": 0}]
+        cells = {sid: {"value": "4", "how": "单值"} for sid in ("1", "2")}
+        for region, verdict in [("first", {"1": "fail", "2": "pass"}), ("second", {"1": "pass", "2": "fail"})]:
+            p.record_verdict("S2", region, rows, {"1": 2, "2": 3}, {"verdict": verdict, "fills": {0: cells}})
+        self.assertEqual(p.verdict, (0, 2, []))

@@ -30,6 +30,8 @@ elif sys.argv[1:] == ['check-parent-env']:
     print('present' if 'DI_TEST_PARENT_ONLY' in os.environ else 'absent')
 elif sys.argv[1:] == ['check-user-options']:
     print(os.environ['DI_OCR'] + '/' + os.environ['DI_NO_VENDOR'])
+elif sys.argv[1:] == ['entry-path']:
+    print(json.dumps(__file__))
 else:
     print(json.dumps([os.getcwd(), sys.argv[1:]], ensure_ascii=True))
     sys.exit(17 if 'test-exit' in sys.argv else 0)
@@ -140,6 +142,18 @@ class LauncherTests(unittest.TestCase):
         return subprocess.run([str(self.kit / "run.cmd"), *args], cwd=self.project,
                               env=dict(self.env, **env), capture_output=True, timeout=90)
 
+    def test_two_cmd_processes_share_first_install_and_leave_existing_directory_alone(self):
+        reserved = self.target.parent / '.cmd-1-1-1'
+        reserved.mkdir(parents=True)
+        sentinel = reserved / 'keep.txt'
+        sentinel.write_text('keep', encoding='ascii')
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            jobs = [pool.submit(self.call_cmd, 'run', value, RANDOM='1') for value in ('first', 'second')]
+            for value, task in zip(('first', 'second'), jobs):
+                self.verify_output(task.result(), ['run', value])
+        self.assertEqual(self.log.read_text().splitlines(), ['smoke'])
+        self.assertEqual(sentinel.read_text(), 'keep')
+
     def test_cmd_and_powershell_share_installation_and_repair(self):
         args = ["run", "中文 文件", "test-exit"]
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
@@ -198,7 +212,7 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(library.is_file())
         self.assertEqual(list(self.target.parent.glob(".di-*")), [])
 
-    def test_damaged_project_repaired_in_place_with_private_cache_present(self):
+    def test_project_repairs_require_explicit_selection(self):
         self.verify_output(self.call())
         deploy = self.call(script=self.kit / "install.ps1", extra_args=[
             "-Agent", "Claude", "-ProjectRoot", str(self.project)])
@@ -208,10 +222,10 @@ class LauncherTests(unittest.TestCase):
         library.unlink()
         rules = project_skill / "rules/learned.json"
         rules.write_text("kept")
-        (project_skill / "scripts/di.py").write_text("print('project')", encoding="ascii")
-        result = self.call()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), b"project")
+        self.verify_output(self.call())
+        self.assertFalse(library.exists())
+        repair = self.call(script=self.kit / "install.ps1", extra_args=["-RepairRoot", str(project_skill)])
+        self.assertEqual(repair.returncode, 0, repair.stderr)
         self.assertEqual(library.read_text(), "# synthetic office backend")
         self.assertEqual(rules.read_text(), "kept")
 
@@ -242,22 +256,24 @@ class LauncherTests(unittest.TestCase):
         self.archive.unlink()
         second = self.call(script=installer, extra_args=options)
         self.assertEqual(second.returncode, 0, second.stderr)
-        self.verify_output(self.call())
+        project_install = self.project / ".claude/skills/traced-template-fill"
+        explicit = subprocess.run([project_install / "runtime/python/python.exe", project_install / "scripts/di.py",
+                                   *self.values], cwd=self.project, env=self.env, capture_output=True)
+        self.verify_output(explicit)
         self.assertFalse(self.target.exists())
         self.assertEqual(self.log.read_text().splitlines(), ["smoke"])
 
-    def test_project_rules_take_precedence_over_private(self):
+    def test_both_wrappers_launch_only_the_selected_version_cache(self):
         self.verify_output(self.call())
         deploy = self.call(script=self.kit / "install.ps1", extra_args=[
             "-Agent", "Claude", "-ProjectRoot", str(self.project)])
         self.assertEqual(deploy.returncode, 0, deploy.stderr)
-        project_entry = self.project / ".claude/skills/traced-template-fill/scripts/di.py"
-        project_entry.write_text("print('project-local skill')", encoding="ascii")
         self.archive.unlink()
-        self.assertTrue(self.target.is_dir())
-        result = self.call()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), b"project-local skill")
+        Path(self.env["DI_TEST_ARGS"]).write_text('["entry-path"]')
+        for result in (self.call(), self.call_cmd('entry-path')):
+            self.assertEqual(result.returncode, 0, result.stderr)
+            entry = Path(json.loads(result.stdout.decode('utf-8-sig')))
+            self.assertTrue(entry.samefile(self.target / "scripts/di.py"))
         self.assertEqual(self.log.read_text().splitlines(), ["smoke", "smoke"])
 
     def test_failed_first_use_and_missing_model(self):

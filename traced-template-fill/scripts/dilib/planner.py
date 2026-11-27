@@ -13,7 +13,7 @@ import hashlib
 import re
 
 from .plan_tables import TablePlanningMixin
-from .common import contains_score, norm_text, short, sim
+from .common import contains_model_code, contains_score, norm_text, short, sim
 from .read_docx import HEAD_PATTERNS
 from .target import analyze
 
@@ -225,26 +225,33 @@ class Planner(TablePlanningMixin):
             self.report['warnings'].append('⚠ ' + detail)
 
     def check_ocr(self):
+        from .pdf_ocr import review_groups
         for alias, md in self.src.items():
             pages = md.m.get('ocr_pages')
             if not pages:
                 continue
             # A previous review only applies to this source and this recognized text.
             digest = hashlib.sha256(md.m['sha1'].encode('ascii'))
+            flagged = {}
             for block in md.m['blocks']:
                 if block.get('ocr'):
-                    for w in block.get('numeric_warnings', []):
-                        digest.update(('%s %.1f' % (w['text'], w['confidence'])).encode('utf-8'))
+                    anchor = '%s:%s（第 %s 页）' % (alias, block['id'], block['page'])
+                    for label, words in review_groups(block):
+                        for w in words:
+                            flagged.setdefault(label, []).append((anchor, w))
+                            digest.update(('%s %.1f' % (w['text'], w['confidence'])).encode('utf-8'))
                     digest.update(('%s\0%s\0' % (block['page'], block['text'])).encode('utf-8'))
             key = 'src:ocr:%s:%s' % (alias, digest.hexdigest()[:16])
             detail = '%s（%s）第 %s 页使用 OCR。请对照 PDF 原页核对本次采用的文字、数字、小数点、正负号和单位' % (
                 md.m['name'], alias, '、'.join(map(str, pages)))
-            flagged = [('%s:%s（第 %s 页）' % (alias, b['id'], b['page']), w)
-                       for b in md.m['blocks'] for w in b.get('numeric_warnings', [])]
-            if flagged:
+            for label, words in flagged.items():
                 examples = '、'.join('%s %s（%.1f/100）' % (anchor, w['text'], w['confidence'])
-                                    for anchor, w in flagged[:6])
-                detail += '。⚠ 低置信数字共 %d 处：%s' % (len(flagged), examples)
+                                    for anchor, w in words[:6])
+                detail += '。⚠ 低置信%s共 %d 处：%s' % (label, len(words), examples)
+            for block in md.m['blocks']:
+                if block.get('metadata_title_hint'):
+                    detail += '。%s:%s 第 1 页 OCR 原文「%s」，PDF 元数据标题「%s」' % (
+                        alias, block['id'], block['text'], block['metadata_title_hint'])
             self.report['warnings'].append(detail)
             eff = self.answer_effect(key)
             if eff is None:
@@ -259,7 +266,7 @@ class Planner(TablePlanningMixin):
 
     def scan_existing_fields(self):
         '''目标表单里已经填着内容的字段（上一批留下的）：不覆盖，标“原有值，本批未核”；型号与源文件不一致时单独提示。'''
-        codes = self._model_codes(self.doc_sources())
+        codes = self.expected_model_codes(self.doc_sources())
         ver = self.rules.get('doc_version')
         for b in self.T.m.get('blocks', []):
             if b['t'] != 'tbl' or 'in' in b:
@@ -274,10 +281,11 @@ class Planner(TablePlanningMixin):
                     val = cs[i + 1]['text'].strip()
                     if not val or not lab or len(lab) > 20 or not self.FIELD_RE.search(lab) or re.fullmatch(r'[年月日至\s　]*', val):
                         continue
-                    if re.search('依据|标准条款', lab) and codes and codes[0].lower() in val.lower() and (not ver or ver in re.sub(r'\s+', '', val)):
+                    same_model = len(codes) == 1 and contains_model_code(val, codes[0])
+                    if re.search('依据|标准条款', lab) and same_model and (not ver or ver in re.sub(r'\s+', '', val)):
                         continue
                     cid = '%s.R%d.C%d' % (b['id'], cs[i + 1]['r'], cs[i + 1]['c'])
-                    bad = bool(re.search('产品名称|规格型号|产品型号', lab)) and bool(codes) and codes[0].lower() not in val.lower()
+                    bad = bool(re.search('产品名称|规格型号|产品型号', lab)) and len(codes) == 1 and not same_model
                     self.stale.append({'kind': 'stale', 'cell': cid, 'text': cs[i + 1]['text'], 'sample': '', 'param': lab, 'why': ('型号与源文件不一致（源文件为 %s）' % codes[0]) if bad else ''})
                     if bad:
                         msg = '⚠【型号不一致】记录里原有型号“%s”，源文件的型号是 %s；没有覆盖，请确认是否填错' % (short(val, 20), codes[0])
@@ -333,9 +341,6 @@ class Planner(TablePlanningMixin):
                                                  "source": "实测值比对", "how": "派生"})
                 elif "□" not in txt and not re.search(r"只合格", txt):
                     missing.append((re.sub(r"\s+", "", txt)[:16], cell))
-            for rg in t["regions"]:
-                if rg.get("label") and not any(rg["id"] in x for x in self.report["unfilled"]):
-                    pass
         for lab, cell in missing:
             self.report["unfilled"].append("%s（%s）" % (lab, cell))
         if missing:
@@ -354,65 +359,79 @@ class Planner(TablePlanningMixin):
 
     def _model_codes(self, docs):
         codes = {}
-        for a, md in docs.items():
-            for s in self.src_names(a) + [self.task]:
-                # 不用 \b：中文也算“单词字符”，型号后紧跟汉字时 \b 不成立
-                for c in re.findall(r"(?<![A-Za-z0-9])[A-Z]{2,}[A-Z0-9\-]*\d[A-Z0-9\-]*(?![A-Za-z0-9])", s or ""):
-                    if len(c) >= 6:
-                        codes[c] = codes.get(c, 0) + 1
-        return sorted(codes, key=lambda c: -codes[c])
+        names = [text for alias in docs for text in dict.fromkeys(self.src_names(alias))]
+        for text in names + [self.task]:
+            for code in re.findall(r"(?<![A-Za-z0-9])[A-Z]{2,}[A-Z0-9\-]*\d[A-Z0-9\-]*(?![A-Za-z0-9])", text or ""):
+                if len(code) >= 6:
+                    codes[code] = codes.get(code, 0) + 1
+        return sorted(codes, key=lambda code: -codes[code])
+
+    def expected_model_codes(self, docs):
+        codes = self._model_codes(docs)
+        chosen = set()
+        for key, answer in self.answers.items():
+            if not re.match(r'^field:.*(?:产品名称|规格型号|产品型号)', key) or not isinstance(answer, dict) or answer.get('default'):
+                continue
+            effect = self.answer_effect(key)
+            if isinstance(effect, dict):
+                chosen.update(code for code in codes if contains_model_code(effect.get('value', ''), code))
+        return [code for code in codes if code in chosen] if chosen else codes
 
     def field_product(self, lab, cell, docs):
-        codes = self._model_codes(docs)
-        if not codes:
-            self.report["unfilled"].append("%s（%s）" % (lab, cell))
-            return
-        code = codes[0]
-        full = None
-        for a, md in docs.items():
-            m = re.search(re.escape(code) + r"型?([一-鿿A-Za-z0-9]{2,20}?)(?:\s|详|规|$)", md.m.get("title", ""))
-            if m:
-                full = "%s型%s" % (code, m.group(1)) if "型" in md.m.get("title", "") else code + m.group(1)
-                break
-        cands = [code] + ([full] if full and full != code else [])
-        eff = self.answer_effect("field:" + lab)
-        if eff and eff.get("value"):
-            val = eff["value"]
-        else:
-            val = cands[0]
-            if len(cands) > 1:
-                self.ask({"key": "field:" + lab, "topic": "字段取值", "question": "“%s”填写哪种形式？" % lab,
-                          "options": [{"label": c, "effect": {"value": c}} for c in cands]})
-        self.ops.append({"id": self.oid(), "op": "set_text", "cell": cell, "text": val})
-        a0 = next(iter(docs))
-        self.ops.append({"id": self.oid(), "op": "comment", "anchor": cell, "text": "【字段】取自源文件标题/文件名中的产品型号",
-                         "links": [{"label": "打开原文", "alias": a0, "ref": "TITLE"}]})
-        self.report["fills"].append({"target": cell, "value": val, "source": "源文件标题", "how": "型号识别"})
+        candidates = []
+        for code in self._model_codes(docs):
+            sources = [a for a in docs if any(contains_model_code(text, code) for text in self.src_names(a))]
+            if not sources:
+                candidates.append((None, code))
+                continue
+            candidates.append((sources[0], code))
+            for alias in sources:
+                title = docs[alias].m.get("title", "")
+                match = re.search(r'(?<![A-Za-z0-9-])' + re.escape(code) + r"(?![A-Za-z0-9-])型?([^，。；\s]{2,20}?)(?=详细规范|规范|标准|\s|$)", title)
+                if match:
+                    full = match.group().strip()
+                    if full != code and not re.fullmatch(r"(详细)?规范|标准", full[len(code):]):
+                        candidates.append((alias, full))
+                        break
+        self._write_field(lab, cell, candidates, "型号识别")
 
     def field_basis(self, lab, cell, docs):
-        cands = []
-        for a, md in docs.items():
-            title = md.m.get("title", "")
+        candidates = []
+        for alias, md in docs.items():
+            title = re.sub(r"\s+", "", md.m.get("title", ""))
             name = re.sub(r"\.\w+$", "", md.m["name"])
-            if re.search(r"规范|标准|细则|大纲", title + name):
-                t = re.sub(r"\s+", "", title)
-                t = re.sub(r"^半导体集成电路", "", t)
-                cands.append((a, t or name))
-        if not cands:
+            basis = next((x for x in (title, name) if re.search(r"规范|标准|细则|大纲", x)), None)
+            if basis:
+                value = re.sub(r"^半导体集成电路", "", basis)
+                version = self.rules.get("doc_version")
+                if version and version not in value:
+                    value += "（%s）" % version
+                candidates.append((alias, value))
+        self._write_field(lab, cell, candidates, "依据文件")
+
+    def _write_field(self, lab, cell, candidates, how):
+        if not candidates:
             self.report["unfilled"].append("%s（%s）" % (lab, cell))
             return
-        a, val = cands[0]
-        ver = self.rules.get("doc_version")
-        if ver and ver not in val:
-            val += "（%s）" % ver
-        eff = self.answer_effect("field:" + lab)
-        if eff and eff.get("value"):
-            val = eff["value"]
-        self.ops.append({"id": self.oid(), "op": "set_text", "cell": cell, "text": val})
-        self.ops.append({"id": self.oid(), "op": "comment", "anchor": cell,
-                         "text": "【字段】规范标题%s" % ("＋任务描述中的版本“%s”" % ver if ver else ""),
-                         "links": [{"label": "打开原文", "alias": a, "ref": "TITLE"}]})
-        self.report["fills"].append({"target": cell, "value": val, "source": "%s 标题" % a, "how": "依据文件"})
+        selected = candidates[0]
+        if len(candidates) > 1:
+            key = "field:" + lab
+            eff = self.answer_effect(key) or {}
+            matches = [(a, v) for a, v in candidates if v == eff.get("value") and
+                       ("alias" not in eff or a == eff["alias"])]
+            if len(matches) != 1:
+                self.ask({"key": key, "topic": "字段取值", "question": "“%s”采用哪个来源和写法？" % lab,
+                          "options": [{"label": "%s · %s" % (a or "任务描述", v), "effect": {"alias": a, "value": v}}
+                                      for a, v in candidates]})
+                return
+            selected = matches[0]
+        alias, value = selected
+        source = ("%s 标题/文件名" % alias) if alias else "任务描述"
+        links = [{"label": "打开原文", "alias": alias, "ref": "TITLE"}] if alias else []
+        self.ops.append({"id": self.oid(), "op": "set_text", "cell": cell, "text": value})
+        self.ops.append({"id": self.oid(), "op": "comment", "anchor": cell, "text": "【字段】" + source, "links": links})
+        self.report["fills"].append({"target": cell, "value": value, "source": source, "source_alias": alias,
+                                     "how": how if alias else "任务指定型号"})
 
     # ================================================================= 配方：章节摘抄
     def parse_requirement(self, text):
@@ -656,30 +675,29 @@ class Planner(TablePlanningMixin):
                 eff = self.answer_effect(key)
                 if not empty and eff is None:
                     continue          # 源章节有内容：直接摘抄，不打扰用户
-                thin = empty
                 tbl = sec.get("in", "body").split(".")[0]
                 sibs = [x for x in md.sections() if x["id"] != sec["id"] and (
                     (sec.get("in", "body") == "body" and x.get("in", "body") == "body" and x.get("parent") == sec.get("parent")) or
                     (sec.get("in", "body") != "body" and x.get("in", "body").split(".")[0] == tbl and x.get("depth") == sec.get("depth")))]
-                order = [x["id"] for x in md.sections()]
-                i0 = order.index(sec["id"])
-                near = [x for x in sibs if abs(order.index(x["id"]) - i0) <= 2 and
-                        (contains_score(clean_title(x["title"]), s["title"] + req) >= 0.2 or abs(order.index(x["id"]) - i0) == 1)]
+                order = {x['id']: i for i, x in enumerate(md.sections())}
+                i0 = order[sec['id']]
+                near = [x for x in sibs if abs(order[x['id']] - i0) <= 2 and
+                        (x['size']['chars'] or x['size']['tables'] or x['size']['figs']) and
+                        (contains_score(clean_title(x["title"]), s["title"] + req) >= 0.2 or abs(order[x['id']] - i0) == 1)]
                 if eff is None and near:
-                    opts = [{"label": "纳入%s“%s”%s" % ("相邻章节" if True else "", clean_title(x["title"]),
-                                                     "（源内容为空）" if x["size"]["chars"] < 2 else ""),
+                    opts = [{"label": "纳入相邻章节“%s”" % clean_title(x["title"]),
                              "effect": {"add": {"alias": p["alias"], "sec": x["id"], "title": clean_title(x["title"])}}}
                             for x in near[:3]]
-                    opts.append({"label": "不纳入其他章节%s" % ("（该部分标注“源文件内容为空”）" if thin else ""), "effect": {}})
+                    opts.append({"label": "不纳入其他章节（该部分标注“源文件内容为空”）", "effect": {}})
                     self.ask({"key": key, "topic": "章节取舍", "multi": True,
-                              "question": "目标章节“%s”（要求：%s）匹配到源章节“%s”%s。是否同时纳入下列相邻章节？（可多选）" % (
-                                  s["title"], short(req, 30), p["title"], "，但其内容为空" if thin else ""),
+                              "question": "目标章节“%s”（要求：%s）匹配到的源章节“%s”为空。是否同时纳入下列相邻章节？（可多选）" % (
+                                  s["title"], short(req, 30), p["title"]),
                               "options": opts, "recommended": len(opts) - 1})
                 if eff:
                     effs = eff if isinstance(eff, list) else [eff]
                     adds = [dict(e["add"], score=0.9, how="用户选择", dnote=self.default_note(eff), kw=p.get("kw"),
                                  label_doc=p.get("label_doc")) for e in effs if e.get("add")]
-                    grp = sorted([p] + adds, key=lambda x: order.index(x["sec"]))     # 按源文件顺序排列
+                    grp = sorted([p] + adds, key=lambda x: order[x["sec"]])     # 按源文件顺序排列
                     idx = picks.index(p)
                     picks[idx:idx + 1] = grp
             # 组装

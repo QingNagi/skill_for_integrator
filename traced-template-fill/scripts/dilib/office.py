@@ -97,8 +97,22 @@ def _reg_has(progid):
         return False
 
 
+def _program_on_path(name):
+    if os.name != "nt":
+        return shutil.which(name)
+    # Windows which() can put the current project ahead of PATH.
+    cwd = Path.cwd()
+    for directory in os.get_exec_path():
+        folder = Path(directory.strip('"'))
+        if folder.is_absolute() and Path(os.path.abspath(folder)) != cwd:
+            executable = folder / (name + ".exe")
+            if executable.is_file():
+                return str(executable)
+    return None
+
+
 def _find_soffice():
-    p = shutil.which("soffice") or shutil.which("libreoffice")
+    p = _program_on_path("soffice") or _program_on_path("libreoffice")
     if p:
         return p
     for c in (r"C:\Program Files\LibreOffice\program\soffice.exe",
@@ -120,7 +134,7 @@ def detect():
     if _DETECTED is not None:
         return _DETECTED
     d = {"word": None, "excel": None, "wps_word": None, "wps_excel": None, "soffice": None,
-         "powershell": shutil.which("powershell") or shutil.which("pwsh")}
+         "powershell": _program_on_path("powershell") or _program_on_path("pwsh")}
     if os.name == "nt":
         if _reg_has("Word.Application"):
             d["word"] = "Word.Application"
@@ -198,7 +212,9 @@ def _run_ps(script, args, timeout=600):
     sp = os.path.join(tmpdir, "run.ps1")
     with open(sp, "w", encoding="utf-8-sig") as f:      # 必须带 BOM，否则 PowerShell 5 按 GBK 读取
         f.write(script)
-    ps = detect()["powershell"] or "powershell"
+    ps = detect()["powershell"]
+    if not ps:
+        raise DIError("找不到已安装的 PowerShell")
     cmd = [ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", sp] + list(args)
     try:
         child_env = ChainMap({"TEMP": tmpdir, "TMP": tmpdir}, os.environ)

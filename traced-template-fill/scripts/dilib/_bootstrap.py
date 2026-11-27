@@ -33,10 +33,6 @@ def notes():
     return list(_notes)
 
 
-def init():
-    """Dependencies are loaded lazily."""
-
-
 def wheel_manifest():
     return json.loads((_ROOT / "vendor/wheels.lock.json").read_text(encoding="utf-8"))
 
@@ -157,12 +153,7 @@ def _vendor_root():
     return _long(os.environ.get("DI_VENDOR_DIR") or _VENDOR)
 
 
-def activate_vendor():
-    """Load the exact private wheels into this interpreter, preserving a pypdf-only kit."""
-    if os.environ.get("DI_NO_VENDOR"):
-        return False
-    if "activated" in _cache:
-        return _cache["activated"]
+def _vendor_packages():
     lock = wheel_manifest()
     root = _vendor_root()
     tag = platform_tag()
@@ -171,6 +162,16 @@ def activate_vendor():
                 if full or key in ("pypdf", "typing_extensions")]
     if full:
         packages.extend((root / "wheels" / tag, spec) for spec in lock["native"][tag].values())
+    return full, packages
+
+
+def activate_vendor():
+    """Load the exact private wheels into this interpreter, preserving a pypdf-only kit."""
+    if os.environ.get("DI_NO_VENDOR"):
+        return False
+    if "activated" in _cache:
+        return _cache["activated"]
+    _, packages = _vendor_packages()
     default = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
     cache = _long(os.environ.get("DI_CACHE_DIR") or default / "traced-template-fill") / "pdf-wheels-v2"
     paths = []
@@ -198,6 +199,20 @@ def use_pypdf():
 
 def _parser_signature():
     if "parser_signature" not in _cache:
+        if not os.environ.get("DI_NO_VENDOR"):
+            full, packages = _vendor_packages()
+            if full:
+                # A lookup reads only an existing JSON model. Actual parsing still
+                # authenticates all wheels and every extracted file in activate_vendor.
+                try:
+                    present = all((folder / spec[0]).stat().st_size == spec[1] for folder, spec in packages)
+                except OSError:
+                    present = False
+                if present:
+                    pins = ' '.join(sorted(spec[2] for _, spec in packages)).encode('ascii')
+                    signature = 'pinned-' + hashlib.sha256(pins).hexdigest()
+                    _cache["parser_signature"] = signature
+                    return signature
         activate_vendor()
         versions = []
         for name in ("pdfplumber", "pdfminer.six", "pypdfium2", "pypdf", "Pillow"):
@@ -208,6 +223,14 @@ def _parser_signature():
             versions.append(name + "=" + version)
         _cache["parser_signature"] = ",".join(versions)
     return _cache["parser_signature"]
+
+
+def parsed_signature(options, backend):
+    # A transient verification failure can fall back to system libraries. Revisit
+    # that parse after repair instead of publishing it as a pinned-reader result.
+    if options['pinned_reader'] and (not _cache.get('activated') or backend != 'pdfplumber'):
+        return None
+    return options['signature']
 
 
 def ocr_hint(probe=False):
@@ -251,5 +274,7 @@ def ocr_hint(probe=False):
                 res["hint"] += "中英文样张自测通过。"
         except (OSError, ValueError, KeyError, ImportError, RuntimeError) as exc:
             res.update(available=False, engine=None, hint=str(exc))
-    res["signature"] = "pdf-ocr-v3:%s:%s:%s:%s" % (_parser_signature(), OCR_LANGUAGE, OCR_DPI, signature)
+    parser = _parser_signature()
+    res["pinned_reader"] = parser.startswith('pinned-')
+    res["signature"] = "pdf-ocr-v4:%s:%s:%s:%s" % (parser, OCR_LANGUAGE, OCR_DPI, signature)
     return res

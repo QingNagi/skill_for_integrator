@@ -65,10 +65,10 @@ Claude Code 也可将文件夹放入用户目录下的 `.claude/skills/`，供�
 python tools/fetch_vendor.py --platform all --mirror pypi
 python tools/build_offline_bundle.py --platform source,lite --tag review --out ../release
 python -m venv .build/zig
-& ./.build/zig/Scripts/python.exe -m pip install ziglang==0.14.1
+& ./.build/zig/Scripts/python.exe -m pip install ziglang==0.14.1 Pillow==13.0.0
 $zig = & ./.build/zig/Scripts/python.exe -c "from pathlib import Path; import ziglang; print(Path(ziglang.__file__).with_name('zig.exe'))"
 foreach ($platform in 'win_amd64','manylinux_x86_64','manylinux_aarch64') {
-    python tools/build_ocr_runtime.py --zig $zig --platform $platform
+    & ./.build/zig/Scripts/python.exe tools/build_ocr_runtime.py --zig $zig --platform $platform
     if ($LASTEXITCODE) { throw "OCR 构建失败 ($platform)" }
 }
 python tools/build_win64_agent_kit.py --out ../release/traced-template-fill-offline-win64.zip

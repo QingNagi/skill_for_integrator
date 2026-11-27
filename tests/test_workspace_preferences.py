@@ -13,9 +13,22 @@ from dilib import cleanup, cli, preferences
 from dilib.common import DIError
 from dilib.common import write_json
 from dilib.content import load_model
+from dilib.job import Job
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_overlapping_source_arguments_keep_one_alias_per_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / '模板.txt'
+            target.write_text('表', encoding='utf8')
+            sources = [root / folder / '记录.txt' for folder in ('一组', '二组')]
+            for path in sources:
+                path.parent.mkdir()
+                path.write_text('同名同内容', encoding='utf8')
+            job = Job.create(str(target), [str(sources[0]), str(sources[0].parent), str(sources[1])], out_root=tmp)
+            self.assertEqual([s['path'] for s in job.data['sources']], list(map(str, sources)))
+
     def test_project_overrides_user_and_old_bundled_rules(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -69,7 +82,18 @@ class WorkspaceTests(unittest.TestCase):
             try:
                 alias.symlink_to(real, target_is_directory=True)
             except OSError as exc:
-                self.skipTest("Directory symlink unavailable: %s" % exc)
-            with self.assertRaises(DIError):
-                cleanup.cmd_clean(SimpleNamespace(out=alias / "out", apply=True))
-            self.assertTrue(derived.exists())
+                if os.name != 'nt' or getattr(exc, 'winerror', None) != 1314:
+                    raise
+                # Standard Windows users can create a directory junction without
+                # the privilege for symbolic links. Both are reparse points.
+                import _winapi
+                _winapi.CreateJunction(str(real), str(alias))
+            try:
+                with self.assertRaises(DIError):
+                    cleanup.cmd_clean(SimpleNamespace(out=alias / "out", apply=True))
+                self.assertTrue(derived.exists())
+            finally:
+                if alias.is_symlink():
+                    alias.unlink()
+                else:
+                    alias.rmdir()

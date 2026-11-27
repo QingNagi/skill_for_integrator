@@ -21,7 +21,7 @@ import os
 import re
 import zipfile
 
-from .common import DIError, cache_hasher, ensure_dir, read_json, safe_name, write_json
+from .common import DIError, cache_hasher, ensure_dir, file_sha1, read_json, safe_name, write_json
 from .content import Model, load_model
 
 DOC_TYPES = {".docx", ".doc", ".docm", ".wps", ".rtf", ".odt", ".xlsx", ".xlsm", ".xls", ".et", ".csv", ".tsv", ".md",
@@ -46,7 +46,7 @@ class Job:
         target = os.path.abspath(target)
         if not os.path.isfile(target):
             raise DIError("请指定存在的目标文件：%s" % target)
-        srcs = []
+        srcs = {}
         for s in sources:
             paths = [s] if os.path.exists(s) else sorted(glob.glob(s))
             if not paths:
@@ -58,10 +58,11 @@ class Job:
                 if os.path.isdir(p):
                     for f in sorted(os.listdir(p)):
                         fp = os.path.join(p, f)
-                        if os.path.isfile(fp) and os.path.splitext(f)[1].lower() in DOC_TYPES and not f.startswith("~$") and fp != target:
-                            srcs.append(fp)
-                elif p != target and not os.path.basename(p).startswith("~$"):
-                    srcs.append(p)
+                        if os.path.isfile(fp) and os.path.splitext(f)[1].lower() in DOC_TYPES and not f.startswith("~$"):
+                            srcs.setdefault(os.path.normcase(fp), fp)
+                elif not os.path.basename(p).startswith("~$"):
+                    srcs.setdefault(os.path.normcase(p), p)
+        srcs.pop(os.path.normcase(target), None)
         if not srcs:
             raise DIError("至少需要一个源文件（--source）")
         out_root = os.path.abspath(out_root or "整合输出")
@@ -71,7 +72,7 @@ class Job:
         if name and os.path.exists(os.path.join(d, "job.json")):
             raise DIError("任务目录已存在：%s" % d)
         data = {"version": 1, "workspace": os.getcwd(), "created": datetime.datetime.now().isoformat(timespec="seconds"), "task": task or "",
-                "target": {"path": target}, "sources": [{"alias": "S%d" % (i + 1), "path": p} for i, p in enumerate(srcs)],
+                "target": {"path": target}, "sources": [{"alias": "S%d" % (i + 1), "path": p} for i, p in enumerate(srcs.values())],
                 "profile": profile or "default", "formats": formats or [], "cache": os.path.join(out_root, "_缓存")}
         job = cls(d, data=data)
         if test_rules:
@@ -134,11 +135,12 @@ class Job:
         return d
 
     # ------------------------------------------------------------ 路径
-    def fingerprint(self):
+    def fingerprint(self, *, files_only=False):
         '''目标+全部源文件当前内容的指纹：回答只对当时的文件版本有效，文件被改过就失效。'''
         h = cache_hasher()
-        for al in ['T'] + [s['alias'] for s in self.data['sources']]:
-            h.update((al + ':' + self.model(al).m['sha1']).encode('utf-8'))
+        for al, entry in [('T', self.data['target'])] + [(s['alias'], s) for s in self.data['sources']]:
+            digest = file_sha1(entry['path']) if files_only else self.model(al).m['sha1']
+            h.update((al + ':' + digest).encode('utf-8'))
         return h.hexdigest()[:12]
 
     def p(self, *parts):

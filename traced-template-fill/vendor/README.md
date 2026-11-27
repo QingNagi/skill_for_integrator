@@ -29,6 +29,6 @@ python tools/build_ocr_runtime.py --platform manylinux_x86_64 --zig PATH_TO_ZIG_
 python tools/build_ocr_runtime.py --platform manylinux_aarch64 --zig PATH_TO_ZIG_0_14_1
 ```
 
-构建脚本从固定标签获取并校验 Tesseract 与 Leptonica 源码，再用 Zig 0.14.1 交叉编译。也可预置已校验的两个源码压缩包至 .build/ocr-build/。模型和解释器由对应平台打包工具准备。wheel 与 OCR 程序分别放在 .build/vendor/py/、.build/vendor/wheels/ 和 .build/vendor/ocr/。打包工具校验发布清单，拒绝摘要不符的输入。
+构建脚本从固定标签获取并校验 Tesseract 与 Leptonica 源码。构建机 Python 需安装 Pillow 13.0.0，将九张内嵌 TIFF 字体图转换为 OCR 引擎支持的 PBM，逐像素核对后用 Zig 0.14.1 交叉编译。也可预置已校验的两个源码压缩包至 .build/ocr-build/。模型和解释器由对应平台打包工具准备。wheel 与 OCR 程序分别放在 .build/vendor/py/、.build/vendor/wheels/ 和 .build/vendor/ocr/。打包工具校验发布清单，拒绝摘要不符的输入。
 
 [PDFium 绑定的许可说明](https://pypdfium2.readthedocs.io/en/stable/readme.html#licensing) · [Tesseract](https://github.com/tesseract-ocr/tesseract/tree/5.5.5) · [Leptonica](https://github.com/DanBloomberg/leptonica/tree/1.87.0) · [tessdata_fast 模型](https://github.com/tesseract-ocr/tessdata_fast/tree/87416418657359cb625c412a48b6e1d6d41c29bd)

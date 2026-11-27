@@ -35,18 +35,18 @@
   "binaries": {
     "manylinux_aarch64": {
       "name": "tesseract",
-      "size": 3731224,
-      "sha256": "9f35e2521834b8cae6214483f27d5db3047666392573a73d91ad9ef3af4f93ec"
+      "size": 5196200,
+      "sha256": "2d2e09705fc52e9295a90fb75f0dcfeecfd0725dd8e470e0b935e107a8c4916a"
     },
     "manylinux_x86_64": {
       "name": "tesseract",
-      "size": 3753040,
-      "sha256": "356b0c20942728c68c22fd5057ce120f35862c243e6663a77f9512d003d759a6"
+      "size": 5218064,
+      "sha256": "ce6e4770d1cf273a37a1b1a38eeff4fcb45c19ba5fc0bc27538a148d0de37dee"
     },
     "win_amd64": {
       "name": "tesseract.exe",
-      "size": 4186624,
-      "sha256": "fb4b584e1e7f34e816d67897a6f7ede2687aa41d51679f43a21e0cfa791e6c61"
+      "size": 5651456,
+      "sha256": "aca7b94dc1b922ad3e9d2ad2f584d7c558f659cefb7de651a8ac09c6f000247d"
     }
   }
 }

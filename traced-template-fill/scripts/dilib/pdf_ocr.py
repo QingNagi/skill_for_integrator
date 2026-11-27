@@ -6,7 +6,11 @@ import re
 import subprocess
 
 # Tesseract confidence is on a 0–100 scale. This flags words for human review.
-NUMERIC_REVIEW_THRESHOLD = 80
+WORD_REVIEW_THRESHOLD = 80
+
+
+def review_groups(block):
+    return (('数字', block.get('numeric_warnings', [])), ('文字', block.get('text_warnings', [])))
 
 
 def parse_tsv(tsv):
@@ -29,10 +33,14 @@ def parse_tsv(tsv):
         text = ' '.join(w for w, _, _ in words)
         text = re.sub(r'(?<=[\u3400-\u9fff]) (?=[\u3400-\u9fff])', '', text)
         coords = list(zip(*(box for _, _, box in words)))
-        warnings = [{'text': word, 'confidence': round(score, 1)}
-                    for word, score, _ in words if score < NUMERIC_REVIEW_THRESHOLD and re.search(r'\d', word)]
+        numeric_warnings, text_warnings = [], []
+        for word, score, _ in words:
+            if score < WORD_REVIEW_THRESHOLD:
+                warnings = numeric_warnings if re.search(r'\d', word) else text_warnings
+                warnings.append({'text': word, 'confidence': round(score, 1)})
         lines.append({'text': text, 'bbox': [min(coords[0]), min(coords[1]), max(coords[2]), max(coords[3])],
-                      'confidence': round(min(s for _, s, _ in words), 1), 'numeric_warnings': warnings,
+                      'confidence': round(min(s for _, s, _ in words), 1),
+                      'numeric_warnings': numeric_warnings, 'text_warnings': text_warnings,
                       'words': [{'text': w, 'confidence': round(s, 1), 'bbox': list(b)} for w, s, b in words]})
     return lines
 

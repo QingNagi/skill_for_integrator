@@ -1,5 +1,6 @@
 """Exercise offline OCR with searchable, scanned, and mixed PDF pages."""
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,7 +21,7 @@ class PdfOcrTests(unittest.TestCase):
     def setUpClass(cls):
         _bootstrap.activate_vendor()
 
-    def test_tsv_marks_only_low_confidence_numbers_without_altering_the_source(self):
+    def test_low_confidence_words_are_visible_without_altering_measurements(self):
         from dilib.pdf_ocr import parse_tsv
         rows = ['level page_num block_num par_num line_num word_num left top width height conf text',
                 '4 1 1 1 1 0 20 30 300 15 -1 ',
@@ -32,11 +33,58 @@ class PdfOcrTests(unittest.TestCase):
         self.assertEqual(line['confidence'], 60)
         self.assertEqual(line['bbox'], [20, 30, 240, 45])
         self.assertEqual(line['numeric_warnings'], [{'text': '-0.125', 'confidence': 64.5}])
+        self.assertEqual(line['text_warnings'], [{'text': 'mV', 'confidence': 60}])
         model = content.Model({'type': 'pdf', 'blocks': [dict(line, t='p', id='P0', ocr=True, page=2)]}, 'S1')
         shown = content.render_block(model, 'P0')
         self.assertIn('⚠', shown)
         self.assertIn('-0.125（64.5', shown)
+        self.assertIn('低置信文字 mV（60.0', shown)
         self.assertTrue(shown.endswith('-0.125 1.250 mV'))
+        self.assertIn('低置信文字 mV', content.search({'S1': model}, 'mV')[0][-1])
+
+    def test_native_engine_lists_both_models_with_clean_font_initialization(self):
+        options = _bootstrap.ocr_hint()
+        proc = subprocess.run([options['executable'], '--list-langs', '--tessdata-dir', '.'],
+                              cwd=options['tessdata'], capture_output=True, check=True)
+        self.assertEqual(proc.stderr, b'')
+        self.assertTrue({b'chi_sim', b'eng'}.issubset(proc.stdout.splitlines()))
+        from PIL import Image
+        import io
+        sample = Path(__file__).resolve().parents[1] / 'traced-template-fill/assets/offline-ocr.png'
+        data = io.BytesIO()
+        with Image.open(sample) as im:
+            im.convert('L').save(data, format='PPM')
+        proc = subprocess.run([options['executable'], 'stdin', 'stdout', '--tessdata-dir', '.',
+                               '-l', options['language'], '--dpi', '300'], cwd=options['tessdata'],
+                              input=data.getvalue(), capture_output=True, check=True)
+        self.assertIn(b'2026', proc.stdout)
+        self.assertEqual(proc.stderr, b'')
+
+    def test_first_scanned_title_offers_separate_metadata_only_for_uncertain_letters(self):
+        from pypdf import PdfReader, PdfWriter
+        from dilib.pdf_ocr import parse_tsv
+        with tempfile.TemporaryDirectory() as tmp:
+            scan = Path(tmp) / 'scan.pdf'
+            path = Path(tmp) / 'with-title.pdf'
+            make_scan(scan)
+            header = 'level page_num block_num par_num line_num word_num left top width height conf text'
+            tokens = [('巡查工作', 95), ('规', 96), ('泡', 0), ('24', 98)]
+            rows = [header] + ['5 1 1 1 1 %d %d 10 15 20 %d %s' % (i, 15*i, score, text)
+                               for i, (text, score) in enumerate(tokens, 1)]
+            tsv = '\n'.join(r.replace(' ', '\t') for r in rows)
+            for title, expected in [('巡查工作规范24', True), ('巡查工作规范25', False), ('旧版物料清单24', False), ('', False)]:
+                with self.subTest(title=title):
+                    writer = PdfWriter(clone_from=PdfReader(scan))
+                    writer.add_metadata({'/Title': title})
+                    writer.write(path)
+                    with patch('dilib.pdf_reader.recognize_image', side_effect=lambda *_: parse_tsv(tsv)):
+                        m = read_pdf(path, ocr={'available': True})
+                    block = next(b for b in m['blocks'] if b.get('ocr'))
+                    shown = content.render_block(content.Model(m, 'S1'), block['id'])
+                    self.assertIn('巡查工作规泡 24', shown)
+                    self.assertEqual('PDF 元数据标题' in shown, expected)
+                    if expected:
+                        self.assertIn(title, shown)
 
     def test_scan_ocr_preserves_source_pixel_grid_and_skips_native_page(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -74,40 +74,6 @@ function Test-OfflineReady {
     return ((Test-InstalledDigest $Root $Digest) -and @(Get-MissingSkillFiles $Root).Count -eq 0)
 }
 
-function Find-InstalledSkill {
-    param([string] $Digest, [string] $Private, [string] $Kit)
-    # An existing project/user install may contain user-customized rules.
-    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $current = [IO.DirectoryInfo]::new((Get-Location).ProviderPath)
-    $bases = @()
-    while ($current) {
-        $bases += $current.FullName
-        $current = $current.Parent
-    }
-    $kitDir = [IO.DirectoryInfo]::new($Kit)
-    if ($kitDir.Parent -and $kitDir.Parent.Name -eq 'skills' -and $kitDir.Parent.Parent -and $kitDir.Parent.Parent.Parent) {
-        $bases += $kitDir.Parent.Parent.Parent.FullName
-    }
-    $bases += [Environment]::GetFolderPath('UserProfile')
-    foreach ($base in $bases) {
-        if ($base -and $seen.Add($base)) {
-            foreach ($agentDir in '.agents', '.claude', '.codex') {
-                foreach ($name in 'traced-template-fill', 'doc-integrator') {
-                    $candidate = [IO.Path]::Combine($base, $agentDir, 'skills', $name)
-                    if (Test-InstalledDigest $candidate $Digest) { return $candidate }
-                }
-            }
-        }
-    }
-    if (-not $env:DI_CACHE_DIR -and $env:LOCALAPPDATA) {
-        $legacyParent = Join-Path $env:LOCALAPPDATA 'doc-integrator\offline'
-        foreach ($candidate in [IO.Path]::Combine($legacyParent, $Digest, 'doc-integrator'), [IO.Path]::Combine($legacyParent, $Digest.Substring(0, 24))) {
-            if (Test-InstalledDigest $candidate $Digest) { return $candidate }
-        }
-    }
-    return $Private
-}
-
 function Invoke-OfflinePython {
     param([string] $Python, [string[]] $Arguments, [ref] $ExitCode, [switch] $BundledDefaults)
     # Windows PowerShell 5.1 drops empty argv entries and embedded quotes in native
@@ -148,11 +114,9 @@ $ErrorActionPreference = 'Stop'
 if ([Console]::IsOutputRedirected) { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) }
 $cliArguments = @($args)
 $digest = Read-OfflineDigest $PSScriptRoot
-$private = Get-PrivateSkillPath $digest
-$installed = Find-InstalledSkill $digest $private $PSScriptRoot
+$installed = Get-PrivateSkillPath $digest
 if (-not (Test-OfflineReady $installed $digest)) {
-    $options = if ($installed -eq $private) { @{ PrivateCache = $true } } else { @{ RepairRoot = $installed } }
-    & (Join-Path $PSScriptRoot 'install.ps1') @options | ForEach-Object { [Console]::Error.WriteLine($_) }
+    & (Join-Path $PSScriptRoot 'install.ps1') -PrivateCache | ForEach-Object { [Console]::Error.WriteLine($_) }
 }
 
 $executionRoot = Get-OfflineExecutionRoot $installed

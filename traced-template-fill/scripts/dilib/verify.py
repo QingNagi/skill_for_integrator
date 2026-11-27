@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import re
 
-from . import testdata
-from .common import fmt_number, norm_text, short, to_number
-from .read_other import measurement_value
+from . import tablemap, testdata
+from .common import contains_model_code, fmt_number, norm_text, short, to_number
+from .read_other import col_index as col_idx, measurement_value
 
 _NUM = r'[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?'
 _REF_RE = re.compile(r'^([^!]+)!([A-Za-z]+)(\d+)(?::([A-Za-z]+)(\d+))?$')
@@ -26,13 +26,6 @@ _CELL_ID = re.compile(r'^T\d+\.R\d+\.C\d+$')
 
 
 # ======================================================================= 通用工具
-def col_idx(letters):
-    n = 0
-    for ch in letters.upper():
-        n = n * 26 + (ord(ch) - 64)
-    return n - 1
-
-
 def sheet_values(md, ref):
     '''Sheet1!B27:B34 -> 区域内非空单元格的原始值；找不到工作表或写法不对返回 None。'''
     m = _REF_RE.match(ref.strip())
@@ -143,32 +136,67 @@ def check_value(value, raws, rules, how=''):
 
 
 # ======================================================================= 测试数据
-def _testdata(plan, models, rules, res):
+def _testdata(plan, models, rules, res, target=None):
+    grids = {}
     for f in plan['report'].get('fills', []):
         m = re.match(r'^(S\d+):(.+!.+)$', f.get('source') or '')
-        if not m or m.group(1) not in models or models[m.group(1)].m['type'] != 'xlsx':
+        if not m:
             continue
         value, how, tgt = f.get('value', ''), f.get('how', ''), f.get('target', '')
         if value == '':
             continue        # 留空不是“填入”；留空由问题回答或“无数据”决定，已在报告里单列
+        md = models.get(m.group(1))
+        if md is None or md.m['type'] != 'xlsx':
+            _bad(res, tgt, '找不到登记的源工作簿 ' + m.group(1))
+            continue
+        if target and f.get('target_header') and 'target_sample' in f:
+            tid, _, col = tgt.split('.')
+            if tid not in grids:
+                grids[tid] = target.table_grid(tid)[0]
+            grid = grids[tid]
+            r0, r1 = f['target_header']
+            c = int(col[1:])
+            path = [row[c] for row in grid[r0:r1 + 1] if c < len(row) and row[c]]
+            if tablemap.role_of(path)[1] != f['target_sample']:
+                _bad(res, tgt, '目标样品列与原模板表头不符')
+                continue
         if '按回答填合格' in how or '按回答填写固定值' in how:
             res['skipped'].append('%s：%s' % (tgt, how))        # 用户回答决定的值，不是从源数据算出来的
             continue
         raws, miss = [], []
-        for part in m.group(2).split(';'):
-            vals = sheet_values(models[m.group(1)], part)
+        for i, part in enumerate(m.group(2).split(';')):
+            vals = sheet_values(md, part)
             if vals is None:
                 miss.append(part)
             else:
                 raws += vals
+                ref = _REF_RE.fullmatch(part.strip())
+                if 'source_sample' in f:
+                    name, col, row, end_col, _ = ref.groups()
+                    header = sheet_values(md, '%s!%s%d' % (name, col, f['header_row']))
+                    if col != (end_col or col) or not header or testdata._sample_id(header[0]) != f['source_sample']:
+                        miss.append(part + '（来源样品编号不符）')
+                if 'range_labels' in f:
+                    name, _, row, _, _ = ref.groups()
+                    label = sheet_values(md, '%s!%s%s' % (name, f['label_col'], row))
+                    if not label or i >= len(f['range_labels']) or str(label[0]).strip() != f['range_labels'][i]:
+                        miss.append(part + '（来源标签不符）')
         res['checked'] += 1
         if miss:
             why = '找不到源区域 %s' % '、'.join(miss)
+        elif 'pass_code' in f:
+            codes = [testdata.measurement_number(raw) for raw in raws]
+            ok = codes and all(code in (0, 1) for code in codes) and f['pass_code'] in (0, 1)
+            expected = rules['pass_text' if all(code == f['pass_code'] for code in codes) else 'fail_text']
+            why = None if ok and expected == value else '状态码或记录结论与所选的状态定义不符'
         elif 'limits' in f and raws:
             lo, hi = map(testdata.parse_limit, f['limits'])
             if '取负号' in how:
                 nums = [testdata.measurement_number(v) for v in raws]
-                raws = [n.copy_negate() for n in nums if n is not None]
+                if any(n is None for n in nums):
+                    _bad(res, tgt, '取负号的源区域混有非数值读数')
+                    continue
+                raws = [n.copy_negate() for n in nums]
             fmt = dict(rules, **rules.get('symbol_formats', {}).get(f.get('symbol'), {}))
             expected, _, _, _ = testdata.aggregate(raws, fmt, mode=f.get('aggregation'), lo=lo, hi=hi)
             why = None if value == expected else '按采用的取值方式、精度与限值复算为“%s”' % expected
@@ -188,7 +216,7 @@ def verify_draft(job, plan, draft=None):
     res = {'items': [], 'checked': 0, 'skipped': [], 'notes': []}
     rules = _merge_rules(plan)
     models = job.source_models()
-    _testdata(plan, models, rules, res)
+    _testdata(plan, models, rules, res, job.target_model())
     _spec_rows(plan, models, res)
     _sections(plan, models, res)
     _fields(plan, models, job.data.get('task', ''), res)
@@ -299,19 +327,28 @@ def _sections(plan, models, res):
 # ----------------------------------------------------------------------- 表单字段
 def _fields(plan, models, task, res):
     '''型号、依据文件：必须出现在源文件标题或文件名里；括号里的版本说明要在标题或任务描述里。'''
-    docs = [m for m in models.values() if m.m['type'] != 'xlsx']
-    hay = norm_text(' '.join('%s %s' % (m.m.get('title', ''), m.m.get('name', '')) for m in docs))
+    docs = {key: m for key, m in models.items() if key != 'T' and m.m['type'] != 'xlsx'}
     for f in plan['report'].get('fills', []):
-        if f.get('how') not in ('型号识别', '依据文件'):
+        if f.get('how') not in ('型号识别', '依据文件', '任务指定型号'):
             continue
         v = f.get('value', '')
         core = re.sub(r'[（(][^（）()]*[）)]\s*$', '', v)
         ver = re.search(r'[（(]([^（）()]*)[）)]\s*$', v)
         res['checked'] += 1
         why = None
-        if norm_text(core) not in hay:
-            why = '“%s”在源文件标题和文件名里找不到' % short(core, 24)
-        elif ver and norm_text(ver.group(1)) not in hay + norm_text(task):
+        alias = f.get('source_alias')
+        sources = [docs[alias]] if alias in docs else ([] if alias else docs.values())
+        raw_labels = [m.m.get(k, '') for m in sources for k in ('title', 'name')]
+        labels = [norm_text(text) for text in raw_labels]
+        if f['how'] == '任务指定型号':
+            if not contains_model_code(task, core):
+                why = '任务描述中找不到该完整型号'
+        elif f['how'] == '型号识别' and re.fullmatch(r'[A-Za-z0-9-]+', core):
+            if not any(contains_model_code(text, core) for text in raw_labels):
+                why = '所引来源中找不到该完整型号'
+        elif not core or not any(norm_text(core) in label for label in labels):
+            why = '“%s”在所引源文件标题和文件名里找不到' % short(core, 24)
+        elif ver and not any(norm_text(ver.group(1)) in text for text in labels + [norm_text(task)]):
             why = '括号里的“%s”既不在源文件标题里，也不在任务描述里' % short(ver.group(1), 16)
         if why:
             _bad(res, f.get('target', ''), '%s 填入“%s”：%s' % (f.get('target', ''), short(v, 30), why))
@@ -368,6 +405,8 @@ def mark_full_read(job, ref):
 
 def full_read_pending(job, report):
     '''report['need_full_read'] 里还没有读全回执（或回执已因文件换版失效）的引用。'''
+    if not report.get('need_full_read'):
+        return []
     answers = job.read('answers.json', {}) or {}
     fp = job.fingerprint()
     return [x for x in (report.get('need_full_read') or []) if (answers.get('fullread:' + x.get('ref', '')) or {}).get('fp') != fp]

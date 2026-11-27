@@ -4,12 +4,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from test_selfcheck import BODY, CT, DOC_RELS, W, doc_xml, make_docx
+from test_selfcheck import BODY, COMMENTS, CT, DOC_RELS, W, doc_xml, make_docx
 from dilib import cli, selfcheck
 from dilib.common import TOOL_AUTHOR
 from dilib.job import Job
 from dilib.ooxml import Package, w
+from dilib.planner import Planner
 
 
 W14 = "http://schemas.microsoft.com/office/word/2010/wordml"
@@ -129,11 +131,14 @@ class ReviewDecisionsTests(unittest.TestCase):
         q = {"id": "Q1", "topic": "来源核对", "key": "src:verify:S1", "question": "核对来源",
              "options": [{"label": "已核对", "effect": {"ok": True}}], "recommended": 0}
         for job in (self.job, other):
-            job.write("questions.json", [q])
+            job.write("questions.json", [dict(q, input_fp=job.fingerprint())])
         pending = dict(q, id="B1", jobs=[[self.job.dir, "Q1"], [other.dir, "Q1"]], options=["已核对"])
         manifest = self.root / "batch.json"
         manifest.write_text(json.dumps({"jobs": [self.job.dir, other.dir], "questions": [pending]}), "utf-8")
         self.assertIn("--user-quote", self.invoke("batch", "answer", manifest, "B1=1", rc=2))
+        self.assertIn('batch plan', self.invoke('batch', 'answer', manifest, 'B1=1', '--user-quote', '原答复', rc=2))
+        pending.update(option_details=q['options'], input_fps={j.dir: j.fingerprint() for j in (self.job, other)})
+        manifest.write_text(json.dumps({'jobs': [self.job.dir, other.dir], 'questions': [pending]}), 'utf8')
         self.invoke("batch", "answer", manifest, "B1=1", "--user-quote", "这两份来源已核实")
         for job in (self.job, other):
             record = json.loads(Path(job.p("decisions.jsonl")).read_text("utf-8"))
@@ -145,7 +150,7 @@ class ReviewDecisionsTests(unittest.TestCase):
                     "options": [{"label": "已核对", "effect": {"ok": True}}], "recommended": 0}
         for key in ["src:verify:S1", "td:samplemap", "src:unread:S1", "src:ocr:S1:abcdef"]:
             question["key"] = key
-            self.job.write("questions.json", [question])
+            self.job.write("questions.json", [dict(question, input_fp=self.job.fingerprint())])
             self.assertIn("--user-quote", self.invoke("answer", self.job.dir, "Q1=1", rc=2))
             self.assertNotIn(key, self.job.read("answers.json", {}))
             quote = '我核过这份：“1 号”对应。'
@@ -154,6 +159,78 @@ class ReviewDecisionsTests(unittest.TestCase):
         records = [json.loads(line) for line in Path(self.job.p("decisions.jsonl")).read_text("utf-8").splitlines()]
         self.assertEqual(len(records), 4)
         self.assertTrue(all(r["user_quote"] == quote for r in records))
+
+    def test_batch_applies_multiple_answers_with_one_replan_per_job(self):
+        questions = [{'key': 'selection' + str(i), 'id': 'Q' + str(i), 'topic': '选择', 'question': '位置' + str(i),
+                      'options': [{'label': '保留', 'effect': {'keep': True}}],
+                      'input_fp': self.job.fingerprint()} for i in (1, 2)]
+        self.job.write('questions.json', questions)
+        items = [dict(q, id='B' + str(i), jobs=[[self.job.dir, q['id']]], options=['保留'],
+                      option_details=q['options'], input_fps={self.job.dir: q['input_fp']})
+                 for i, q in enumerate(questions, 1)]
+        path = self.root / 'batch.json'
+        path.write_text(json.dumps({'jobs': [self.job.dir], 'questions': items}), encoding='utf8')
+        self.invoke('batch', 'answer', path, 'B1=1', 'B2=999', rc=2)
+        self.assertFalse(self.job.read('answers.json'))
+        with patch.object(cli, 'do_plan', wraps=cli.do_plan) as replan:
+            self.invoke('batch', 'answer', path, 'B1=1', 'B2=1')
+            self.assertEqual(replan.call_count, 1)
+        self.assertEqual(set(self.job.read('answers.json')), {'selection1', 'selection2'})
+
+    def test_source_replaced_after_question_and_after_draft(self):
+        q = {"id": "Q1", "topic": "来源核对", "key": "src:verify:S1", "question": "核对来源",
+             "options": [{"label": "已核对", "effect": {"ok": True}}], "recommended": 0,
+             "input_fp": self.job.fingerprint()}
+        self.job.write("questions.json", [q])
+        make_docx(self.root / 'source.docx', {'word/document.xml': doc_xml(BODY.replace('hello', '第二批'))})
+        message = self.invoke('answer', self.job.dir, 'Q1=1', '--user-quote', '已核对第一批', rc=2)
+        self.assertIn('重新', message)
+        self.assertFalse(self.job.read('answers.json'))
+        self.invoke('draft', self.job.dir)
+        make_docx(self.root / 'source.docx', {'word/document.xml': doc_xml(BODY.replace('hello', '第三批'))})
+        message = self.invoke('final', self.job.dir, rc=2)
+        self.assertIn('重新', message)
+        self.assertFalse(list((self.root / 'job/终稿').glob('*.docx')))
+
+    def test_empty_adjacent_sections_only_offer_available_content(self):
+        heading = '<w:pPr><w:outlineLvl w:val="0"/></w:pPr>'
+        target = self.root / '验收模板.docx'
+        anchor = ('<w:p>' + heading + '<w:commentRangeStart w:id="0"/><w:r><w:t>一、质量说明</w:t></w:r>'
+                  '<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p><w:p/>')
+        make_docx(target, {'word/document.xml': doc_xml(anchor),
+                           'word/comments.xml': COMMENTS.replace('note', '查看研制任务书可靠性章节')})
+        source = self.root / '研制任务书.docx'
+        titles = ['1 可靠性', '2 抽检要求', '3 序列号']
+        headings = ['<w:p>' + heading + '<w:r><w:t>' + title + '</w:t></w:r></w:p>' for title in titles]
+        for name, evidence in [('empty', ''), ('present', '<w:p><w:r><w:t>逐台检查密封圈。</w:t></w:r></w:p>')]:
+            make_docx(source, {'word/document.xml': doc_xml(headings[0] + headings[1] + evidence + headings[2])})
+            job = Job.create(str(target), [str(source)], out_root=str(self.root), name=name)
+            plan = cli.do_plan(job, quiet=True)
+            self.assertTrue(any(op['op'] == 'insert_section' for op in plan['ops']))
+            questions = [q for q in plan['questions'] if q['topic'] == '章节取舍']
+            if evidence:
+                self.assertEqual(len(questions), 1)
+                self.assertIn('抽检要求', questions[0]['options'][0]['label'])
+            else:
+                self.assertEqual(questions, [])
+
+    def test_product_and_basis_cite_selected_document_among_multiple_sources(self):
+        paths = [self.root / s for s in ('说明.docx', 'AB1234详细规范.docx', 'AB1234X详细规范.docx')]
+        for path in paths:
+            make_docx(path)
+        job = Job.create(self.job.data['target']['path'], list(map(str, paths)), out_root=str(self.root), name='multi')
+        planner = Planner(job)
+        for field, method in [('产品型号', planner.field_product), ('依据文件', planner.field_basis)]:
+            method(field, 'T0.R1.C1', planner.doc_sources())
+            q = next(x for x in planner.questions if x['key'] == 'field:' + field)
+            selected = next(o for o in q['options'] if 'AB1234X' in o['label'])
+            self.assertFalse(planner.ops)
+            planner.answers[q['key']] = {'effect': selected['effect']}
+            method(field, 'T0.R1.C1', planner.doc_sources())
+            self.assertIn('AB1234X', planner.ops[0]['text'])
+            self.assertEqual(planner.ops[-1]['links'][0]['alias'], 'S3')
+            planner.ops.clear()
+
 
     def test_flags_and_batch_require_quotes_before_writing(self):
         make_docx(self.draft)

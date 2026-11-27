@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import datetime
 import glob
@@ -82,12 +83,20 @@ def do_plan(job, quiet=False, extra_answers=None):
             continue
         qs.append(q)
         used.add(q["key"])
-    n = max([int(q["id"][1:]) for q in qs if q["id"][1:].isdigit()] + [0])
+    known = dict(job.data.get('question_ids', {}))
+    known.update((q['key'], q['id']) for q in prev)
+    n = max([int(qid[1:]) for qid in known.values() if qid[1:].isdigit()] + [0])
     for q in plan["questions"]:
         if q["key"] not in used:
-            n += 1
-            qs.append(dict(q, id="Q%d" % n))
+            if q['key'] not in known:
+                n += 1
+                known[q['key']] = 'Q%d' % n
+            qs.append(dict(q, id=known[q['key']]))
+    if known != job.data.get('question_ids', {}):
+        job.data['question_ids'] = known
+        job.save()
     for q in qs:
+        q['input_fp'] = fp
         q["answered"] = q["key"] in answers
         q["learned"] = q["key"] in learned and q["key"] not in answers
         lk = learned.get(q["key"]) if q["learned"] else None
@@ -207,7 +216,9 @@ def cmd_plan(a):
 
 def cmd_questions(a):
     job = Job(a.job)
-    qs = job.read("questions.json") or do_plan(job, quiet=True)["questions"]
+    qs = job.read("questions.json")
+    if not qs or qs[0].get('input_fp') != job.fingerprint(files_only=True):
+        qs = do_plan(job, quiet=True)["questions"]
     pend = pending(qs) if not a.all else qs
     if a.ask_json:
         batch = []
@@ -232,6 +243,21 @@ def cmd_questions(a):
     out(open(job.p("questions.md"), encoding="utf-8").read())
 
 
+def _choice_indices(q, val):
+    if not val:
+        raise DIError('%s 的回答为空。' % q['id'])
+    parts = val.split(',')
+    if not all(part.strip().isdecimal() for part in parts):
+        return None
+    indices = [int(part) - 1 for part in parts]
+    if len(indices) > 1 and not q.get('multi'):
+        raise DIError('%s 是单选题，请只提交一个选项。' % q['id'])
+    for index in indices:
+        if not 0 <= index < len(q['options']):
+            raise DIError('%s 没有选项 %d' % (q['id'], index + 1))
+    return indices
+
+
 def cmd_answer(a):
     job = Job(a.job)
     quote = getattr(a, "user_quote", None)
@@ -239,6 +265,10 @@ def cmd_answer(a):
         require_quote(quote, "answer --remember")
     decisions = []
     qs = job.read("questions.json") or do_plan(job, quiet=True)["questions"]
+    fp = job.fingerprint(files_only=True)
+    if any(q.get('input_fp') != fp for q in qs):
+        do_plan(job, quiet=True)
+        raise DIError('问题依据的输入文件已变化或属于旧版任务。已重新规划，请查看当前 questions 后再回答。')
     byid = {q["id"]: q for q in qs}
     answers = job.read("answers.json", {}) or {}
     remembered = {}
@@ -253,12 +283,9 @@ def cmd_answer(a):
         if protected_question(q["key"]):
             require_quote(quote, "%s %s" % (qid, q["topic"]))
         val = val.strip().strip('"').strip("“”")
-        rec = {"label": "", "answered_at": datetime.datetime.now().isoformat(timespec="seconds"), "fp": job.fingerprint()}
-        if all(x.strip().isdigit() for x in val.split(",")) and val:
-            idx = [int(x) - 1 for x in val.split(",")]
-            for i in idx:
-                if not 0 <= i < len(q["options"]):
-                    raise DIError("%s 没有选项 %d" % (qid, i + 1))
+        rec = {"label": "", "answered_at": datetime.datetime.now().isoformat(timespec="seconds"), "fp": fp}
+        idx = _choice_indices(q, val)
+        if idx is not None:
             effs = [q["options"][i]["effect"] for i in idx]
             rec["choice"] = idx
             rec["label"] = "；".join(q["options"][i]["label"] for i in idx)
@@ -386,11 +413,14 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
     if pend:
         extra = {}
         for _ in range(4):      # 按推荐回答后可能出现新问题，迭代至稳定
-            extra.update(default_answers([q for q in pend if q["key"] not in extra]))
+            extra.update(default_answers(pend))
             plan = do_plan(job, quiet=True, extra_answers=extra)
             pend = [q for q in pending(plan["questions"]) if q["key"] not in extra]
             if not pend:
                 break
+        if pend:
+            print_plan(job, plan)
+            raise DIError('出现了新的待确认问题。请核对 questions 后再生成草稿。')
         pend = [q for q in plan["questions"] if q.get("defaulted")]
     tm = job.target_model().m
     work = tm["work"]
@@ -430,6 +460,7 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
     # 按推荐默认处理的问题也登记：用户没有正式回答之前，定稿会拦截（默认推荐不等于已确认）
     unv += [{"kind": "default", "key": q["key"], "name": short(q["question"], 40), "effect": q["options"][q.get("recommended", 0)].get("effect"), "detail": "%s → %s" % (short(q["question"], 60), q["options"][q.get("recommended", 0)]["label"])} for q in pend]
     job.data.setdefault("unverified", {})[os.path.basename(draft)] = unv
+    job.data.setdefault('draft_inputs', {})[os.path.basename(draft)] = job.fingerprint()
     job.save()
     # 重新草稿：并入上一版草稿里审核人的直接修改和人工批注（--discard-edits 则丢弃）；合并出错也要登记，不能当作“没有人工修改”
     try:
@@ -647,14 +678,18 @@ def cmd_batch(a):
         for job in jobs:
             plan = do_plan(job, quiet=True)
             for q in pending(plan["questions"]):
-                k = (q["key"], q["question"])
-                merged.setdefault(k, {"q": q, "jobs": []})["jobs"].append((job.dir, q["id"]))
+                options = json.dumps(q['options'], sort_keys=True, ensure_ascii=False)
+                scope = q['input_fp'] if protected_question(q['key']) else None
+                k = (q['key'], q['question'], options, bool(q.get('multi')), q.get('recommended', 0), scope)
+                group = merged.setdefault(k, {'q': q, 'jobs': [], 'input_fps': {}})
+                group['jobs'].append((job.dir, q['id']))
+                group['input_fps'][job.dir] = q['input_fp']
             out("  %s：%d 个操作，%d 个待答" % (os.path.basename(job.dir), len(plan["ops"]), len(pending(plan["questions"]))))
         items = []
         for i, (k, v) in enumerate(merged.items()):
             items.append({"id": "B%d" % (i + 1), "key": k[0], "question": v["q"]["question"], "topic": v["q"]["topic"],
                           "options": [o["label"] for o in v["q"]["options"]], "recommended": v["q"].get("recommended", 0),
-                          "jobs": v["jobs"]})
+                          "option_details": v['q']['options'], "input_fps": v['input_fps'], "jobs": v["jobs"]})
         b["questions"] = items
         write_json(a.manifest, b)
         if items:
@@ -678,21 +713,29 @@ def cmd_batch(a):
             if protected_question(it["key"]):
                 require_quote(a.user_quote, "%s %s" % (bid, it["topic"]))
             assignments.append((it, val))
+        grouped = {}
         for it, val in assignments:
-            for jd, _ in it["jobs"]:
-                qs = read_json(os.path.join(jd, "questions.json"), []) or []
-                q = next((x for x in qs if x["key"] == it["key"]), None)      # 按问题键匹配，避免编号变化
-                if not q:
-                    continue
-                sub = argparse.Namespace(job=jd, items=["%s=%s" % (q["id"], val)], remember=False,
-                                         user_quote=a.user_quote)
-                saved = sys.stdout
-                try:
-                    sys.stdout = open(os.devnull, "w", encoding="utf-8")
-                    cmd_answer(sub)
-                finally:
-                    sys.stdout.close()
-                    sys.stdout = saved
+            for jd, _ in it['jobs']:
+                grouped.setdefault(jd, []).append((it, val))
+        commands = []
+        for jd, selections in grouped.items():
+            job = Job(jd)
+            fp = job.fingerprint(files_only=True)
+            by_key = {q['key']: q for q in job.read('questions.json', [])}
+            choices = []
+            for it, val in selections:
+                q = by_key.get(it['key'])
+                if (not q or q.get('input_fp') != fp or it.get('input_fps', {}).get(jd) != fp
+                        or q['question'] != it['question'] or [o['label'] for o in q['options']] != it['options']
+                        or it.get('option_details') != q['options']):
+                    raise DIError('批量问题的来源或选项已变化。请重新运行 batch plan 并核对选项：%s' % jd)
+                _choice_indices(q, val.strip().strip('"').strip('“”'))
+                choices.append('%s=%s' % (q['id'], val))
+            commands.append(argparse.Namespace(job=jd, items=choices, remember=False, user_quote=a.user_quote))
+        with open(os.devnull, 'w', encoding='utf-8') as sink, contextlib.redirect_stdout(sink):
+            for command in commands:
+                cmd_answer(command)
+        for it, _ in assignments:
             out("%s → 已应用到 %d 个任务" % (it["id"], len(it["jobs"])))
         return
     failed = False

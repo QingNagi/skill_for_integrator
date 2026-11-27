@@ -310,6 +310,9 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
         if len(registered) != 1:
             raise DIError('无法确定这份审核副本对应的草稿版本。请将副本命名为所审核版本的原文件名，再用 --draft 指定。')
         version_name = next(iter(registered))
+    draft_fp = job.data.get('draft_inputs', {}).get(version_name)
+    if draft_fp and draft_fp != job.fingerprint(files_only=True):
+        raise DIError('审核草稿使用的模板或源文件已变化。请重新生成草稿并核对后再定稿。')
     pkg = Package(draft)
     infos = comments_info(pkg)
     tmpl = {(a, t) for a, t in job.data.get("template_comments", [])}
@@ -359,6 +362,10 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
     if unv:
         cur = dict(texts_by_id(chk_path))
         answers = job.read('answers.json', {}) or {}
+        if answers:
+            current_fp = draft_fp or job.fingerprint(files_only=True)
+            answers = {key: item for key, item in answers.items()
+                       if isinstance(item, dict) and item.get('fp') == current_fp}
         for it in unv:
             if it.get('kind') in ('source', 'unread'):
                 eff = (answers.get(it.get('key')) or {}).get('effect')

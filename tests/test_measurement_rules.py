@@ -44,7 +44,7 @@ class MeasurementTests(unittest.TestCase):
             self.assertEqual(result["fills"][0]["1"]["value"], expected)
 
     def test_upper_bound_written_with_operator_and_matching_unit(self):
-        parsed = testdata.parse_sheet({"name": "sheet", "rows": [["label", "1"], ["V", "1.3504"]]}, {})
+        parsed = testdata.parse_sheet({"name": "sheet", "rows": [["label", "unit", "1"], ["V", "V", "1.3504"]]}, {})
         result = testdata.build(parsed, [{"sym": "V", "row": 0, "hi": "≤ 1.35 V", "unit": "V"}], {}, {}, {})
         self.assertEqual(result["fills"][0]["1"]["value"], "1.3504")
         self.assertEqual(result["verdict"]["1"], "fail")
@@ -59,7 +59,8 @@ class MeasurementTests(unittest.TestCase):
         sheet = {"name": "Sheet", "rows": [["item", "1"], ["VOLT/SHIFTR@hot", 9],
                                             ["VOLT/SHIFTR@cold", 2], ["VOLT/SHIFTR@cold", 3]]}
         result = testdata.build(testdata.parse_sheet(sheet, rules),
-                                [{"sym": "VOLT", "row": 0}, {"sym": "ΔR", "row": 1}], rules, {}, {})
+                                [{"sym": "VOLT", "row": 0}, {"sym": "ΔR", "row": 1}], rules, {},
+                                {"td:map:VOLT/SHIFTR": {"map": ["VOLT", "ΔR"]}})
         self.assertEqual([result["fills"].get(row, {}).get("1", {}).get("value") for row in (0, 1)], ["2", "3"])
 
     def test_plain_decimal_xlsx_style_preserves_zeros_without_rounding_raw_measurement(self):

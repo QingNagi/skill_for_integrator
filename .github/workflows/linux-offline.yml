@@ -39,12 +39,15 @@ jobs:
             x86_64) hash=6eb9d4d759b292c83810dbee2e9e8e3fbfbf01d864e6e9811bae711fd74e1c2f ;;
             aarch64) hash=7994b27f3cbfcedea43f9b7552e38b45857bdf0e9a45065474092dd74e7048cf ;;
           esac
-          python3 -m venv "$RUNNER_TEMP/zig"
+          /usr/bin/python3.12 -m venv "$RUNNER_TEMP/zig"
           printf 'ziglang==0.14.1 --hash=sha256:%s\n' "$hash" > "$RUNNER_TEMP/zig/requirements.txt"
           "$RUNNER_TEMP/zig/bin/pip" install --no-deps --only-binary=:all: --require-hashes \
             --report "$RUNNER_TEMP/zig/install.json" -r "$RUNNER_TEMP/zig/requirements.txt"
+          # Host-only decoder for lossless conversion of Leptonica's embedded TIFF font sheets.
+          echo 'Pillow==13.0.0 --hash=sha256:8bf295fe459343bc6093c8e5e0df60bfa189e0fcb775a22e2c2488fdeccc6c0d --hash=sha256:42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca' > "$RUNNER_TEMP/zig/font-tools.txt"
+          "$RUNNER_TEMP/zig/bin/pip" install --no-deps --only-binary=:all: --require-hashes -r "$RUNNER_TEMP/zig/font-tools.txt"
           zig=$("$RUNNER_TEMP/zig/bin/python" -c 'import pathlib, ziglang; print(pathlib.Path(ziglang.__file__).with_name("zig"))')
-          python3 tools/build_ocr_runtime.py --platform "manylinux_$arch" --zig "$zig"
+          "$RUNNER_TEMP/zig/bin/python" tools/build_ocr_runtime.py --platform "manylinux_$arch" --zig "$zig"
           # The published lock identifies the Windows-hosted cross build. Record the
           # compiler and executable from this native CI build in this copy only.
           python3 - "manylinux_$arch" "$RUNNER_TEMP/zig/install.json" <<'PY'

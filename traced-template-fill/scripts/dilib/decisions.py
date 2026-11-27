@@ -6,7 +6,7 @@ from .common import DIError
 
 
 def protected_question(key):
-    return key.startswith(("src:verify:", "src:ocr:", "src:unread:")) or key == "td:samplemap"
+    return key.startswith(("src:verify:", "src:ocr:", "src:unread:")) or key.split(":")[:2] == ["td", "samplemap"]
 
 
 def require_quote(quote, action):

@@ -9,9 +9,53 @@ from xml.etree.ElementTree import ParseError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "traced-template-fill" / "scripts"))
 from dilib import _bootstrap, ooxml, safe_xml
+from dilib.content import load_model
 
 
 class ProcessingTests(unittest.TestCase):
+    def test_cached_pdf_uses_verified_parse_without_activating_native_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tag = _bootstrap.platform_tag()
+            if not tag or sys.version_info[:2] != (3, 14):
+                self.skipTest('Embedded runtime profile requires CPython 3.14 on a supported platform')
+            folder = root / 'wheels' / tag
+            folder.mkdir(parents=True)
+            wheel = folder / 'example.whl'
+            wheel.write_bytes(b'example')
+            spec = (wheel.name, 7, 'a' * 64, '')
+            manifest = {'pure': {}, 'native': {tag: {'example': spec}}}
+            source = root / 'sample.pdf'
+            source.write_bytes(b'fixture: the PDF reader is instrumented')
+            def parse(*args):
+                _bootstrap._cache['activated'] = True
+                return {'pdf_backend': 'pdfplumber', 'blocks': []}
+            with patch.dict('os.environ', {'DI_OCR': 'off', 'DI_NO_VENDOR': ''}), \
+                 patch.object(_bootstrap, '_vendor_root', return_value=root), \
+                 patch.object(_bootstrap, 'wheel_manifest', return_value=manifest), \
+                 patch.object(_bootstrap, '_cache', {}), \
+                 patch.object(_bootstrap, 'activate_vendor', side_effect=AssertionError('unexpected import')), \
+                 patch('dilib.read_other.read_pdf', side_effect=parse) as reader:
+                first = load_model(str(source), tmp)
+                _bootstrap._cache.clear()  # The next CLI command starts in a new interpreter.
+                self.assertEqual(first, load_model(str(source), tmp))
+                self.assertEqual(reader.call_count, 1)
+                _bootstrap._cache.clear()
+                manifest['native'][tag]['example'] = (wheel.name, 7, 'b' * 64, '')
+                load_model(str(source), tmp)
+                self.assertEqual(reader.call_count, 2)
+                _bootstrap._cache.clear()
+                manifest['native'][tag]['example'] = spec
+                def fallback(*args):
+                    _bootstrap._cache['activated'] = True
+                    return {'pdf_backend': 'pypdf', 'blocks': []}
+                reader.side_effect = fallback
+                load_model(str(source), tmp)
+                _bootstrap._cache.clear()
+                reader.side_effect = parse
+                self.assertEqual(load_model(str(source), tmp)['pdf_backend'], 'pdfplumber')
+                self.assertEqual(reader.call_count, 4)
+
     def test_namespace_scopes_across_stream_chunks(self):
         data = ('<r xmlns="urn:root" xmlns:p="urn:root-p">' + 'a' * 67000
                 + '<n xmlns="" xmlns:p="urn:inner"><p:v/>end</n></r>')

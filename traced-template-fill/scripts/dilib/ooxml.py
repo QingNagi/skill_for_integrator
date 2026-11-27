@@ -343,14 +343,6 @@ def get_ppr(p, create=True):
     return ppr
 
 
-def get_rpr(r, create=True):
-    rpr = r.find(W_RPR)
-    if rpr is None and create:
-        rpr = ET.Element(W_RPR)
-        r.insert(0, rpr)
-    return rpr
-
-
 # ---------------------------------------------------------------- 构造
 def make_rpr(base=None, flags=(), font=None, latin_font=None, size_pt=None, bold=None, italic=None,
              color=None, underline=None):

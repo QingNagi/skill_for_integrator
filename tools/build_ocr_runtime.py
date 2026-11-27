@@ -1,13 +1,14 @@
-"""Build the relocatable single-file OCR executable with Zig 0.14.1 (Clang and libc++)."""
+"""Build the relocatable OCR executable with Zig 0.14.1 and Pillow for host font conversion."""
 import argparse
+import base64
 import hashlib
-import json
-import os
+import io
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tarfile
+import textwrap
 import urllib.request
 
 REPO = Path(__file__).resolve().parents[1]
@@ -36,6 +37,50 @@ def sources(name):
         with tarfile.open(path) as archive:
             archive.extractall(target.parent, filter="data")
     return target
+
+
+def bitmap_font_source(lept, generated):
+    """Keep all Leptonica caption fonts in a format supported by our PNM-only image pipeline."""
+    from PIL import Image
+
+    header = (lept / "bmfdata.h").read_text(encoding="utf-8")
+    def as_pbm(match):
+        tiff = base64.b64decode("".join(re.findall(r'"([^"]*)"', match[2])), validate=True)
+        with Image.open(io.BytesIO(tiff)) as bitmap:
+            if bitmap.format != "TIFF" or bitmap.mode != "1":
+                raise ValueError("Unexpected embedded Leptonica font format")
+            data = io.BytesIO()
+            bitmap.save(data, format="PPM")  # Pillow writes binary PBM (P4) for mode 1.
+            data.seek(0)
+            with Image.open(data) as converted:
+                if bitmap.size != converted.size or bitmap.tobytes() != converted.tobytes():
+                    raise ValueError("Font conversion changed glyph pixels")
+            encoded = base64.b64encode(data.getvalue()).decode("ascii")
+        return match[1] + "\n" + "\n".join('    "' + line + '"' for line in textwrap.wrap(encoded, 76)) + ";"
+
+    header, count = re.subn(r'(static const char\s+fontdata_\d+\[\] =)\s*((?:"[^"]*"\s*)+);', as_pbm, header)
+    if count != 9:
+        raise ValueError("Expected nine Leptonica bitmap fonts")
+    (generated / "bmfdata.h").write_text(header, encoding="utf-8")
+    # Quoted C includes search the translation unit's own directory first.
+    source = generated / "bmf.c"
+    shutil.copyfile(lept / "bmf.c", source)
+    return source
+
+
+def pnm_line_source(tess, generated):
+    """Select Tesseract's existing lossless PNM line store for the PNG-free build."""
+    original = tess / "src/ccstruct/imagedata.cpp"
+    body = original.read_text(encoding="utf-8")
+    fallback = """  ret = pixWriteMem(&data, &size, pix, IFF_PNG);
+  if (ret) {
+    ret = pixWriteMem(&data, &size, pix, IFF_PNM);
+  }"""
+    if body.count(fallback) != 1:
+        raise ValueError("Expected the pinned Tesseract PNG/PNM line encoder")
+    source = generated / "imagedata.cpp"
+    source.write_text(body.replace(fallback, "  ret = pixWriteMem(&data, &size, pix, IFF_PNM);"), encoding="utf-8")
+    return source
 
 
 def build(platform, zig, vendor):
@@ -73,11 +118,14 @@ def build(platform, zig, vendor):
     maps = ["-ffile-prefix-map=" + str(CACHE) + "=ocr", "-ffile-prefix-map=" + CACHE.as_posix() + "=ocr"]
     cmd += ["-cflags", "-std=gnu11", "-w", "-DNDEBUG", *maps, "-DHAVE_LIBJPEG=0", "-DHAVE_LIBPNG=0",
             "-DHAVE_LIBTIFF=0", "-DHAVE_LIBZ=0", "--"]
-    cmd += [p.as_posix() for p in sorted(lept.glob("*.c"))]
+    bitmap_font = bitmap_font_source(lept, generated)
+    cmd += [(bitmap_font if p.name == "bmf.c" else p).as_posix() for p in sorted(lept.glob("*.c"))]
     cmd += ["-cflags", "-std=c++17", "-w", "-DNDEBUG", *maps, "-DDISABLED_LEGACY_ENGINE", "-DGRAPHICS_DISABLED", "-DFAST_FLOAT"]
     if platform == "manylinux_aarch64":
         cmd += ["-DHAVE_NEON"]
-    cmd += ["--"] + [(tess / p).as_posix() for p in sorted(cpp)]
+    line_encoder = pnm_line_source(tess, generated)
+    cmd += ["--"] + [(line_encoder if p == "src/ccstruct/imagedata.cpp" else tess / p).as_posix()
+                      for p in sorted(cpp)]
     response = generated.parent / "zig.rsp"
     response.write_text("\n".join('"' + arg + '"' for arg in cmd[1:]), encoding="utf-8")
     subprocess.run([zig, cmd[0], "@" + response.as_posix()], check=True)

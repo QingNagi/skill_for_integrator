@@ -86,6 +86,14 @@ def safe_name(s, maxlen=60):
     return s[:maxlen] or "unnamed"
 
 
+def contains_model_code(text, code):
+    """Match a whole product code, including its revision suffix, alongside Chinese text."""
+    if not code:
+        return False
+    return bool(re.search(r'(?<![a-z0-9-])' + re.escape(code) + r'(?![a-z0-9]|-[a-z0-9])',
+                          text or '', flags=re.IGNORECASE | re.ASCII))
+
+
 def lock_file_of(path):
     """Word/WPS 打开文件时产生的 ~$ 锁文件路径（存在说明文件正被编辑）。"""
     d, b = os.path.split(path)

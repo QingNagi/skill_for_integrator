@@ -294,6 +294,29 @@ def _raster_items(page, pno, options, renderer, media_dir, first_id, errors):
     return items
 
 
+def _compare_cover_title(blocks, title):
+    """Offer independent metadata when it differs only inside weak nonnumeric cover words."""
+    cover = next((b for b in blocks if b['page'] == 1 and b.get('text')), {})
+    weak = {(w['text'], w['confidence']) for w in cover.get('text_warnings', [])}
+    if not weak or not title or len(title) > 200:
+        return
+    metadata = ''.join(title.split())
+    text = ''.join(cover['text'].split())
+    if len(text) != len(metadata):
+        return
+    changes = {i for i, (a, b) in enumerate(zip(text, metadata)) if a != b}
+    if not changes or len(changes) * 5 > len(text) or any(metadata[i].isdigit() for i in changes):
+        return
+    offset, uncertain = 0, set()
+    for word in cover['words']:
+        end = offset + len(''.join(word['text'].split()))
+        if (word['text'], word['confidence']) in weak:
+            uncertain.update(range(offset, end))
+        offset = end
+    if changes <= uncertain:
+        cover['metadata_title_hint'] = ' '.join(title.split())
+
+
 def read_layout(path, media_dir, options):
     import pdfplumber
     blocks, figures, images, unread, recognized = [], [], {}, [], []
@@ -352,6 +375,7 @@ def read_layout(path, media_dir, options):
                 blocks.append(block)
     for index, para in enumerate(recognized, start=np_):
         para['id'] = 'P%d' % index
+    _compare_cover_title(blocks, title)
     result = _pdf_common_post(blocks, figures, images, title, path)
     result.update(unread=unread, ocr_pages=sorted({b['page'] for b in recognized}), pdf_backend='pdfplumber')
     result['stats']['pages'] = count

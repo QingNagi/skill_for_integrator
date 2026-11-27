@@ -11,6 +11,16 @@ from dilib import office
 
 
 class WordWorkfileTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows program lookup')
+    def test_program_search_uses_only_absolute_configured_installation_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            programs = Path(tmp) / "installed programs"
+            programs.mkdir()
+            expected = programs / "soffice.exe"
+            expected.touch()
+            with patch.dict(os.environ, PATH=os.pathsep.join((".", "relative", str(programs)))):
+                self.assertEqual(office._program_on_path("soffice"), str(expected))
+
     def test_published_lo_conversion_survives_a_busy_profile_during_cleanup(self):
         import contextlib
         import io

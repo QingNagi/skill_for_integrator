@@ -2,7 +2,7 @@
 import re
 
 from . import tablemap, testdata
-from .common import norm_text, short
+from .common import contains_model_code, norm_text, short
 
 
 class TablePlanningMixin:
@@ -13,24 +13,29 @@ class TablePlanningMixin:
         has_samples = any(r == "sample" for r in roles)
         need_spec = any(r in ("name", "cond", "min", "max", "unit") for r in roles)
         rows = []
-        if need_spec and not rg.get('filled'):
-            best = None
-            kw = self.task
-            for alias, md in self.doc_sources().items():
-                for b in md.m["blocks"]:
-                    if b["t"] == "tbl" and "in" not in b and not b.get("cont") and b["nrows"] > 2:
-                        sc = tablemap.table_score(md, b["id"], tcols, kw)
-                        if best is None or sc > best[0]:
-                            best = (sc, alias, b["id"])
-            ans = self.answer_effect("tbl:src:%s" % rg["id"])
-            if ans and ans.get("table"):
-                al, tid = ans["table"].split(":")
-                best = (9, al, tid)
-            if best and best[0] >= 0.99:
+        best = None
+        if need_spec:
+            best, ambiguous = self.select_table(rg, tcols)
+            if ambiguous and best is None:
+                self.report["unfilled"].append("区域 %s 的规范来源未选定，本区未写入" % rg["id"])
+                if rg.get("filled"):
+                    self.mark_region_stale(t, rg, tcols)
+                    rows = self.rows_from_existing(t, rg, tcols)
+                    for c in tcols:
+                        role, sid, _ = tablemap.role_of(c["path"])
+                        if role == "sample":
+                            self.mark_stale(t, rows, {sid: c["c"]}, set())
+                if has_samples:
+                    if not hasattr(self, "region_verdicts"):
+                        self.region_verdicts = {}
+                    self.region_verdicts[rg["id"]] = ({}, ["规范来源未选定"])
+                    self.verdict = (0, 0, ["规范来源未选定"])
+                return
+        if need_spec and not rg.get("filled"):
+            if best and best[0] >= 0.5:
                 rows = self.fill_from_table(t, rg, tcols, best[1], best[2])
-            elif best and best[0] >= 0.5:
-                rows = self.fill_from_table(t, rg, tcols, best[1], best[2])
-                self.report["warnings"].append("数据区 %s 与源表 %s:%s 列匹配度一般(%.2f)，请重点核对" % (rg["id"], best[1], best[2], best[0]))
+                if best[0] < 0.99:
+                    self.report["warnings"].append("数据区 %s 与源表 %s:%s 列匹配度一般(%.2f)，请重点核对" % (rg["id"], best[1], best[2], best[0]))
             elif rg.get("label") or not has_samples:
                 self.missing_regions.append((re.sub(r"\s+", "", rg.get("label") or "表格区"), "%s.R%d" % (t["id"], rg["rows"][0])))
         elif not has_samples and not rg.get('filled'):
@@ -40,7 +45,7 @@ class TablePlanningMixin:
             if need_spec or has_samples:
                 rows = self.rows_from_existing(t, rg, tcols)
             if need_spec and rows:
-                self.check_spec_drift(t, rg, tcols, rows)
+                self.check_spec_drift(t, rg, tcols, rows, best)
             if not has_samples:
                 self.mark_region_stale(t, rg, tcols)
         if has_samples:
@@ -107,6 +112,8 @@ class TablePlanningMixin:
                     row_info["sym"] = cells.get(sym_col[0], ("", []))[0].strip() if sym_col else \
                         testdata.extract_symbol(row_info["name"])
                     row_info["name"] = re.sub(r"[a-z]$", "", row_info["name"].strip()) if marks else row_info["name"]
+                elif mp["role"] == "symbol":
+                    row_info["sym"] = "".join(x[0] for x in runs).strip()
                 elif mp["role"] in ("min", "max", "unit", "cond"):
                     row_info[{"min": "lo", "max": "hi", "unit": "unit", "cond": "cond"}[mp["role"]]] = \
                         "".join(x[0] for x in runs)
@@ -160,18 +167,31 @@ class TablePlanningMixin:
                         info["sym"], info["mark"] = mk.group(2), mk.group(1)
                 elif ro == "symbol":
                     info["sym"] = txt.strip()
-                elif ro in ("min", "max", "unit"):
-                    info[{"min": "lo", "max": "hi", "unit": "unit"}[ro]] = txt
+                elif ro in ("min", "max", "unit", "cond"):
+                    info[{"min": "lo", "max": "hi", "unit": "unit", "cond": "cond"}[ro]] = txt
             if info.get("sym"):
                 rows.append(info)
         return rows
 
     def fill_testdata(self, t, rg, tcols, rows):
-        sid_col = {}
+        if not hasattr(self, "region_verdicts"):
+            self.region_verdicts = {}
+        self.region_verdicts[rg["id"]] = ({}, ["实测数据区未完成"])
+        self.verdict = (0, 0, ["实测数据区未完成"])
+        columns = {}
         for c in tcols:
             ro, sid, _ = tablemap.role_of(c["path"])
             if ro == "sample":
-                sid_col[sid] = c["c"]
+                columns.setdefault(sid, []).append(c["c"])
+        sid_col = {sid: cols[0] for sid, cols in columns.items() if len(cols) == 1}
+        duplicates = {sid: cols for sid, cols in columns.items() if len(cols) > 1}
+        for sid, cols in duplicates.items():
+            detail = "目标区域 %s 样品 %s 重复出现在列 %s，已排除该样品" % (rg["id"], sid, cols)
+            self.review_measurements("td:duplicate:" + rg["id"] + ":" + sid, detail)
+            for col in cols:
+                self.mark_stale(t, rows, {sid: col}, set())
+        if not sid_col:
+            return
         sheets = self.sheet_sources()
         if not sheets:
             self.report["unfilled"].append("实测值列（%s）：没有提供测试数据文件（属于“指定来源没提供”，不等于没有数据）" % rg["id"])
@@ -189,48 +209,79 @@ class TablePlanningMixin:
         else:
             alias = next(iter(sheets))
         md = self.src[alias]
-        sheet = max(md.m["sheets"], key=lambda s: s["nrows"] * max(1, s["ncols"]))
+        nonempty = [s for s in md.m["sheets"] if s["rows"]]
+        if not nonempty:
+            self.report["unfilled"].append("测试数据文件没有非空工作表：" + md.m["name"])
+            self.mark_stale(t, rows, sid_col, set())
+            return
+        if len(nonempty) > 1:
+            candidates = [s for s in nonempty if testdata.detect_layout(s, self.rules)[2]]
+            nonempty = candidates or nonempty
+        sheet = nonempty[0]
+        if len(nonempty) > 1:
+            key = "td:sheet:" + alias + ":" + rg["id"]
+            eff = self.answer_effect(key) or {}
+            chosen = next((s for s in nonempty if s["name"] == eff.get("sheet") and not eff.get("_default")), None)
+            if chosen is None:
+                self.ask({"key": key, "topic": "测试数据工作表", "question": "%s 有多张候选工作表，哪张属于 %s？" % (md.m["name"], rg["id"]),
+                          "options": [{"label": "先留空", "effect": {"skip": True}}] +
+                                     [{"label": s["name"], "effect": {"sheet": s["name"]}} for s in nonempty]})
+                self.mark_stale(t, rows, sid_col, set())
+                return
+            sheet = chosen
         self.verify_data_source(alias, md, sheet)
+        scope = ":" + alias + ":" + rg["id"] + ":" + sheet["name"]
         rules = dict(self.rules)
         for k in ("cond_keep", "multi"):
-            eff = self.answer_effect("td:" + ("cond" if k == "cond_keep" else "multi"))
+            eff = self.answer_effect("td:" + ("cond" if k == "cond_keep" else "multi") + scope)
             if eff and eff.get("rules"):
                 rules.update(eff["rules"])
         parsed = testdata.parse_sheet(sheet, rules)
-        if not (set(parsed['samples']) & set(sid_col)):
-            # 样品号与记录完全对不上（如记录1#2#3#，数据4#5#6#）：不能猜着填，也不用再问后面的映射题
-            key = 'td:samplemap'
-            ds, recs = list(parsed['samples']), sorted(sid_col)
-            eff = self.answer_effect(key)
-            if eff is None:
-                opts = []
-                if ds and len(ds) == len(recs):
-                    opts.append({'label': '按顺序对应：' + '，'.join('数据%s号→记录%s#' % (d, r) for d, r in zip(ds, recs)), 'effect': {'samplemap': dict(zip(ds, recs))}})
-                opts.append({'label': '不对应：这不是记录里这几只样品的数据，实测值本次不填', 'effect': {'skip': True}})
-                self.ask({'key': key, 'topic': '样品对应', 'question': '数据文件 %s 的样品号是 %s，记录里的样品号是 %s，两边没有一个相同。数据能对应到记录的哪几只？' % (md.m['name'], '、'.join(ds) or '无', '、'.join(recs) or '无'), 'options': opts, 'recommended': len(opts) - 1})
-                eff = {'skip': True}
-            sm = eff.get('samplemap') if isinstance(eff, dict) else None
+        for sid, cols in parsed["duplicate_samples"].items():
+            detail = "来源 %s:%s 样品 %s 重复出现在列 %s，已排除该样品" % (alias, sheet["name"], sid, "、".join(cols))
+            self.review_measurements("td:duplicate" + scope + ":" + sid, detail)
+        ds = parsed["samples"]
+        recs = list(sid_col)
+        source_sample = {sid: sid for sid in ds}
+        if set(ds) != set(recs):
+            key = "td:samplemap" + scope
+            eff = self.answer_effect(key) or {}
+            common = {sid: sid for sid in ds if sid in sid_col}
+            options = [{"label": "仅按相同编号填写，其余留空" if common else "编号无交集，实测值留空",
+                        "effect": {"samplemap": common}}]
+            if ds and len(ds) == len(recs) and not (duplicates or parsed["duplicate_samples"]):
+                ordered = dict(zip(ds, recs))
+                options.append({"label": "已核对编号：" + "，".join("%s→%s" % item for item in ordered.items()),
+                                "effect": {"samplemap": ordered}})
+            if not eff:
+                self.ask({"key": key, "topic": "样品对应", "question": "来源样品号 %s 与目标 %s 不一致。" %
+                          ("、".join(ds) or "无", "、".join(recs)), "options": options})
+            sm = common if not eff or eff.get("_default") else eff.get("samplemap") or {}
+            if not isinstance(sm, dict) or not set(sm) <= set(ds) or not set(sm.values()) <= set(recs) or len(set(sm.values())) != len(sm):
+                sm = {}
             if not sm:
-                self.report['unfilled'].append('实测值列（%s）：数据文件样品号 %s 与记录样品号 %s 没有交集，没有写入任何实测值' % (rg['id'], '、'.join(ds), '、'.join(recs)))
-                self.summary.append('[测试数据] %s：样品号与记录无交集，未写入实测值（记录里的原有值已标“本批未核”）' % md.m['name'])
+                self.report["unfilled"].append("实测值列（%s）：没有已核对的样品对应，未填" % rg["id"])
                 self.mark_stale(t, rows, sid_col, set())
                 return
-            parsed['samples'] = [sm.get(s, s) for s in parsed['samples']]
-            parsed['sample_cols'] = {sm.get(s, s): c for s, c in parsed['sample_cols'].items()}
-            for b in parsed['blocks']:
-                b['values'] = {sm.get(s, s): v for s, v in b['values'].items()}
-            self.report['warnings'].append('⚠ 样品号按回答对应：' + '，'.join('数据%s号→记录%s#' % kv for kv in sm.items()))
+            source_sample = {target: source for source, target in sm.items()}
+            parsed["samples"] = [sm[s] for s in ds if s in sm]
+            parsed["sample_cols"] = {sm[s]: c for s, c in parsed["sample_cols"].items() if s in sm}
+            for b in parsed["blocks"]:
+                b["values"] = {sm[s]: v for s, v in b["values"].items() if s in sm}
+            self.report["warnings"].append("样品号对应：" + "，".join("数据%s→记录%s" % kv for kv in sm.items()))
         targets = [{"row": r["row"], "sym": r.get("sym"), "name": r.get("name", ""), "lo": r.get("lo"), "hi": r.get("hi"),
-                    "unit": r.get("unit", ""), "not_tested": r.get("not_tested")} for r in rows]
+                    "unit": r.get("unit", ""), "cond": r.get("cond", ""), "not_tested": r.get("not_tested")} for r in rows]
         ans_map = {}
         for k, v in self.answers.items():
-            if k.startswith("td:"):
+            if k.startswith("td:") and k.endswith(scope):
                 e = self.answer_effect(k)
                 if e is not None:
-                    ans_map[k] = e
+                    ans_map[k[:-len(scope)]] = e
         res = testdata.build(parsed, targets, rules, self.aliases, ans_map)
         for q in res["questions"]:
-            self.ask(q)
+            self.ask(dict(q, key=q["key"] + scope))
+        if res["review"]:
+            self.review_measurements("td:review" + scope, "；".join(res["review"]))
         missing_samples = [s for s in res["samples"] if s not in sid_col]
         self.summary.append("[测试数据] %s %s：样品%s（第%d行为样品号，%s列为测试项）；条件=%s；多值=%s；已对应 %d 个参数；忽略 %d 项%s" % (
             alias, md.m["name"], "、".join(s + "#" for s in res["samples"]), parsed["header_row"], parsed["label_col"],
@@ -258,15 +309,21 @@ class TablePlanningMixin:
                     filled.add((row, sid))
                     self.ops.append({"id": self.oid(), "op": "set_cell", "cell": cid, "runs": [[cell["value"], ""]],
                                      "group": "data:%d" % row})
-                links.append({"label": "%s#" % sid, "alias": alias, "ref": cell["ranges"][0] if len(cell["ranges"]) == 1
-                              else cell["ranges"][0].split(":")[0] + ":" + cell["ranges"][-1].split(":")[-1]})
+                links.extend({"label": "%s# %s" % (sid, ref), "alias": alias, "ref": ref} for ref in cell["ranges"])
                 notes.add(cell["how"])
                 if cell["check"] != "ok" or cell["conf"] < 0.9:
                     warn = True
-                self.report["fills"].append({"target": cid, "value": cell["value"], "source": "%s:%s" % (alias, ";".join(cell["ranges"])),
+                entries = self.report["fills"] if cell["value"] else self.report.setdefault("held_measurements", [])
+                if not cell["value"]:
+                    self.report["unfilled"].append("%s %s 样品%s：%s" % (cid, sym_of[row], sid, cell["check_msg"] or cell["how"]))
+                entries.append({"target": cid, "value": cell["value"], "source": "%s:%s" % (alias, ";".join(cell["ranges"])),
                                              "how": "%s；%s" % ("/".join(cell["hows"]), cell["how"]), "raw": cell["raw"],
                                              "check": cell["check_msg"], "limits": cell["limits"],
-                                             "aggregation": res["rules"]["multi"], "symbol": sym_of[row]})
+                                             "aggregation": res["rules"]["multi"], "symbol": sym_of[row],
+                                             "source_sample": source_sample[sid], "target_sample": sid,
+                                             "target_header": rg.get("header"),
+                                             "header_row": parsed["header_row"], "label_col": parsed["label_col"],
+                                             "range_labels": cell["range_labels"], **({"pass_code": cell["pass_code"]} if "pass_code" in cell else {})})
             if first_cell:
                 c0 = next(iter(fill.values()))
                 if len(c0["labels"]) > 1:
@@ -289,12 +346,23 @@ class TablePlanningMixin:
                 cid = "%s.R%d.C%d" % (t["id"], r["row"], sid_col[sorted(sid_col)[0]])
                 self.ops.append({"id": self.oid(), "op": "comment", "anchor": cid,
                                  "text": "【实测】未填：%s；数据文件中无此项" % ("；".join(r.get("foot") or ["规范注明不测试"])), "links": []})
-        self.record_verdict(alias, rg['id'], rows, sid_col, res)
+        self.record_verdict(alias, rg['id'], rows, columns, res)
+
+    def review_measurements(self, key, detail):
+        self.report["unfilled"].append(detail)
+        eff = self.answer_effect(key) or {}
+        if not eff:
+            self.ask({"key": key, "topic": "实测记录核对", "question": detail + "。请核对源表并重新规划，或确认这些格留空。",
+                      "options": [{"label": "待核对", "effect": {"ok": False}},
+                                  {"label": "已核对，接受所列实测格留空", "effect": {"ok": True}}]})
+        if not eff.get("ok") or eff.get("_default"):
+            self.report.setdefault("unverified_sources", []).append({"kind": "source", "key": key, "detail": detail,
+                                                                     "name": "实测记录"})
 
     def record_verdict(self, alias, region, rows, sample_cols, res):
         """只汇总记录中实际出现的样品，待确认的测量或来源不能产生批次结论。"""
         reasons = []
-        if any(i.get('key') == 'src:verify:' + alias for i in self.report.get('unverified_sources', [])):
+        if any(i.get('key', '').split(':')[:3] == ['src', 'verify', alias] for i in self.report.get('unverified_sources', [])):
             reasons.append('数据来源尚未核实')
         relevant = {'tbl:src:' + region, 'spec:drift:' + region}
         for key in {q['key'] for q in self.questions} | set(self.answers):
@@ -310,24 +378,23 @@ class TablePlanningMixin:
             if verdict.get(sid) == 'fail':
                 continue
             measured = [res['fills'].get(row, {}).get(sid, {}) for row in required]
-            if (sid not in verdict or not measured
+            if (verdict.get(sid) not in ('pass', 'fail') or not measured
                     or any(c.get('value', '') == '' or c.get('how') == '文本结果' for c in measured)):
                 reasons.append('存在缺少有效必测结果的样品')
                 break
-        passes = sum(verdict.get(sid) == 'pass' for sid in sample_cols)
-        fails = sum(verdict.get(sid) == 'fail' for sid in sample_cols)
+        if not hasattr(self, "region_verdicts"):
+            self.region_verdicts = {}
+        self.region_verdicts[region] = ({s: verdict.get(s, "unknown") for s in sample_cols}, reasons)
+        reasons = list(dict.fromkeys(reason for _, issues in self.region_verdicts.values() for reason in issues))
+        if any(set(statuses) != set(sample_cols) for statuses, _ in self.region_verdicts.values()):
+            reasons.append("各实测区的样品集合不一致，请分区核对")
+        fails = sum(any(statuses.get(s) == "fail" for statuses, _ in self.region_verdicts.values()) for s in sample_cols)
+        passes = sum(all(statuses.get(s) == "pass" for statuses, _ in self.region_verdicts.values()) for s in sample_cols)
         self.verdict = passes, fails, reasons
 
     # ================================================================= 配方：表单字段
-    def check_spec_drift(self, t, rg, tcols, rows):
+    def check_spec_drift(self, t, rg, tcols, rows, best):
         '''记录里已有规范列（限值/单位）时：不覆盖，只与最匹配的源表逐行核对；不一致的标⚠并登记，定稿前必须处理。'''
-        best = None
-        for alias, md in self.doc_sources().items():
-            for b in md.m['blocks']:
-                if b['t'] == 'tbl' and 'in' not in b and not b.get('cont') and b['nrows'] > 2:
-                    sc = tablemap.table_score(md, b['id'], tcols, self.task)
-                    if best is None or sc > best[0]:
-                        best = (sc, alias, b['id'])
         if best is None or best[0] < 0.99:
             self.report['warnings'].append('⚠ 区域 %s 里已有规范值，但没有找到足够匹配的源表，这些规范值本批没有被核对' % rg['id'])
             return
@@ -397,85 +464,30 @@ class TablePlanningMixin:
         res.sort(key=lambda x: -x[0])
         return res
 
-    def table_tie(self, rg, ranked):
-        '''得分最高的源表不能静默独占：第二张得分相差不到 0.15 时出题让用户选；
-        差得多但仍像样（>=0.5）的，返回一句提示，由调用方放进批注。'''
-        if len(ranked) < 2 or ranked[1][0] < 0.5:
-            return None
-        near = [x for x in ranked[:3] if x[0] >= 0.5 and ranked[0][0] - x[0] < 0.15]
-
-        def desc(x):
-            return '%s:%s %s（得分%.2f）' % (x[1], x[2], short(self.src[x[1]].by[x[2]].get('cap') or '无题注', 20), x[0])
-        if len(near) >= 2:
-            self.ask({'key': 'tbl:src:%s' % rg['id'], 'topic': '源表选择',
-                      'question': '数据区 %s 有 %d 张源表得分相近：%s。用哪张填？' % (rg['id'], len(near), '；'.join(desc(x) for x in near)),
-                      'options': [{'label': desc(x), 'effect': {'table': '%s:%s' % (x[1], x[2])}} for x in near] +
-                                 [{'label': '都不用，这一区留空，我来填', 'effect': {'skip': True}}],
-                      'recommended': 0})
-            return None
-        return '另有相近的源表 %s，本次采用 %s；要换表请告诉助手（可用 show 对比两张表）' % (desc(ranked[1]), desc(ranked[0]))
-
-    def resolve_drift(self, t, rg, tcols, alias, drifts, tcol):
-        '''记录里已有的规范值与规范表不一致：不再只告警，出“与规范不一致”问题，由用户定：
-        以规范为准（覆盖，旧值写进批注，推荐）/ 保留原值（标⚠）/ 留空。回答绑定文件指纹，文件换版后重新问。
-        返回处理方式的简短说明，给规划摘要用。'''
-        if not drifts:
-            return ''
-        label_of = {'min': '最小', 'max': '最大', 'unit': '单位'}
-        key_of = {'min': 'lo', 'max': 'hi', 'unit': 'unit'}
-        key = 'spec:drift:%s' % rg['id']
-        n = sum(len(d['bad']) for d in drifts)
-        eg = '；'.join('%s%s 记录“%s”规范“%s”' % (d['sym'], label_of[d['bad'][0][0]], short(d['bad'][0][2], 8) or '空', short(d['bad'][0][3], 8) or '空') for d in drifts[:3])
+    def select_table(self, rg, tcols):
+        """Use the same ranked sources when copying a table and when checking existing values."""
+        ranked = self.rank_tables(tcols)
+        if not ranked:
+            return None, False
+        key = "tbl:src:" + rg["id"]
         eff = self.answer_effect(key)
-        waiting = eff is None
-        if waiting:
-            self.ask({'key': key, 'topic': '与规范不一致',
-                      'question': '记录里已有的规范值有 %d 行与规范表不一致（共 %d 格，如 %s）。怎么处理？' % (len(drifts), n, eg),
-                      'options': [{'label': '以规范为准，覆盖原值（旧值写进批注）', 'effect': {'mode': 'spec'}},
-                                  {'label': '保留原值，批注标⚠', 'effect': {'mode': 'keep'}},
-                                  {'label': '这些格留空，我来填', 'effect': {'mode': 'blank'}}],
-                      'recommended': 0})
-            eff = {'mode': 'spec'}
-        if isinstance(eff, dict) and eff.get('mode'):
-            mode = eff['mode']
-        else:
-            mode = 'keep' if isinstance(eff, dict) and eff.get('free') else 'spec'      # 自由文本回答不当作“以规范为准”，不动原值
-        dn = self.default_note(eff)
-        who = '暂按推荐（尚未回答）' if waiting else '按回答'
-        tail = ('；' + dn) if dn else ''
-        name_c = next((c['c'] for c in tcols if tablemap.role_of(c['path'])[0] == 'name'), tcols[0]['c'])
-        blanks = []
-        for d in drifts:
-            r, lr, sym, bad = d['r'], d['lr'], d['sym'], d['bad']
-            row = r['row']
-            what = '；'.join('%s 记录原有“%s”，规范“%s”' % (label_of[role], old or '空', new or '空') for role, _tc, old, new in bad)
-            for role, tc_, old, new in bad:
-                cid = '%s.R%d.C%d' % (t['id'], row, tc_)
-                if mode == 'spec':
-                    scol = tcol[role][1]
-                    rr = tablemap.strip_marks([list(x) for x in lr['cells'].get(scol, ('', []))[1]])[0]
-                    runs = [[x[0].replace('\n', ''), x[1]] for x in rr if x[0]]
-                    self.ops.append({'id': self.oid(), 'op': 'set_cell', 'cell': cid, 'runs': runs, 'group': 'drift:%d' % row, 'from_cols': [scol]})
-                    r[key_of[role]] = new
-                    self.report['fills'].append({'target': cid, 'value': ''.join(x[0] for x in runs), 'source': '%s:%s.R%d' % (alias, lr['table'], lr['r']),
-                                                 'how': '与规范不一致：%s以规范为准覆盖' % who, 'raw': '记录原有“%s”' % old})
-                elif mode == 'blank':
-                    self.ops.append({'id': self.oid(), 'op': 'set_cell', 'cell': cid, 'runs': [], 'group': 'drift:%d' % row})
-                    r[key_of[role]] = ''
-            if mode == 'spec':
-                text = '【与规范不一致】%s：%s；%s以规范为准，已覆盖，旧值记在此处%s' % (sym, what, who, tail)
-            elif mode == 'blank':
-                text = '⚠【与规范不一致】%s：%s；%s已清空这些格，待人工填写%s' % (sym, what, who, tail)
-                blanks.append(sym)
-            else:
-                text = '⚠【与规范不一致】%s：%s；%s保留原值，没有覆盖%s' % (sym, what, who, tail)
-            self.ops.append({'id': self.oid(), 'op': 'comment', 'anchor': '%s.R%d.C%d' % (t['id'], row, name_c), 'warn': mode != 'spec' or waiting or bool(dn),
-                             'links': [{'label': '打开原文', 'alias': alias, 'ref': '%s.R%d' % (lr['table'], lr['r'])}], 'text': text, 'group': 'drift:%d' % row})
-        if mode == 'keep':
-            self.report['warnings'].append('区域 %s 有 %d 行规范值与规范表不一致，%s保留原值（批注已标⚠）' % (rg['id'], len(drifts), who))
-        elif mode == 'blank':
-            self.report['unfilled'].append('与规范不一致、%s已清空的规范值：%s（待人工填写）' % (who, '、'.join(blanks[:8])))
-        return {'spec': '以规范为准', 'keep': '保留原值', 'blank': '留空'}.get(mode, mode) + ('（待回答）' if waiting else '')
+        if isinstance(eff, dict) and not eff.get("_default"):
+            selected = next((r for r in ranked if "%s:%s" % (r[1], r[2]) == eff.get("table")), None)
+            if selected:
+                return (max(1.0, selected[0]), selected[1], selected[2]), False
+            return None, True
+        near = [r for r in ranked if r[0] >= 0.5 and ranked[0][0] - r[0] < 0.15]
+        if len(near) < 2:
+            return ranked[0], False
+        options = [{"label": "先留空，这一区暂不采用任何候选表", "effect": {"skip": True}}]
+        for score, alias, tid in near:
+            source = self.src[alias]
+            options.append({"label": "%s:%s %s %s（得分 %.2f）" %
+                            (alias, tid, source.m["name"], short(source.by[tid].get("cap") or "无题注", 35), score),
+                            "effect": {"table": "%s:%s" % (alias, tid)}})
+        self.ask({"key": key, "topic": "规范表选择", "question": "多张源表与 %s 的列匹配，哪张是本数据区的规范依据？" %
+                  rg["id"], "options": options, "recommended": 0})
+        return None, True
 
     def mark_region_stale(self, t, rg, tcols):
         '''目标里这块区域已有内容、本批没有提供对应来源（如上一批的仪器清单/有效期）：不覆盖、不清除，标⚠登记，定稿前必须处理。'''
@@ -517,20 +529,23 @@ class TablePlanningMixin:
 
     def verify_data_source(self, alias, md, sheet):
         '''填写前先核对来源：数据文件的文件名/内容里能不能找到型号。数字对得上不能证明来源对——找不到就问，并在定稿前拦截。'''
-        codes = self._model_codes(self.doc_sources())
+        codes = self.expected_model_codes(self.doc_sources())
         if not codes:
             return
-        strs = [str(v) for row in sheet['rows'][:300] for v in row if isinstance(v, str)]
-        hay = (md.m.get('name', '') + ' ' + ' '.join(strs)).lower()
-        if any(c.lower() in hay for c in codes[:3]):
+        strings = [v for row in sheet["rows"][:300] for v in row if isinstance(v, str)]
+        hay = md.m.get("name", "") + " " + " ".join(strings)
+        if len(codes) == 1 and contains_model_code(hay, codes[0]):
             return
-        key = 'src:verify:' + alias
+        key = "src:verify:" + alias + ":" + ",".join(sorted(codes))
+        detail = ("在 %s 的文件名与所查工作表前 300 行中未找到完整型号 %s" % (md.m["name"], codes[0])
+                  if len(codes) == 1 else "本任务有多个候选型号 %s，须核实 %s 的产品与批次" % ("、".join(codes), md.m["name"]))
         eff = self.answer_effect(key)
         if eff is None:
-            self.ask({'key': key, 'topic': '来源核对', 'question': '测试数据文件 %s 的文件名和内容里都没有出现型号 %s（也没有批号/版本信息），无法自动确认它就是本批该产品的数据。数字对得上也不能证明来源正确，请确认：' % (md.m['name'], '/'.join(codes[:2])), 'options': [{'label': '已核对，该文件就是本批 %s 的数据' % codes[0], 'effect': {'ok': True}}, {'label': '暂未核对，先出草稿，定稿前我再核对', 'effect': {'ok': False}}], 'recommended': 1})
-            eff = {'ok': False}
-        if isinstance(eff, dict) and eff.get('ok') and not eff.get('_default'):
+            opts = [{"label": "暂未核对，定稿前核对来源", "effect": {"ok": False}}]
+            opts.extend({"label": "已核对原始记录，该文件属于本批 " + code, "effect": {"ok": True, "model": code}} for code in codes)
+            self.ask({"key": key, "topic": "来源核对", "question": detail + "。请对照原始试验记录核对。",
+                      "options": opts, "recommended": 0})
+        if isinstance(eff, dict) and eff.get("ok") and eff.get("model") in codes and not eff.get("_default"):
             return
-        detail = '数据来源未核对：%s 的文件名和内容里没有型号 %s 的任何信息，无法确认属于本批该产品' % (md.m['name'], codes[0])
-        self.report.setdefault('unverified_sources', []).append({'kind': 'source', 'key': key, 'name': md.m['name'], 'detail': detail})
-        self.report['warnings'].append('⚠ ' + detail)
+        self.report.setdefault("unverified_sources", []).append({"kind": "source", "key": key, "name": md.m["name"], "detail": detail})
+        self.report["warnings"].append("⚠ " + detail)

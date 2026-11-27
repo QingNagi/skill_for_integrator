@@ -46,8 +46,8 @@ def load_model(path, cache_dir):
     ext = os.path.splitext(path)[1].lower()
     ocr = None
     if ext == ".pdf":
-        from ._bootstrap import ocr_hint
-        ocr = ocr_hint()
+        from . import _bootstrap
+        ocr = _bootstrap.ocr_hint()
     if m and m.get("_v") == MODEL_VERSION and (not ocr or m.get("_pdf_reader") == ocr["signature"]):
         return m
     media = ensure_dir(os.path.join(cache_dir, "media", key))
@@ -77,7 +77,7 @@ def load_model(path, cache_dir):
     elif wext == ".pdf":
         from .read_other import read_pdf
         m = read_pdf(wp, media, ocr)
-        m["_pdf_reader"] = ocr["signature"]
+        m["_pdf_reader"] = _bootstrap.parsed_signature(ocr, m.get('pdf_backend'))
     else:
         raise DIError("不支持的文件类型：%s" % ext)
     m["_v"] = MODEL_VERSION
@@ -135,10 +135,6 @@ class Model:
                         origin[r][cc] = (c["r"], c["c"])
         return grid, runs, origin
 
-    def section_blocks(self, sid):
-        s = self.by[sid]
-        return [self.by[x] for x in s["blocks"] if x in self.by]
-
     def sections(self):
         return self.m.get("sections", [])
 
@@ -179,10 +175,11 @@ def outline(model, alias, max_lines=80, max_depth=3, section=None):
         lines.append("  " + m["backend_note"])
     if m.get("ocr_pages") and not section:
         first = next(b for b in m["blocks"] if b.get("ocr"))
-        lines.append("  OCR 页：%s。识别文字从 %s 开始，数字和单位请对照原页核对。" %
+        lines.append("  OCR 页：%s。识别文字从 %s 开始，请对照原页核对标记的文字、数字和单位。" %
                      ("、".join(map(str, m["ocr_pages"])), first["id"]))
     if m.get("title"):
-        lines.append("  标题：" + short(m["title"], 60))
+        label = "  PDF 元数据标题：" if any(b.get('metadata_title_hint') for b in m['blocks']) else "  标题："
+        lines.append(label + short(m["title"], 60))
     secs = m.get("sections", [])
     if section:
         root = model.by.get(section)
@@ -349,15 +346,18 @@ def render_block(model, bid, full=False, maxchars=1500):
 def _ocr_label(block):
     if not block.get('ocr'):
         return ''
-    warning = _numeric_review(block)
+    warning = _ocr_review(block)
     return '[OCR，第 %s 页] %s' % (block['page'], warning + ' ' if warning else '')
 
 
-def _numeric_review(block):
-    words = block.get('numeric_warnings') or []
-    if not words:
-        return ''
-    return '⚠ 低置信数字 ' + '、'.join('%s（%.1f/100）' % (w['text'], w['confidence']) for w in words)
+def _ocr_review(block):
+    from .pdf_ocr import review_groups
+    labels = ['⚠ 低置信%s ' % label + '、'.join('%s（%.1f/100）' % (w['text'], w['confidence'])
+                                          for w in words)
+              for label, words in review_groups(block) if words]
+    if block.get('metadata_title_hint'):
+        labels.append('PDF 元数据标题「%s」，OCR 原文：' % block['metadata_title_hint'])
+    return ' '.join(labels)
 
 
 def render_sheet(model, rng=None, max_rows=40):
@@ -424,8 +424,10 @@ def search(models, query, top=8, kinds=("sec", "tbl", "p", "fig")):
                     sc = 1.0 if literal and literal in b["text"].casefold() else contains_score(q, b["text"])
                     if sc > 0.5:
                         label = "OCR 第 %s 页：" % b["page"] if b.get("ocr") else ""
-                        if b.get("numeric_warnings"):
-                            label += _numeric_review(b) + " "
+                        if b.get("ocr"):
+                            warning = _ocr_review(b)
+                            if warning:
+                                label += warning + " "
                         res.append((sc, alias, b["id"], label + short(b["text"], 60)))
                 elif b["t"] == "tbl":
                     for c in b["cells"]:

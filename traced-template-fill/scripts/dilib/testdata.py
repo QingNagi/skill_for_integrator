@@ -14,18 +14,19 @@
 """
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from .common import DIError, norm_text, to_number
+from .common import DIError, norm_text
 from .read_other import col_index, col_letter, measurement_value
 
 DEFAULT_RULES = {
     "header_row": None, "label_col": None,
-    "cond_keep": "ask", "no_suffix": "keep",
+    "cond_keep": "ask", "no_suffix": "ask",
     "multi": "ask", "range_sep": "~",
     "pass_text": "合格", "fail_text": "不合格",
     "decimals": 2, "min_sig": 3, "precision": "source", "symbol_formats": {},
@@ -79,7 +80,7 @@ def validate_rules(rules):
         elif key == "split_compound":
             valid = isinstance(value, bool)
         elif key in ("no_suffix", "multi", "precision"):
-            choices = {"no_suffix": ("keep", "drop"), "multi": ("ask", "range", "min", "max", "mean", "median"),
+            choices = {"no_suffix": ("ask", "keep", "drop"), "multi": ("ask", "range", "min", "max", "mean", "median"),
                        "precision": ("source", "trim", "fixed")}
             valid = value in choices[key]
         else:
@@ -138,7 +139,7 @@ def detect_layout(sheet, rules):
         if c in sample_cols or c == lc or v is None:
             continue
         k = norm_text(str(v))
-        for key, words in (("unit", ("单位", "unit", "units")), ("min", ("min", "lsl", "下限", "最小", "lolimit", "lowlimit")),
+        for key, words in (("unit", ("单位", "unit", "units")), ("condition", ("测试条件", "条件", "condition")), ("min", ("min", "lsl", "下限", "最小", "lolimit", "lowlimit")),
                            ("max", ("max", "usl", "上限", "最大", "hilimit", "highlimit"))):
             if any(k == w_ or k.startswith(w_) for w_ in words):
                 meta[c] = key
@@ -148,13 +149,20 @@ def detect_layout(sheet, rules):
 def parse_sheet(sheet, rules):
     hi, lc, sample_cols, meta = detect_layout(sheet, rules)
     rows = sheet["rows"]
+    columns = {}
+    for c, sid in sample_cols.items():
+        columns.setdefault(sid, []).append(col_letter(c))
+    duplicates = {sid: cols for sid, cols in columns.items() if len(cols) > 1}
+    sample_cols = {c: sid for c, sid in sample_cols.items() if sid not in duplicates}
     blocks, cur = [], None
     for r in range(hi + 1, len(rows)):
         row = rows[r]
         lab = row[lc] if lc < len(row) else None
         vals = {sid: measurement_value(sheet, r, c) for c, sid in sample_cols.items()}
+        if not str(lab or "").strip() and not any(v is not None and str(v).strip() for v in vals.values()):
+            continue
         if lab not in (None, "") and str(lab).strip():
-            cur = {"label": str(lab).strip(), "rows": [r], "values": {}, "meta": {}}
+            cur = {"label": str(lab).strip(), "rows": [r], "values": {}, "meta": {}, "units": [], "conditions": []}
             blocks.append(cur)
         elif cur is None:
             continue
@@ -166,6 +174,9 @@ def parse_sheet(sheet, rules):
         for c, k in meta.items():
             if c < len(row) and row[c] is not None:
                 cur["meta"].setdefault(k, row[c])
+                group = {"unit": "units", "condition": "conditions"}.get(k)
+                if group and str(row[c]).strip() and str(row[c]).strip() not in cur[group]:
+                    cur[group].append(str(row[c]).strip())
     occ = {}
     for b in blocks:
         k = b["label"]
@@ -173,7 +184,7 @@ def parse_sheet(sheet, rules):
         occ[k] = b["occ"] + 1
     return {"sheet": sheet["name"], "header_row": hi + 1, "label_col": col_letter(lc),
             "samples": [sample_cols[c] for c in sorted(sample_cols)], "sample_cols": {sample_cols[c]: col_letter(c) for c in sample_cols},
-            "blocks": blocks}
+            "blocks": blocks, "duplicate_samples": duplicates}
 
 
 # ======================================================================= 符号匹配
@@ -281,6 +292,8 @@ def aggregate(vals, rules, mode=None, lo=None, hi=None):
         return stats[0] if len(set(stats)) == 1 else "/".join(sorted(set(stats))), "文本结果", None, []
     if not nums:
         return "", "无数据", None, []
+    if stats:
+        return "", "源区域混有数值与状态或文本：" + "、".join(sorted(set(stats))), "unknown", nums
 
     def f(value):
         return display_measurement(value, rules, lo, hi)
@@ -299,9 +312,10 @@ def aggregate(vals, rules, mode=None, lo=None, hi=None):
         k = len(s) // 2
         return f(s[k] if len(s) % 2 else (s[k - 1] + s[k]) / 2), "%d个值取中位数" % len(nums), None, nums
     a, b = f(smallest), f(largest)
-    if a == b:
-        how = "%d个值相同" if smallest == largest else "%d个值修约后相同"
-        return a, how % len(nums), None, nums
+    if smallest == largest:
+        return a, "%d个值相同" % len(nums), None, nums
+    if Decimal(a) == Decimal(b):
+        a, b = str(smallest), str(largest)
     return a + rules.get("range_sep", "~") + b, "%d个值取范围" % len(nums), None, nums
 
 
@@ -325,7 +339,7 @@ def plausibility(nums, lo, hi):
     scale = max(abs(x) for x in (lo, hi) if x is not None) or 1.0
     if lo is not None and hi is not None and lo >= 0 and vmax < 0:
         return "implausible", "实测为负值而限值为正"
-    if hi is not None and hi <= 0 and (lo is None or lo < 0) and vmin > 0:
+    if hi is not None and (hi < 0 or hi == 0 and lo is not None and lo < 0) and vmin > 0:
         return "implausible", "实测为正值而限值≤0"
     if lo is not None and lo > 0 and vmax < lo / 20:
         return "implausible", "实测(%s)远小于下限(%s)，疑似状态码/单位不符" % (vmax, lo)
@@ -343,7 +357,7 @@ def build(parsed, targets, rules, aliases, answers):
     rules = dict(DEFAULT_RULES, **{k: v for k, v in rules.items() if v is not None})
     qpat = re.compile(rules["qualifier_pattern"], re.I)
     cpat = re.compile(rules["cond_pattern"], re.I) if rules.get("cond_pattern") else None
-    questions, notes = [], []
+    questions = []
     syms = {}
     for t in targets:
         if t.get("sym"):
@@ -370,10 +384,24 @@ def build(parsed, targets, rules, aliases, answers):
                        [{"label": "全部条件合并取范围", "effect": {"rules": {"cond_keep": "all"}}}],
         })
         keep = [mid]
+    no_suffix = rules["no_suffix"]
+    if no_suffix == "ask":
+        bare = [b["label"] for b in parsed["blocks"] if not b["cond"]]
+        no_suffix = "keep"
+        if isinstance(keep, list) and bare:
+            key = "td:no_suffix"
+            ans = answers.get(key) or {}
+            if not ans:
+                questions.append({"key": key, "topic": "未注明条件",
+                                  "question": "已选择 %s。%s 等标签未注明条件，是否有原始记录证明它们也属于所选工况？" %
+                                              ("、".join(keep), "、".join(dict.fromkeys(bare))[:180]),
+                                  "options": [{"label": "省略未注明条件的测试项", "effect": {"no_suffix": "drop"}},
+                                              {"label": "已核对未注明条件的项目均适用，纳入填写", "effect": {"no_suffix": "keep"}}]})
+            no_suffix = "keep" if ans.get("no_suffix") == "keep" and not ans.get("_default") else "drop"
     active = []
     for b in parsed["blocks"]:
         if b["cond"] is None:
-            if rules.get("no_suffix", "keep") == "keep":
+            if no_suffix == "keep":
                 active.append(b)
         elif keep == "all" or (isinstance(keep, list) and b["cond"].lower() in [k.lower() for k in keep]):
             active.append(b)
@@ -420,138 +448,196 @@ def build(parsed, targets, rules, aliases, answers):
                     break
     assign = {}     # sym -> [(block, how, score)]
     ignored = []
-    pending = []
-    is_nt = lambda s: tested_targets.get(norm_sym(s), {}).get("not_tested")
-    # 第一遍：用户已回答的、以及置信的对应（精确/别名；单参数或“参数个数=数据段数”的复合标签）
+    alias_groups = {}
     for base, info in label_map.items():
-        bl, matched = info["blocks"], info["matched"]
-        ans = answers.get("td:map:" + base)
-        if ans is not None:
-            order = ans.get("map")      # list[sym or None] 按出现顺序
-            if order is None:
-                ignored.append((base, "按回答不填"))
-                continue
-            how, sc = ("按推荐默认(待确认)", 0.5) if ans.get("_default") else ("按回答", 1.0)
-            for b, s in zip(bl, itertools.cycle(order) if len(order) == 1 else order):
-                if s:
-                    assign.setdefault(s, []).append((b, how, sc))
+        matched = info["matched"]
+        if len(matched) == 1 and matched[0][2] == "别名" and not info["unexplained"] and not info.get("shadowed_by"):
+            sym = matched[0][0]
+            alias_tokens = [tok for tok in info["tokens"] if any(v in aliases for v in token_variants(tok, rules["delta_prefixes"]))]
+            if len(info["alts"][sym]) == 1 and len(alias_tokens) == 1 and not tested_targets[norm_sym(sym)].get("not_tested"):
+                alias_groups.setdefault((alias_tokens[0].upper(), sym), []).append(base)
+    grouped_answers = {}
+    for (token, sym), bases in alias_groups.items():
+        if len(bases) < 2:
             continue
-        if not matched:
-            ignored.append((base, "记录中无对应参数"))
+        key = "td:alias:" + token + ":" + sym
+        ans = answers.get(key) or {}
+        if ans.get("individual") and not ans.get("_default"):
             continue
-        if info.get("shadowed_by"):
-            ignored.append((base, "含额外测量词“%s”，与 %s 重复，视为其他测量项" % ("/".join(info["unexplained"]), info["shadowed_by"])))
+        if not ans:
+            questions.append({"key": key, "topic": "数据对应",
+                              "question": "以下标签都使用别名 %s，是否在本批数据中代表 %s？%s" % (token, sym, "、".join(bases)),
+                              "options": [{"label": "暂不对应，留空", "effect": {"map": None}},
+                                          {"label": "已核对，上述标签均对应 " + sym, "effect": {"map": [sym]}},
+                                          {"label": "逐个标签选择对应参数", "effect": {"individual": True}}]})
+        grouped_answers.update({base: ans if ans and not ans.get("_default") else {"map": None} for base in bases})
+    # Only exact single-parameter labels establish a correspondence without an answer.
+    for base, info in label_map.items():
+        blocks, matched = info["blocks"], info["matched"]
+        if not matched or info.get("shadowed_by"):
+            ignored.append((base, "记录无对应参数" if not matched else "含额外测量词，与 " + info["shadowed_by"] + " 不是同一项目"))
             continue
-        syms_in = [m[0] for m in matched]
-        fuzzy = [m for m in matched if m[1] < 0.9]
-        nt = [s for s in syms_in if is_nt(s)]
-        if nt or info["unexplained"] or (len(syms_in) > 1 and (
-                not rules["split_compound"] or len(syms_in) != len(bl))):
-            pending.append(base)
+        symbols = list(dict.fromkeys(c[0] for m in matched for c in info["alts"][m[0]]))
+        key = "td:map:" + base
+        exact = (len(symbols) == 1 and len(matched) == 1 and matched[0][2] == "精确"
+                 and not info["unexplained"] and not tested_targets[norm_sym(symbols[0])].get("not_tested"))
+        if exact and key not in answers:
+            for block in blocks:
+                assign.setdefault(symbols[0], []).append((block, "精确", 1.0))
             continue
-        if len(syms_in) == 1:
-            for b in bl:
-                assign.setdefault(syms_in[0], []).append((b, matched[0][2], matched[0][1]))
-            if fuzzy:
-                notes.append(("fuzzy", base, syms_in))
+        q = _map_question(base, info, targets, symbols, tested_targets, set())
+        if not q:
+            ignored.append((base, "无可测参数候选"))
             continue
-        confirm_default = bool((answers.get("td:confirm") or {}).get("_default"))
-        for b, s in zip(bl, syms_in):
-            assign.setdefault(s, []).append((b, "复合标签按顺序拆分", 0.5 if confirm_default else (0.9 if not fuzzy else 0.8)))
-        notes.append(("split", base, syms_in))
-    # 第二遍：不确定的标签——排除已被置信分配的参数后给出候选并询问；草稿先按推荐填写
-    confident = {norm_sym(s) for s in assign}
-    for base in pending:
-        info = label_map[base]
-        bl = info["blocks"]
-        syms_in = []
-        for m in info["matched"]:
-            alt = [c for c in info["alts"].get(m[0], [m]) if norm_sym(c[0]) not in confident]
-            if alt and alt[0][0] not in syms_in:
-                syms_in.append(alt[0][0])
-        q = _map_question(base, info, targets, syms_in, tested_targets, confident)
-        if q is None:
-            ignored.append((base, "候选参数均已有数据"))
+        if len(matched) > 1 and not rules["split_compound"]:
+            q["options"] = q["options"][:1]  # 可以用自由回答明确给出每段符号
+        ans = answers.get(key, grouped_answers.get(base))
+        if not isinstance(ans, dict) or ans.get("_default"):
+            questions.append(q)
+            ignored.append((base, "待核对标签与参数逐段对应"))
             continue
-        questions.append(q)
-        rec = q["options"][q["recommended"]]["effect"]["map"] or []
-        for b, s in zip(bl, rec if len(rec) > 1 else itertools.cycle(rec)):
-            if s:
-                assign.setdefault(s, []).append((b, "待确认(按推荐)", 0.5))
-    # 汇总确认：复合拆分/近似匹配
-    if notes and "td:confirm" not in answers:
-        desc = []
-        for kind, base, ss in notes:
-            desc.append("%s→%s" % (base, "、".join(ss)))
-        questions.append({"key": "td:confirm", "topic": "标签对应",
-                          "question": "以下测试项标签按“复合标签按出现顺序拆分/近似匹配”对应到记录参数，是否正确？\n" + "；".join(desc),
-                          "options": [{"label": "正确，按此填写", "effect": {}},
-                                      {"label": "有误，我来说明", "effect": {"free": True}}]})
+        order = ans.get("map")
+        if ans.get("free"):
+            order = [x.strip() for x in re.split(r"[,，]", ans.get("text", ""))]
+        if not order:
+            ignored.append((base, "按回答省略"))
+            continue
+        if len(order) == 1:
+            order = order * len(blocks)
+        if len(order) != len(blocks) or any(sym is not None and (
+                norm_sym(sym) not in tested_targets or tested_targets[norm_sym(sym)].get("not_tested")) for sym in order):
+            ignored.append((base, "回答未给出与段数相符的可测参数，未填；请重新回答"))
+            continue
+        for block, sym in zip(blocks, order):
+            if sym:
+                actual = tested_targets[norm_sym(sym)]["sym"]
+                assign.setdefault(actual, []).append((block, "按回答逐段对应", 1.0))
     # ---- 逐行汇总
     fills, unmatched, verdict = {}, [], {s: "pass" for s in parsed["samples"]}
+    unit_map = {t["sym"]: str(t["unit"]).strip() for t in targets if t.get("sym") and t.get("unit")}
+    identity = {"units": {}, "conditions": {}}
+    needed = {"units": {}, "conditions": {}}
+    for name in identity:
+        for key, effect in answers.items():
+            if key.startswith("td:" + name + ":") and isinstance(effect, dict) and not effect.get("_default"):
+                identity[name].update(effect.get(name) or {})
+    required_review = []
     for t in targets:
         if not t.get("sym"):
             continue
-        key = norm_sym(t["sym"])
-        hits = None
-        for s, lst in assign.items():
-            if norm_sym(s) == key:
-                hits = lst
-                break
+        symbol = t["sym"]
+        hits = assign.get(symbol, [])
         if not hits:
             if not t.get("not_tested"):
-                unmatched.append(t["sym"])
+                unmatched.append(symbol)
             continue
-        vans = answers.get("td:val:" + t["sym"])
-        format_rules = dict(rules, **rules["symbol_formats"].get(t["sym"], {}))
-        row_fill = {}
+        if sum(norm_sym(other.get("sym") or "") == norm_sym(symbol) for other in targets) > 1:
+            required_review.append("%s 在目标出现多行，按行核对工况或手工指定" % symbol)
+            continue
+        keys = list(dict.fromkeys(b["base"] for b, _, _ in hits))
+        if len(keys) > 1:
+            key = "td:merge:" + symbol
+            ans = answers.get(key)
+            if not isinstance(ans, dict) or ans.get("_default"):
+                opts = [{"label": "先留空", "effect": {"labels": []}},
+                        {"label": "已核对工况/通道，按选定取值方式汇总这些标签", "effect": {"labels": keys}}]
+                opts += [{"label": "仅取 " + k, "effect": {"labels": [k]}} for k in keys]
+                questions.append({"key": key, "topic": "跨标签汇总", "question": "%s 有多个来源标签：%s。哪些属于本记录行？" %
+                                  (symbol, "、".join(keys)), "options": opts})
+                ans = {}
+            hits = [h for h in hits if h[0]["base"] in (ans.get("labels") or [])]
+            if not hits:
+                unmatched.append(symbol)
+                continue
+        vans = answers.get("td:val:" + symbol)
+        if not isinstance(vans, dict) or vans.get("_default"):
+            vans = {}
+        format_rules = dict(rules, **rules["symbol_formats"].get(symbol, {}))
+        lo, hi = (parse_limit(t.get(k), k, t.get("unit")) for k in ("lo", "hi"))
+        unsupported = any(v is None and str(t.get(k) or "").strip() not in ("", "—", "–", "-", "/")
+                          for k, v in (("lo", lo), ("hi", hi)))
+        unit = unit_map.get(symbol)
+        declared_units = {u for b, _, _ in hits for u in b.get("units", []) if u}
+        unit_conflict = bool(unit and any(u != unit for u in declared_units))
+        unit_missing = bool(unit and any(not b.get("units") for b, _, _ in hits))
+        condition = str(t.get("cond") or "").strip()
+        context_missing = condition not in ("", "—", "-", "/") and any(
+            {norm_text(c) for c in b.get("conditions", [])} != {norm_text(condition)} for b, _, _ in hits)
+        row_fill, bad = {}, None
+        all_binary = all(measurement_number(v) in (0, 1) for b, _, _ in hits for vs in b["values"].values() for v in vs)
         for sid in parsed["samples"]:
-            vals, src_rows = [], []
-            for b, how, sc in hits:
-                v = b["values"].get(sid, [])
-                vals.extend(v)
-                src_rows.append((b["rows"][0], b["rows"][-1], b["label"]))
-            lo, hi = (parse_limit(t.get(k), k, t.get("unit")) for k in ("lo", "hi"))
-            text, how_txt, status, nums = aggregate(vals, format_rules, lo=lo, hi=hi)
-            pst, pmsg = plausibility(nums, lo, hi)
+            vals, ranges = [], []
             col = parsed["sample_cols"][sid]
-            cell = {"value": text, "how": how_txt, "n": len(vals),
-                    "labels": sorted({b["label"] for b, _, _ in hits}),
-                    "ranges": ["%s!%s%d:%s%d" % (parsed["sheet"], col, a + 1, col, z + 1) for a, z, _ in src_rows],
-                    "conf": min(sc for _, _, sc in hits), "hows": sorted({h for _, h, _ in hits}),
-                    "check": pst, "check_msg": pmsg, "raw": _fmt_list(vals),
-                    "limits": [str(v) if v is not None else None for v in (lo, hi)]}
-            if vans:
+            incomplete = False
+            for b, _, _ in hits:
+                values = b["values"].get(sid, [])
+                incomplete |= len(values) != len(b["rows"])
+                vals.extend(values)
+                ranges.append("%s!%s%d:%s%d" % (parsed["sheet"], col, b["rows"][0] + 1, col, b["rows"][-1] + 1))
+            text, how, status, nums = aggregate(vals, format_rules, lo=lo, hi=hi)
+            pst, msg = plausibility(nums, lo, hi)
+            if incomplete or status == "unknown" or how == "文本结果":
+                msg = "样品有缺少读数的行" if incomplete else how
+                text, pst, status = "", "unknown", "unknown"
+                required_review.append("%s 样品%s (%s)：%s" % (symbol, sid, "；".join(ranges), msg))
+            elif nums:
+                if pst == "implausible" and not bad:
+                    bad = {"value": text, "check_msg": msg}
                 mode = vans.get("mode")
-                if mode == "pass":
-                    cell["value"], cell["how"] = rules["pass_text"], "按回答填合格"
-                    pst = "ok"
-                elif mode == "blank":
-                    cell["value"], cell["how"] = "", "按回答留空"
-                    pst = "ok"
-                elif mode == "const":
-                    cell["value"], cell["how"] = vans.get("const", ""), "按回答填写固定值"
-                    pst = "ok"
-                elif mode == "negate" and nums:
-                    text2, how2, _, nums2 = aggregate([x.copy_negate() for x in nums], format_rules, lo=lo, hi=hi)
-                    cell["value"], cell["how"] = text2, how2 + "（取负号）"
-                    pst, pmsg = plausibility(nums2, lo, hi)
-                elif mode == "raw":
-                    pst = "out" if pst == "implausible" else pst
-                cell["check"] = pst
-                if vans.get("_default"):
-                    cell["how"] += "（按推荐默认，待确认）"
-                    cell["conf"] = min(cell["conf"], 0.5)
-                cell["check_msg"] = "" if pst == "ok" else pmsg
-            if status == "fail" or pst in ("out", "implausible"):
+                if mode == "negate":
+                    text, how, _, transformed = aggregate([n.copy_negate() for n in nums], format_rules, lo=lo, hi=hi)
+                    how += "（取负号）"
+                    pst, msg = plausibility(transformed, lo, hi)
+                elif mode == "flags" and vans.get("pass_code") in (0, 1) and all_binary:
+                    status = "pass" if all(n == vans["pass_code"] for n in nums) else "fail"
+                    text, how = rules[status + "_text"], "按回答解码状态（%s 表示通过）" % vans["pass_code"]
+                    pst, msg = "ok", ""
+                elif mode == "raw" and pst == "implausible":
+                    pst = "out"
+                    how += "（已确认原始读数）"
+                if mode == "blank" or pst == "implausible":
+                    text, status = "", "unknown"
+                    how = "按回答留空" if mode == "blank" else "疑似状态码、单位或符号异常，待确认"
+                if text and status not in ("pass", "fail"):
+                    if unit_conflict:
+                        msg = "源单位 %s 与目标单位 %s 不一致" % ("、".join(sorted(declared_units)), unit)
+                        required_review.append("%s：%s（%s）" % (symbol, msg, "；".join(ranges)))
+                        text, pst, status = "", "unknown", "unknown"
+                    elif unit_missing and identity["units"].get(symbol) != unit:
+                        needed["units"][symbol] = unit
+                        text, pst, status, msg = "", "unknown", "unknown", "源表未注明单位，记录单位为 " + unit
+                    elif unsupported or (lo is None and hi is None):
+                        status, msg = "unknown", "规范界限缺失或未能解析，无法判定"
+            if context_missing and identity["conditions"].get(symbol) != condition:
+                needed["conditions"][symbol] = condition
+                text, pst, status = "", "unknown", "unknown"
+                msg = (msg + "；" if msg else "") + "源表未证实记录所需工况：" + condition
+            if status == "fail" or (text and pst == "out" and status != "unknown"):
                 verdict[sid] = "fail"
-            row_fill[sid] = cell
-        bad = [c for c in row_fill.values() if c["check"] == "implausible"]
+            elif (status == "unknown" or not text) and verdict[sid] != "fail":
+                verdict[sid] = "unknown"
+            row_fill[sid] = {"value": text, "how": how, "n": len(vals), "labels": sorted({b["label"] for b, _, _ in hits}),
+                             "ranges": ranges, "range_labels": [b["label"] for b, _, _ in hits], "conf": min(sc for _, _, sc in hits), "hows": sorted({h for _, h, _ in hits}),
+                             "check": pst, "check_msg": msg, "raw": _fmt_list(vals),
+                             "limits": [str(v) if v is not None else None for v in (lo, hi)]}
+            if vans.get("mode") == "flags" and status in ("pass", "fail"):
+                row_fill[sid]["pass_code"] = vans["pass_code"]
         if bad and not vans:
-            questions.append(_value_question(t, row_fill, bad[0]))
+            questions.append(_value_question(t, all_binary, bad))
         fills[t["row"]] = row_fill
+    for name, missing in needed.items():
+        if not missing:
+            continue
+        desc = "、".join("%s (%s)" % (sym, v) for sym, v in sorted(missing.items()))
+        signature = hashlib.sha256(json.dumps(missing, sort_keys=True).encode()).hexdigest()[:16]
+        key = "td:" + name + ":" + signature
+        if key not in answers:
+            topic = "测量单位" if name == "units" else "测试工况核对"
+            questions.append({"key": key, "topic": topic, "question": "源表未证实以下记录要求，请对照原始试验记录核对：" + desc,
+                              "options": [{"label": "未核对，相关结果留空", "effect": {name: {}}},
+                                          {"label": "已核对，所列要求与本批试验一致", "effect": {name: missing}}]})
     return {"fills": fills, "questions": questions, "ignored": ignored, "unmatched": unmatched,
-            "verdict": verdict, "rules": rules, "samples": parsed["samples"]}
+            "verdict": verdict, "rules": rules, "samples": parsed["samples"], "review": required_review}
 
 
 def _map_question(base, info, targets, syms_in, tested, confident):
@@ -562,28 +648,22 @@ def _map_question(base, info, targets, syms_in, tested, confident):
     lasts = {norm_sym(x)[-1:] for x in syms_in} | {t[-1:].upper() for t in info["tokens"] if t}
     for t in targets:
         s = t.get("sym")
-        if s and not t.get("not_tested") and s not in pool and norm_sym(s) not in confident \
+        if (info["unexplained"] or any(is_nt(x) for x in syms_in)) and s and not t.get("not_tested") and s not in pool and norm_sym(s) not in confident \
                 and norm_sym(s)[-1:] in lasts:
             pool.append(s)
     if not pool:
         return None
     k = min(n, len(pool))
-    rec = [s if s in pool else None for s in syms_in][:n]
-    rec += [None] * (n - len(rec))
-    rest = [s for s in pool if s not in rec]
-    rec = [s if s else (rest.pop(0) if rest else None) for s in rec]
-    cands = [rec]
-    for perm in itertools.permutations(pool, k):
-        c = list(perm) + [None] * (n - k)
-        if c not in cands:
-            cands.append(c)
-        if len(cands) >= 3:
-            break
-    opts = []
+    cands = []
+    if len(pool) == 1:
+        cands.append([pool[0]] * n)
+    else:
+        for perm in itertools.islice(itertools.permutations(pool, k), 3):
+            cands.append(list(perm) + [None] * (n - k))
+    opts = [{"label": "暂不对应，该项留空", "effect": {"map": None}}]
     for cand in cands:
-        label = "，".join("第%d段→%s" % (i + 1, s or "不填") for i, s in enumerate(cand)) if n > 1 else "→%s" % cand[0]
+        label = "，".join("第%d段→%s" % (i + 1, s or "不填") for i, s in enumerate(cand))
         opts.append({"label": label, "effect": {"map": cand}})
-    opts.append({"label": "该测试项不填", "effect": {"map": None}})
     segs = []
     for b in info["blocks"]:
         sample = next(iter(b["values"].values()), [])
@@ -597,34 +677,24 @@ def _map_question(base, info, targets, syms_in, tested, confident):
     if len(info["matched"]) != n:
         reason.append("标签含%d个参数名而数据为%d段" % (len(info["matched"]), n))
     return {"key": "td:map:" + base, "topic": "数据对应",
-            "question": "测试项“%s”（%s）应填到哪个参数？%s" % (base, "；".join(segs), ("（" + "，".join(reason) + "）") if reason else ""),
+            "question": "测试项“%s”（%s）应填到哪个参数？其他顺序可按数据段输入用逗号分隔的参数符号。%s" % (base, "；".join(segs), ("（" + "，".join(reason) + "）") if reason else ""),
             "options": opts, "recommended": 0}
 
 
-def _value_question(t, row_fill, bad):
+def _value_question(t, all_binary, bad):
     eg = bad["value"]
-    nums = []
-    for c in row_fill.values():
-        for x in (c.get("raw") or "").replace("…", "").split(","):
-            n = to_number(x)
-            if n is not None:
-                nums.append(n)
-    lo, hi = (parse_limit(t.get(k), k, t.get("unit")) for k in ("lo", "hi"))
-    lim = t.get("lo") if lo is not None else t.get("hi")
-    o_pass = {"label": "填“%s”" % "合格", "effect": {"mode": "pass"}}
-    o_lim = {"label": "填规范限值 %s（视为达到指标）" % lim, "effect": {"mode": "const", "const": str(lim)}}
-    o_neg = {"label": "取负号后填写", "effect": {"mode": "negate"}}
-    o_raw = {"label": "照填原始数据", "effect": {"mode": "raw"}}
-    o_blank = {"label": "留空", "effect": {"mode": "blank"}}
-    if nums and set(nums) <= {0.0, 1.0}:
-        # 0/1 通过标志：推荐“留空”，不把标志当实测值，也不把规范限值当实测值；“填规范限值”只作备选
-        opts = [o_blank, o_pass, o_raw] + ([o_lim] if lim not in (None, "", "—") else [])
-        why = "数据只有0/1，疑似通过标志"
-    elif "正值" in bad["check_msg"] or "负值" in bad["check_msg"]:
-        opts = [o_raw, o_neg, o_pass, o_blank]      # 推荐项必须是不掩盖原始数据的“照填原始数据”，不能默认写“合格”
-        why = bad["check_msg"]
+    o_neg = {"label": "已核原始记录，本项目按相反极性记录", "effect": {"mode": "negate"}}
+    o_raw = {"label": "已核对，照填原始测量并如实标注超限", "effect": {"mode": "raw"}}
+    o_blank = {"label": "留空，核对原始测试记录", "effect": {"mode": "blank"}}
+    if all_binary:
+        opts = [o_blank, o_raw] + [
+            {"label": "已核对状态定义，%d 表示通过，%d 表示失败，仅填结论" % (code, 1 - code),
+             "effect": {"mode": "flags", "pass_code": code}} for code in (1, 0)]
+        why = "数据只有0/1，疑似状态码；规范限值不能作为实测值"
     else:
-        opts = [o_raw, o_pass, o_blank]
+        opts = [o_blank, o_raw]
+        if "正值" in bad["check_msg"] or "负值" in bad["check_msg"]:
+            opts.append(o_neg)
         why = bad["check_msg"]
     return {"key": "td:val:" + t["sym"], "topic": "数值合理性",
             "question": "参数 %s（%s，规范 %s~%s %s）实测为“%s”，%s。如何填写？" % (

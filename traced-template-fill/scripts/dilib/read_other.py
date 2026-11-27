@@ -444,7 +444,7 @@ def read_txt(path):
             continue
     else:
         text = raw.decode("latin-1")
-    m = read_markdown(path, text="\n".join(re.sub(r"^#+", "", l) if False else l for l in text.splitlines()))
+    m = read_markdown(path, text=text)
     m["type"] = "txt"
     return m
 
