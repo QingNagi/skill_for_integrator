@@ -1,5 +1,7 @@
 # Windows 离线技能的完整 Tier 1 复核
 
+[本轮五个交付包的 SHA-256、功能验收和三个 ZIP 的评审结果](2026-11-28-离线验收.md)
+
 source 只含业务代码和资源；lite 增加纯 Python wheel；完整包包含解释器、原生 PDF 组件和 OCR 模型。请按实际产物分别复核。历史 Windows 发布包包含 PyMuPDF，复核该历史包时可在评审机使用项目修复版 SkillSpector。安装命令、同包对照结果及仍需复核的发现见 [PyMuPDF 归档扫描修复](skillspector-zip/README.md)。
 
 在评审机的 PowerShell 7.2 或更新版本中，从仓库根目录调用 `qa/run-tier1.ps1`。评审机需有 SkillEvaluator、SkillSpector 和 Gitleaks。已验证 SkillEvaluator 1.2.1、Gitleaks 8.30.1、上游 SkillSpector 2.13.6 / 2.13.7 和本项目的修复版。入口支持指定工具绝对路径。未指定扫描器时，优先使用安装在用户目录的项目修复版，再查找 PATH。静态评审使用 `--no-llm`。
