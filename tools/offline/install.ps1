@@ -103,6 +103,22 @@ function Enter-InstallLock {
     }
 }
 
+function Complete-InstallStage {
+    param([string] $Stage, [string] $PublishTo)
+    # Windows may briefly retain a handle to a file after the smoke test exits.
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            if ($PublishTo) { [IO.Directory]::Move($Stage, $PublishTo) }
+            else { [IO.Directory]::Delete($Stage, $true) }
+            return
+        } catch [IO.IOException], [UnauthorizedAccessException] {
+            $code = $_.Exception.GetBaseException().HResult -band 65535
+            if ($attempt -ge 8 -or $code -notin 5, 32, 33) { throw }
+            Start-Sleep -Milliseconds (100 * $attempt)
+        }
+    }
+}
+
 function Install-ValidatedSkill {
     param([string] $Target, [string] $Digest)
     if (Test-OfflineReady $Target $Digest) { return }
@@ -154,22 +170,12 @@ function Install-ValidatedSkill {
                 }
             } else {
                 [IO.File]::WriteAllText([IO.Path]::Combine($ioStage, $markerName), $Digest)
-                # A virus scanner may briefly retain a handle to the freshly executed interpreter.
-                for ($attempt = 1; ; $attempt++) {
-                    try {
-                        [IO.Directory]::Move($ioStage, $ioTarget)
-                        break
-                    } catch [IO.IOException], [UnauthorizedAccessException] {
-                        $code = $_.Exception.GetBaseException().HResult -band 65535
-                        if ($attempt -ge 8 -or $code -notin 5, 32, 33) { throw }
-                        Start-Sleep -Milliseconds (100 * $attempt)
-                    }
-                }
+                Complete-InstallStage $ioStage $ioTarget
             }
         } finally {
             if ([IO.Directory]::Exists($ioStage) -and $stageInfo.Parent.FullName -eq $ioParent -and $stageInfo.Name -ceq $stageName -and
                 -not ($stageInfo.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                [IO.Directory]::Delete($ioStage, $true)
+                Complete-InstallStage $ioStage
             }
         }
     } finally {

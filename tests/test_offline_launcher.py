@@ -42,6 +42,18 @@ with open(os.environ['DI_TEST_INSTALL_LOG'], 'a', encoding='utf-8') as log:
 time.sleep(0.35)
 if os.environ.get('DI_TEST_FAIL_SMOKE'):
     raise SystemExit(9)
+if os.environ.get('DI_TEST_STAGE_LOCK'):
+    import subprocess, sys
+    from pathlib import Path
+    ready = Path(os.environ['DI_TEST_STAGE_LOCK'])
+    lock = "import sys,time; f=open(sys.argv[1],'rb'); open(sys.argv[2],'w').close(); time.sleep(0.8)"
+    subprocess.Popen([sys.executable, '-B', '-c', lock, __file__, str(ready)],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 5
+    while not ready.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if not ready.exists():
+        raise SystemExit(10)
 """
 
 
@@ -134,6 +146,17 @@ class LauncherTests(unittest.TestCase):
         self.env.pop("OS", None)
         self.env.pop("PATHEXT", None)
         self.verify_output(self.call())
+
+    def test_repair_cleanup_waits_for_transient_file_handle(self):
+        self.verify_output(self.call())
+        library = self.target / "scripts/dilib/office.py"
+        library.unlink()
+        marker = self.base / "file-opened"
+        result = self.call(DI_TEST_STAGE_LOCK=str(marker))
+        self.assertTrue(marker.is_file(), result.stderr)
+        self.verify_output(result)
+        self.assertTrue(library.is_file())
+        self.assertEqual(list(self.target.parent.glob(".di-*")), [])
 
     def test_damaged_project_repaired_in_place_with_private_cache_present(self):
         self.verify_output(self.call())

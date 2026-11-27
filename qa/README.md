@@ -2,9 +2,9 @@
 
 在评审机的 PowerShell 7.2 或更新版本中，从仓库根目录调用 `qa/run-tier1.ps1`。评审机需有 SkillEvaluator、SkillSpector 和 Gitleaks。已验证的版本分别为 1.2.1、2.13.6 和 8.30.1。评审入口从 PATH 查找三个工具，也接受其可执行文件的绝对路径。静态评审使用 `--no-llm`。
 
-**2026-11-27 实测。** Windows ZIP 的 SHA-256 为 `b36c9dc05c969924934264b1ac992e16213f669fe7dcbda52ed0ec30bed49f65`。13 项验证中 12 项通过，PII 精确应用 3 条许可证豁免，质量分 100/100（A）。Security Scan 的 SkillSpector 退出码为 2，发布资格为 `incomplete`。PyMuPDF wheel 的完整字节数为 19,826,532，超过扫描器单文件缓存的 16 MiB，其 ZIP 中央目录从偏移 19,816,122 开始。完整 wheel 的 119 个条目通过 CRC 校验。
+**2026-11-27 实测。** Windows ZIP 的 SHA-256 为 `6650f0a6ecb429360b4ca152485d6947d21a2b57da091ce65a7c2a491f6dbfe2`。13 项验证中 12 项通过，PII 精确应用 3 条许可证豁免，质量分 100/100（A）。Security Scan 的 SkillSpector 退出码为 2，发布资格为 `incomplete`。PyMuPDF wheel 的完整字节数为 19,826,532，超过扫描器单文件缓存的 16 MiB，其 ZIP 中央目录从偏移 19,816,122 开始。完整 wheel 的 119 个条目通过 CRC 校验。
 
-同一发布包的 SkillSpector 2.13.6 原始结论为 `CRITICAL / DO_NOT_INSTALL`，扫描覆盖率 76.3%。660 条 HIGH 中，592 条定位到运行时，67 条定位到第三方依赖，1 条定位到 `SKILL.md` 对解释器的引用。扫描器对该解释器只做了部分分析。发布审核仍需处理扫描覆盖与安全告警。
+同一发布包的 SkillSpector 2.13.6 原始结论为 `CRITICAL / DO_NOT_INSTALL`，扫描覆盖率 77.3%。660 条 HIGH 中，592 条定位到运行时，67 条定位到第三方依赖，1 条定位到 `SKILL.md` 对解释器的引用。扫描器对该解释器只做了部分分析。发布审核仍需处理扫描覆盖与安全告警。[性能与新环境迁移验收](性能与迁移.md)
 
 ## 评审发布 ZIP
 
