@@ -6,7 +6,7 @@
 
 Windows x64、Linux x86_64 和 Linux aarch64 各有独立的运行时套装，均使用同一份技能指令。离线套装包括 Python、PDF 后端和中英文 OCR；旧版 Word/Excel 文档转换与 PDF 导出使用目标机已有的办公软件。
 
-**完整包用于功能验收及经单位批准的部署。** 本轮 Windows 完整包的 SkillSpector 风险评分为 `100/100（CRITICAL）`，Tier 1 发布资格为 `incomplete`。按包的 SHA-256 查看对应的完整评审报告；源码或精简包的结论仅适用于该项交付。新完整包在构建目录生成，源码仓库独立维护技能和构建工具。[内网使用手册](tools/offline/README.md) · [本轮功能验收与安全结果](qa/2026-11-28-离线验收.md) · [复现安全评审](qa/README.md)
+**完整包目前供本地验收。** 本轮 Windows 完整包的 SkillSpector 风险评分为 `100/100（CRITICAL）`，Tier 1 发布资格为 `incomplete`。五个交付件均有独立 SHA-256。验收记录列出了真实来件的数据差异、盲测得分、各平台的实测环境和回归结果。[内网使用手册](tools/offline/README.md) · [本轮数据核对、性能与安全结果](qa/2026-11-28-数据核对与全流程复验.md) · [复现安全评审](qa/README.md)
 
 ## 源码安装与调用
 
