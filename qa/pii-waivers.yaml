@@ -1,0 +1,29 @@
+version: 1
+waivers:
+  - id: CPYTHON-31410-LICENSE-BZIP2
+    category: emails
+    file: doc-integrator/runtime/python/LICENSE.txt
+    line: 359
+    evidence_sha256: 1dc00a7be746fd9c34096dbfa2573936e7d8744850543a3b75243ab16b3ab4c8
+    reason: Public bzip2 copyright attribution in the unmodified CPython 3.14.10 distribution license.
+    owner: QingNagi/skill_for_integrator maintainers
+    created: 2026-11-27
+    expires: 2027-05-27
+  - id: CPYTHON-31410-LICENSE-DFARS-7014
+    category: phone_numbers
+    file: doc-integrator/runtime/python/LICENSE.txt
+    line: 631
+    evidence_sha256: 9337e428dae5047b7ec4a01260474fc22403ce1a55618092606a6aad99bc65c7
+    reason: DFARS clause 252.227-7014 in the verbatim upstream license notice is a regulatory citation.
+    owner: QingNagi/skill_for_integrator maintainers
+    created: 2026-11-27
+    expires: 2027-05-27
+  - id: CPYTHON-31410-LICENSE-DFARS-7013
+    category: phone_numbers
+    file: doc-integrator/runtime/python/LICENSE.txt
+    line: 672
+    evidence_sha256: 120328c06b39361de2e58cef921d6d24113f3c4f49386a72cecc106aecd05da3
+    reason: DFARS clause 252.227-7013 in the verbatim upstream license notice is a regulatory citation.
+    owner: QingNagi/skill_for_integrator maintainers
+    created: 2026-11-27
+    expires: 2027-05-27

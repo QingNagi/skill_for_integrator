@@ -201,7 +201,8 @@ def read_xls(path):
 
 
 def read_csv(path):
-    raw = open(path, "rb").read()
+    with open(path, "rb") as stream:
+        raw = stream.read()
     for enc in ("utf-8-sig", "gb18030", "latin-1"):
         try:
             text = raw.decode(enc)
@@ -270,7 +271,8 @@ def _pseudo_rank(text):
 
 def read_markdown(path, text=None):
     if text is None:
-        raw = open(path, "rb").read()
+        with open(path, "rb") as stream:
+            raw = stream.read()
         text = raw.decode("utf-8-sig", "replace")
     lines = text.splitlines()
     blocks, figures = [], []
@@ -402,7 +404,8 @@ def read_markdown(path, text=None):
 
 
 def read_txt(path):
-    raw = open(path, "rb").read()
+    with open(path, "rb") as stream:
+        raw = stream.read()
     for enc in ("utf-8-sig", "gb18030"):
         try:
             text = raw.decode(enc)

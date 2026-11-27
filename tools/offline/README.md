@@ -1,8 +1,24 @@
 # doc-integrator 内网使用手册
 
-**把规范、任务书、测试表或扫描 PDF 的内容填进 Word 模板。** Agent 先生成带来源批注的草稿，供你核对，再根据你的确认生成终稿。Windows x64 自部署套装包含 Python、PDF 读取组件和简体中文、英文 OCR 模型。第一次运行实际任务时自动部署，以后同一用户复用已就绪的同版本环境。
+**把规范、任务书、测试表或扫描 PDF 的内容填进 Word 模板。** Agent 先生成带来源批注的草稿，供你核对，再根据你的确认生成终稿。Windows x64、GNU/Linux x86_64 和 ARM64 自部署套装均包含 Python、PDF 读取组件和简体中文、英文 OCR 模型。第一次运行实际任务时自动部署，以后同一用户复用已就绪的同版本环境。
 
-## 快速开始
+## 选择离线包
+
+三种机器共用同一个 skill 和同一套文档命令。把下载目录交给 Agent，让它识别系统和 CPU 后选择对应文件。
+
+| 目标机 | 文件 | 首次及后续入口 |
+|---|---|---|
+| Windows x64 | `doc-integrator-offline-win64.zip` | PowerShell 的 `run.ps1` |
+| GNU/Linux Intel 或 AMD，`uname -m` 显示 `x86_64` | `doc-integrator-offline-linux-x86_64.tar.gz` | `bash run.sh` |
+| GNU/Linux ARM64，`uname -m` 显示 `aarch64` | `doc-integrator-offline-linux-aarch64.tar.gz` | `bash run.sh` |
+
+Linux 原生 PDF/OCR 库要求 glibc 2.28 或更高。可用 `getconf GNU_LIBC_VERSION` 核对。Linux 旧版办公格式和 PDF 导出使用目标机已有的 LibreOffice。
+
+**输入文件放哪里。** 模板和来源可放在不同盘符或目录。给完整路径，或给相对于当前项目的路径，如 `第二批/测量表.xlsx`。只给文件名时，Agent 会在指定工作区递归查找；同名且批次不明确时，会列出路径请你选，选定后才开始处理。默认输出在模板旁的 `整合输出`；可用 `--out` 指定另一个可写目录。
+
+**SHA-256 用在哪。** 分发包旁的 `.sha256` 供 Agent 在拷贝后核对。Linux 可在两份文件所在目录执行 `sha256sum -c 文件名.tar.gz.sha256`；Windows 用 `Get-FileHash -Algorithm SHA256` 与清单比对。包内摘要供启动器验证载荷、识别同版本安装。校验值从可信发布位置取得。
+
+## Windows 快速开始
 
 1. **把 ZIP 拷到内网。** 目标机需要能在内网工作的 Codex 或 Claude Code、可用的本地命令执行权限，以及可写的项目目录和用户数据目录。可直接把 ZIP 路径、目标 Word 模板、来源文件一起交给 Agent。目标机可以没有系统 Python、pip 和单独的 OCR 程序。
 2. **让 Agent 放好 skill 并执行任务。** Codex 项目入口是 `.agents/skills/doc-integrator/SKILL.md`；Claude Code 项目入口是 `.claude/skills/doc-integrator/SKILL.md`。ZIP 已包含顶层 `doc-integrator` 文件夹，解压目标应是上一级 `skills` 目录。若只想在当前会话直接处理文件，也可以解压到独立目录，让 Agent 读取里面的 `SKILL.md` 并调用同级 `run.ps1`。
@@ -13,6 +29,19 @@
 > 在本项目使用 doc-integrator。离线包位于 D:\交接\doc-integrator-offline-win64.zip。如果本项目尚未配置这个版本，请把它解压到本项目的技能目录；已有同版就复用，保留已有规则和其他版本。读取 SKILL.md，直接用 run.ps1 执行任务，首次让它自行部署并自检。目标是“验证记录.docx”，来源是“测试数据.xlsx”和“扫描规范.pdf”。按模板批注填写，先给我草稿和审核报告；扫描识别的数值请标明原页。
 
 如果 Agent 刚解压完而当前会话的技能列表还没有刷新，可让它直接读取上述入口文件并执行。同一项目后续可直接说“用 doc-integrator 按批注填写这份记录”。
+
+## Linux 快速开始
+
+把对应的 tar.gz、模板和来源路径交给 Agent，并告诉它「在本项目配置 doc-integrator，先按来源生成草稿」。Agent 在项目目录执行下列步骤。示例使用 Codex，Claude Code 可将 `.agents` 换成 `.claude`。项目中已经有同版入口时直接执行最后一行。
+
+```bash
+arch=$(uname -m)
+mkdir -p .agents/skills
+tar -xzf "/交接/doc-integrator-offline-linux-${arch}.tar.gz" -C .agents/skills
+bash .agents/skills/doc-integrator/run.sh run -t "/模板/验证记录.docx" -s "/来件/扫描规范.pdf" --task "先生成草稿"
+```
+
+同一用户首次运行会从本地载荷部署环境并识别中英文扫描样文。需要系统已有的 shell、GNU tar、gzip、sha256sum 和 flock。运行时默认放在 `~/.local/share/doc-integrator/offline/`；已设置 `XDG_DATA_HOME` 时使用该数据目录。该文件系统须允许执行程序。后续使用同一入口和参数。变更既有的入口版本前请保存该项目的自定义规则。
 
 ## 什么时候需要 OCR
 
@@ -36,7 +65,7 @@
 | 首次部署中断 | 本次命令报告失败。修复磁盘、写权限或文件问题后重试，未通过自检的临时目录不会被当作成功安装。 |
 | 换电脑、账号或发布包 | 新电脑或账号需要自己的环境。不同载荷有独立版本目录；已有项目技能带有自定义规则时先保留原目录，再迁移需要的规则。 |
 
-默认本机缓存位于 `%LOCALAPPDATA%\doc-integrator\offline\<载荷摘要>\doc-integrator\`。用户目录较长时会缩短缓存目录名，仍用完整摘要校验。匹配的项目级或用户级安装也可复用。项目里的技能入口、用户缓存和文档输出是三个位置。要持续从项目里调用 skill，请保留解压出的技能文件夹。
+Windows 默认本机缓存位于 `%LOCALAPPDATA%\doc-integrator\offline\<载荷摘要>\doc-integrator\`。用户目录较长时会缩短缓存目录名，仍用完整摘要校验。匹配的项目级或用户级安装也可复用。项目里的技能入口、用户缓存和文档输出是三个位置。要持续从项目里调用 skill，请保留解压出的技能文件夹。
 
 ## 能力与依赖
 
@@ -49,7 +78,7 @@
 | 旧版 .doc/.xls 输入、输出 .doc 或 PDF | 目标机已有的 Word/Excel、兼容 WPS 或 LibreOffice | 按约定由现有办公软件承担转换。没有转换后端时请提供 DOCX/XLSX；可正常交付 DOCX |
 | Agent 理解请求、读取本地文件和运行命令 | 内网可用的 Agent 与模型 | 部署包提供技能运行环境；Agent 服务、模型及其访问权限由内网提供 |
 
-适用平台为 Windows x64。脚本要求 Windows PowerShell 5.1 或 PowerShell 7，且组织策略允许执行相应本地脚本。不同办公软件对旧格式、字体和批注的显示可能不同，首次换环境时宜打开实际模板生成的草稿核对。
+Windows x64 脚本要求 Windows PowerShell 5.1 或 PowerShell 7，且组织策略允许执行相应本地脚本。不同办公软件对旧格式、字体和批注的显示可能不同，首次换环境时宜打开实际模板生成的草稿核对。
 
 ## 常用操作
 
@@ -73,7 +102,7 @@ $di = (Resolve-Path '.\.agents\skills\doc-integrator\run.ps1').Path
 
 原文件保持只读。默认在目标模板旁生成 `整合输出\<任务名>\`，其中包含 `草稿\`、`审核报告.md`，定稿后还有 `终稿\`。草稿批注中的链接指向来源快照，移动草稿时应保留相邻的快照目录。待确认项按任务保存；源文件换版后，已绑定原版本的回答需要重新核对。
 
-## 包内结构
+## Windows 包内结构
 
 ```text
 doc-integrator/

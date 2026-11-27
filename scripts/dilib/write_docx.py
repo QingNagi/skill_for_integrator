@@ -7,6 +7,7 @@ import datetime
 import os
 import re
 import shutil
+from collections import Counter
 from xml.etree import ElementTree as ET
 
 from .common import TOOL_AUTHOR, TOOL_INITIALS, ensure_dir, norm_text, read_json, short, write_json
@@ -54,21 +55,26 @@ class Snapshots:
         self.warns = []                                          # 快照净化中的警告（cmd_draft 一并输出）
 
     def file_for(self, alias):
-        if alias in self.names:
-            return self.names[alias]
-        md = self.job.model(alias).m
-        work = md["work"]
-        base = os.path.basename(md["path"])
-        if os.path.splitext(work)[1].lower() == ".docx" and not base.lower().endswith(".docx"):
-            base = os.path.splitext(base)[0] + ".docx"
-        if os.path.splitext(work)[1].lower() == ".xlsx" and not base.lower().endswith((".xlsx", ".xlsm")):
-            base = os.path.splitext(base)[0] + ".xlsx"
-        others = [os.path.basename(self.job.model(s["alias"]).m["path"])
-                  for s in self.job.data["sources"] if s["alias"] != alias]
-        if base in others:
-            base = alias + "_" + base
-        self.names[alias] = base
-        return base
+        if not self.names:
+            candidates = {}
+            for source in self.job.data["sources"]:
+                key = source["alias"]
+                md = self.job.model(key).m
+                base = os.path.basename(md["path"])
+                ext = os.path.splitext(md["work"])[1].lower()
+                if ext in (".docx", ".xlsx") and os.path.splitext(base)[1].lower() != ext:
+                    base = os.path.splitext(base)[0] + ext
+                candidates[key] = base
+            counts = Counter(name.casefold() for name in candidates.values())
+            reserved = set(counts)
+            for key, base in candidates.items():
+                if counts[base.casefold()] > 1:
+                    base = key + "_" + base
+                    while base.casefold() in reserved:
+                        base = key + "_" + base
+                self.names[key] = base
+                reserved.add(base.casefold())
+        return self.names[alias]
 
     def link(self, alias, ref):
         """登记引用并返回 (相对路径, 锚点, 提示)。"""

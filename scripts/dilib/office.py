@@ -28,12 +28,15 @@ try {
   $app = New-Object -ComObject $progid
   try { $app.Visible = $false } catch {}
   try { $app.DisplayAlerts = 0 } catch {}
+  if ($progid -in @('Word.Application', 'Excel.Application')) { $app.AutomationSecurity = 3 }
   foreach ($line in $jobs) {
     if (-not $line -or -not $line.Trim()) { continue }
     $p = $line.Split("`t"); [string]$src = $p[0]; [string]$dst = $p[1]; [int]$fmt = [int]$p[2]
     try {
       if ($kind -eq 'word') {
-        $doc = $app.Documents.Open($src, $false, $true, $false)
+        if ($progid -eq 'Word.Application') {
+          $doc = $app.Documents.OpenNoRepairDialog($src, $false, $true, $false)
+        } else { $doc = $app.Documents.Open($src, $false, $true, $false) }
         $done = $false
         if ($fmt -eq 17) { try { $doc.ExportAsFixedFormat($dst, 17); $done = $true } catch {} }
         if (-not $done) { try { $doc.SaveAs([ref]$dst, [ref]$fmt); $done = $true } catch {} }
@@ -160,6 +163,35 @@ def _engines(kind):
     return order
 
 
+def _user_internet_cache():
+    """Read the current user's configured Internet Cache shell folder (Word work files)."""
+    import winreg
+    key = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as folders:
+        configured, _ = winreg.QueryValueEx(folders, "Cache")
+    return os.path.expandvars(configured)
+
+
+def word_workfile_error():
+    """Check actual create/delete access from the same token before starting Word."""
+    path = 'Content.Word'
+    try:
+        path = os.path.join(_user_internet_cache(), 'Content.Word')
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            pass
+        dirs = [path] + [os.environ[k] for k in ('TEMP', 'TMP') if os.environ.get(k)]
+        for path in dict.fromkeys(dirs):
+            with tempfile.TemporaryFile(dir=path):
+                pass
+    except OSError as exc:
+        return ('Word 无法创建工作文件，当前进程不能使用 %s（%s）。'
+                '请在日常桌面 Word 中打开原件并另存为 DOCX，再用该副本作为输入；'
+                '如只需导出 PDF，可在桌面 Word 中导出。' % (path, exc))
+    return None
+
+
 def _run_ps(script, args, timeout=600):
     tmpdir = tempfile.mkdtemp(prefix="di_ps_")
     sp = os.path.join(tmpdir, "run.ps1")
@@ -223,6 +255,11 @@ def convert_many(items):
             if not pending:
                 break
             if typ == "com":
+                if val == 'Word.Application':
+                    workfile_error = word_workfile_error()
+                    if workfile_error:
+                        errors.update((dst, workfile_error) for _, dst, _ in pending)
+                        continue
                 fmap = WORD_FMT if kind == "word" else EXCEL_FMT
                 pairs = [(s, d, fmap[f]) for s, d, f in pending if f in fmap]
                 res = _com_batch(val, kind, pairs)

@@ -13,6 +13,7 @@ sys.dont_write_bytecode = True
 from fetch_vendor import mirror_opener
 
 
+DOWNLOAD_TIMEOUT_SECONDS = 90
 PYTHON_VERSION = "3.14.10"
 PYTHON_ZIP = "python-3.14.10-embed-amd64.zip"
 PYTHON_RELEASE = "https://www.python.org/downloads/release/python-31410/"
@@ -38,7 +39,7 @@ def read_verified(source_dir, name, url, size, digest):
     if source_dir:
         stream = (source_dir / name).open("rb")
     else:
-        stream = mirror_opener(url).open(url, timeout=90)
+        stream = mirror_opener(url).open(url, timeout=DOWNLOAD_TIMEOUT_SECONDS)
     with stream:
         data = stream.read(size + 1)
     if len(data) != size or hashlib.sha256(data).hexdigest() != digest:

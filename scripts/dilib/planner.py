@@ -274,7 +274,7 @@ class Planner(TablePlanningMixin):
                     else:
                         msg = '⚠【原有值，本批未核】“%s”是模板/上一批留下的值，本批没有重新核对；没有覆盖，请核对是否仍适用' % short(val, 24)
                     self.ops.append({'id': self.oid(), 'op': 'comment', 'anchor': cid, 'warn': True, 'links': [], 'text': msg})
-        if not hasattr(self, 'verdict'):
+        if not hasattr(self, 'verdict') or self.verdict[2]:
             for b in self.T.m.get('blocks', []):
                 if b['t'] != 'tbl' or 'in' in b:
                     continue
@@ -282,7 +282,7 @@ class Planner(TablePlanningMixin):
                     if re.search(r'\d+\s*只合格', c['text']):
                         cid = '%s.R%d.C%d' % (b['id'], c['r'], c['c'])
                         self.stale.append({'kind': 'stale', 'cell': cid, 'text': c['text'], 'sample': '', 'param': '合格数量'})
-                        self.ops.append({'id': self.oid(), 'op': 'comment', 'anchor': cid, 'warn': True, 'links': [], 'text': '⚠【原有值，本批未核】合格/不合格数量是上一批留下的，本批没有测试数据可以核对；没有覆盖，请核对或清除'})
+                        self.ops.append({'id': self.oid(), 'op': 'comment', 'anchor': cid, 'warn': True, 'links': [], 'text': '⚠【原有值，本批未核】原有的合格/不合格数量缺少本批完整依据；没有覆盖，请核对或清除'})
 
     def plan_fields(self):
         self.scan_existing_fields()
@@ -308,12 +308,16 @@ class Planner(TablePlanningMixin):
                 txt = b["text"]
                 cell = sh(b["cell"])
                 if re.search(r"只合格", txt) and hasattr(self, "verdict"):
-                    npass, nfail, pend = self.verdict
+                    npass, nfail, reasons = self.verdict
+                    if reasons:
+                        detail = '合格/不合格数量待核：' + '；'.join(reasons)
+                        self.report['unfilled'].append(detail)
+                        self.ops.append({'id': self.oid(), 'op': 'comment', 'anchor': cell, 'warn': True,
+                                         'text': '⚠【派生】' + detail, 'links': []})
+                        continue
                     self.ops.append({"id": self.oid(), "op": "fill_blanks", "cell": cell, "values": [str(npass), str(nfail)]})
-                    self.ops.append({"id": self.oid(), "op": "comment", "anchor": cell, "warn": bool(pend),
-                                     "text": "%s【派生】按实测值与规范限值逐项比对：%d只全部在限值内、%d只有超限%s" % (
-                                         "⚠" if pend else "", npass, nfail,
-                                         ("；另有%d项待确认（见问题清单），确认后会重新计算" % pend) if pend else ""),
+                    self.ops.append({"id": self.oid(), "op": "comment", "anchor": cell, "warn": False,
+                                     "text": "【派生】按实测值与规范限值逐项比对：%d只全部在限值内、%d只有超限" % (npass, nfail),
                                      "links": []})
                     self.report["fills"].append({"target": cell, "value": "%d只合格，%d只不合格" % (npass, nfail),
                                                  "source": "实测值比对", "how": "派生"})

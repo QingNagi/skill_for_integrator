@@ -2,13 +2,17 @@
 
 把规范、任务书或测试表中的内容填进已有 Word 模板。助手先给你一份带来源批注的草稿和一份审核报告。你可以核对原文、修改草稿，再决定是否定稿。
 
-## Windows x64 内网首用
+## 内网首次使用
 
 从仓库下载下方的完整 ZIP，再拷入内网交给 Agent。GitHub 页面上的 “Download ZIP” 下载的是源码，预装的解释器和 OCR 模型在部署包内。
 
 [下载 Windows x64 自部署包](https://github.com/QingNagi/skill_for_integrator/raw/refs/heads/main/dist/doc-integrator-offline-win64.zip) · [SHA-256 校验文件](https://github.com/QingNagi/skill_for_integrator/blob/main/dist/doc-integrator-offline-win64.zip.sha256) · [Markdown 使用手册](tools/offline/README.md)
 
-将完整部署包交给 Agent，按包内 README 放入项目技能目录，使用同级 `run.ps1` 执行实际子命令。首次运行自动部署内置 Python、PDF 后端和中英文 OCR 并自检，之后同版本直接复用。详细步骤见 [内网使用手册](tools/offline/README.md)。
+GNU/Linux 部署包支持 glibc 2.28+。Intel/AMD 服务器选择 x86_64，ARM64 服务器选择 aarch64，均使用 `bash run.sh`。
+
+[下载 Linux x86_64 套装](https://github.com/QingNagi/skill_for_integrator/raw/refs/heads/main/dist/doc-integrator-offline-linux-x86_64.tar.gz) · [下载 Linux ARM64 套装](https://github.com/QingNagi/skill_for_integrator/raw/refs/heads/main/dist/doc-integrator-offline-linux-aarch64.tar.gz)
+
+将完整部署包交给 Agent，按包内 README 放入项目技能目录，使用 Windows 的 `run.ps1` 或 Linux 的 `run.sh` 执行实际子命令。首次运行自动部署内置 Python、PDF 后端和中英文 OCR 并自检，之后同版本直接复用。详细步骤见 [内网使用手册](tools/offline/README.md)。
 
 ## 源码安装与调用
 

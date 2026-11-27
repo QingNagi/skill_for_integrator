@@ -3,6 +3,7 @@
    设计目标：模型只看提纲与局部片段，不读整份文件 —— 节省 token、避免上下文溢出。"""
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 
@@ -37,7 +38,10 @@ def load_model(path, cache_dir):
     if not os.path.exists(path):
         raise DIError("文件不存在：%s" % path)
     sha = file_sha1(path)
-    mpath = os.path.join(ensure_dir(os.path.join(cache_dir, "models")), "%s.json" % sha)
+    # Equal bytes in two directories can have different relative image links and provenance.
+    location = os.path.normcase(os.path.abspath(path))
+    key = sha + "-" + hashlib.sha256(os.fsencode(location)).hexdigest()[:16]
+    mpath = os.path.join(ensure_dir(os.path.join(cache_dir, "models")), "%s.json" % key)
     m = read_json(mpath)
     ext = os.path.splitext(path)[1].lower()
     ocr = None
@@ -46,7 +50,7 @@ def load_model(path, cache_dir):
         ocr = ocr_hint()
     if m and m.get("_v") == MODEL_VERSION and (not ocr or m.get("_pdf_reader") == ocr["signature"]):
         return m
-    media = ensure_dir(os.path.join(cache_dir, "media", sha))
+    media = ensure_dir(os.path.join(cache_dir, "media", key))
     wp = work_copy(path, cache_dir)
     wext = os.path.splitext(wp)[1].lower()
     if wext in DOC_EXT:

@@ -2,6 +2,7 @@
 name: doc-integrator
 description: Use when filling a Word template from specs, scanned PDFs or test data with source citations. 按批注摘抄、填表，可离线识别中英文扫描页。Do not use for standalone summaries.
 metadata:
+  author: QingNagi
   tags: "word, document-integration, source-tracing, verification-records"
 ---
 
@@ -13,11 +14,12 @@ metadata:
 
 ## Prerequisites
 
-在 Windows 离线套装中，先定位本 SKILL.md 所在目录，保留当前任务工作目录。把下文的 `DI` 替换成对应的执行入口，直接执行用户所需的第一个子命令。
+先识别系统，再定位本 SKILL.md 所在目录，保留当前任务工作目录。把下文的 `DI` 替换成对应的执行入口，直接执行用户所需的第一个子命令。
 
-| 当前能看到的文件 | 在 PowerShell 中如何执行 DI |
+| 当前能看到的文件 | 执行 DI 的入口 |
 |---|---|
 | SKILL.md 同级有 `run.ps1` | `& "<技能目录>/run.ps1" <子命令> ...`。此入口自动部署随包环境并继续原命令。以后仍用同一入口，同版本就绪即复用。 |
+| Linux 套装与 SKILL.md 同级有 `run.sh` | `bash "<技能目录>/run.sh" <子命令> ...`。按 `uname -m` 选择 x86_64 或 aarch64 的 GNU/Linux 套装。 |
 | 已展开的技能目录有 `runtime/python/python.exe` | `& "<技能目录>/runtime/python/python.exe" -B "<技能目录>/scripts/di.py" <子命令> ...` |
 | 仅有源码且环境已有 Python 3.8+ | `python "<技能目录>/scripts/di.py" <子命令> ...`。内网新机应使用含运行时的完整套装。 |
 
@@ -35,7 +37,17 @@ metadata:
 
 ## Instructions
 
-1. 确定要填写的目标和提供内容的来源。文件名不全时用 `find`。多个候选难以区分时请用户确认，成品示例只有用户指定才作为来源。将用户原话完整传给 `run --task`，保留电压条件、取值方法、版本号等限定词。记录返回的任务目录。
+宿主已有 Python 并需要以参数数组调用时，可直接使用标准库，例如 Linux 下的环境检查：
+
+```python
+from pathlib import Path
+from subprocess import run as run_script
+
+skill = Path(".agents/skills/doc-integrator").resolve()
+run_script(["bash", str(skill / "run.sh"), "doctor"], check=True)
+```
+
+1. 确定要填写的目标和提供内容的来源。只给文件名时先运行 `find 文件名 --exact --dir 工作区`，只给片段时用 `find 关键词`。重名时列出候选的相对路径，等用户选定后再建任务；若已明确给了目录、批次并且唯一匹配，可直接使用该路径。成品示例只有用户指定才作为来源。将用户原话完整传给 `run --task`，保留电压条件、取值方法、版本号等限定词。记录返回的任务目录。
 2. 对照规划摘要核对目标行、源章节、忽略项和已识别规则。用 `outline`、`search` 定位，再用 `show` 读回**每个选中的引用**。表格可分段读，标题命中、近似匹配或带警告的引用用 `show --full`。按 ID 让脚本复制原文和数值。区分空章节、跳过的占位文字与未读取的页。规划不符时按 [手工操作](reference/手工操作.md) 修正。
 3. 将实际待确认问题和选项交给用户，每批最多四题。Claude Code 可用 `questions --ask-json` 生成表单，用选项描述里的原编号记录回答。其他环境显示任务目录内的 `questions.md`。来源所属批次、样品号无交集、取值方式冲突或字段无来源时，由用户决定。数字相近不能确认来源；保留超限实测值和警告，0/1 标志不作测量值。用 `answer` 记录用户的实际选择，重规划后核对新问题。文件换版重新确认，各任务的回答按版本保存。仅在用户要求记住对应规则时加 `--remember`。[规则与提问](reference/规则与提问.md)
 4. 运行 `draft`，确认命令输出了草稿路径。只有用户同意按推荐出草稿时才用 `--defaults`，默认值只对本版草稿有效。交付 DOCX、来源快照位置和 `审核报告.md`，报出未填、原有值未核和未读项的实际数量。旧值保持原样并提示本批未核。请用户打开批注核对来源，修改或加批注后保存并关闭。
@@ -44,7 +56,7 @@ metadata:
 
 ## Examples
 
-用户说“按报告批注摘入任务书的进度要求，先给我审核”。在技能目录执行，模板和来源路径换成用户提供的文件。
+用户说“按报告批注摘入任务书的进度要求，先给我审核”。保留项目工作目录，模板和来源路径换成用户提供的文件。
 
 ```sh
 DI run -t "报告.docx" -s "任务书.docx" --task "按报告批注摘入任务书的进度要求，先给我审核"

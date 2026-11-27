@@ -1,0 +1,32 @@
+name: Linux offline kits
+on:
+  push:
+    paths:
+      - 'dist/*linux*'
+      - 'qa/check_linux_kit.sh'
+      - '.github/workflows/linux-offline.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build a missing candidate from pinned upstream inputs
+        run: |
+          arch=$(uname -m)
+          if [ ! -f "dist/doc-integrator-offline-linux-$arch.tar.gz" ]; then
+            python3 tools/build_linux_agent_kit.py --arch "$arch" --fetch-inputs --from-dir "$RUNNER_TEMP/inputs" --out "$RUNNER_TEMP/dist"
+            cp "$RUNNER_TEMP/dist/"* dist/
+          fi
+      - name: Validate package on its native CPU without network access
+        run: |
+          sudo unshare --net -- runuser -u "$(id -un)" -- bash qa/check_linux_kit.sh

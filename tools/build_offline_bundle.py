@@ -22,7 +22,7 @@ import fetch_vendor as fv  # noqa: E402
 
 ROOT = fv.ROOT
 TOP = 'doc-integrator'
-SKIP_DIRS = ('__pycache__', '_unpacked', '.git', 'dist', 'runtime')
+SKIP_DIRS = ('__pycache__', '_unpacked', '.git', '.github', 'qa', 'dist', 'runtime')
 SKIP_EXT = ('.pyc', '.pyo', '.part', '.tmp')
 
 

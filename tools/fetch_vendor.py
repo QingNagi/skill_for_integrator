@@ -36,6 +36,7 @@ UA = 'doc-integrator-fetch'
 MEBIBYTE = 1 << 20
 DOWNLOAD_CHUNK_BYTES = 64 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
+RETRY_DELAY_SECONDS = 2
 
 
 def checked_url(url, allowed_hosts):
@@ -103,7 +104,7 @@ def download(url, part, size, tries=8):
             pass
         else:
             continue
-        time.sleep(2)
+        time.sleep(RETRY_DELAY_SECONDS)
     return os.path.exists(part) and os.path.getsize(part) == size
 
 

@@ -1,4 +1,6 @@
+#!/usr/bin/env python3
 """Exercise the deployed interpreter, both PDF backends and the bilingual OCR reader."""
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -8,10 +10,17 @@ from dilib.common import setup_console
 from dilib.read_other import read_pdf
 
 
+NATIVE_TEXT_ORIGIN = (50, 80)
+NATIVE_FONT_POINTS = 16
+IMAGE_PIXELS_PER_POINT = 2
+
+
 def check():
     root = Path(__file__).resolve().parents[1]
-    if Path(sys.executable).resolve() != (root / "runtime" / "python" / "python.exe").resolve():
-        raise RuntimeError("请用本技能随附的 runtime/python/python.exe 运行验收。")
+    runtime = root / "runtime" / "python"
+    interpreter = runtime / ("python.exe" if os.name == "nt" else "bin/python3")
+    if Path(sys.executable).resolve() != interpreter.resolve():
+        raise RuntimeError("请用本技能随附的 Python 运行验收。")
     fitz = _bootstrap.use_pymupdf()
     fallback = _bootstrap.use_pypdf()
     if fitz is None or fallback is None:
@@ -24,9 +33,9 @@ def check():
         pdf_path = Path(tmp) / "bilingual.pdf"
         with fitz.open() as pdf:
             page = pdf.new_page()
-            page.insert_text((50, 80), "Native voltage 4.75 V", fontsize=16)
+            page.insert_text(NATIVE_TEXT_ORIGIN, "Native voltage 4.75 V", fontsize=NATIVE_FONT_POINTS)
             pix = fitz.Pixmap(image)
-            page = pdf.new_page(width=pix.width / 2, height=pix.height / 2)
+            page = pdf.new_page(width=pix.width / IMAGE_PIXELS_PER_POINT, height=pix.height / IMAGE_PIXELS_PER_POINT)
             page.insert_image(page.rect, stream=image)
             pdf.save(str(pdf_path), deflate=True)
         with pdf_path.open("rb") as stream:

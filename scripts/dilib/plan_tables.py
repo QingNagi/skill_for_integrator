@@ -288,12 +288,34 @@ class TablePlanningMixin:
                 cid = "%s.R%d.C%d" % (t["id"], r["row"], sid_col[sorted(sid_col)[0]])
                 self.ops.append({"id": self.oid(), "op": "comment", "anchor": cid,
                                  "text": "【实测】未填：%s；数据文件中无此项" % ("；".join(r.get("foot") or ["规范注明不测试"])), "links": []})
-        # 派生：合格/不合格数量
-        npass = sum(1 for s, v in res["verdict"].items() if v == "pass")
-        nfail = len(res["verdict"]) - npass
-        n_default = sum(1 for k, e in ans_map.items() if isinstance(e, dict) and e.get("_default")
-                        and (k.startswith("td:val:") or k.startswith("td:map:")))
-        self.verdict = (npass, nfail, len([q for q in res["questions"] if q["topic"] in ("数值合理性", "数据对应")]) + n_default)
+        self.record_verdict(alias, rg['id'], rows, sid_col, res)
+
+    def record_verdict(self, alias, region, rows, sample_cols, res):
+        """只汇总记录中实际出现的样品，待确认的测量或来源不能产生批次结论。"""
+        reasons = []
+        if any(i.get('key') == 'src:verify:' + alias for i in self.report.get('unverified_sources', [])):
+            reasons.append('数据来源尚未核实')
+        relevant = {'tbl:src:' + region, 'spec:drift:' + region}
+        for key in {q['key'] for q in self.questions} | set(self.answers):
+            if not (key.startswith('td:') or key in relevant):
+                continue
+            effect = self.answer_effect(key)
+            if effect is None or (isinstance(effect, dict) and (effect.get('_default') or effect.get('free'))):
+                reasons.append('测试条件、映射或数值解释仍待确认')
+                break
+        verdict = res['verdict']
+        required = [r['row'] for r in rows if r.get('sym') and not r.get('not_tested')]
+        for sid in sample_cols:
+            if verdict.get(sid) == 'fail':
+                continue
+            measured = [res['fills'].get(row, {}).get(sid, {}) for row in required]
+            if (sid not in verdict or not measured
+                    or any(c.get('value', '') == '' or c.get('how') == '文本结果' for c in measured)):
+                reasons.append('存在缺少有效必测结果的样品')
+                break
+        passes = sum(verdict.get(sid) == 'pass' for sid in sample_cols)
+        fails = sum(verdict.get(sid) == 'fail' for sid in sample_cols)
+        self.verdict = passes, fails, reasons
 
     # ================================================================= 配方：表单字段
     def check_spec_drift(self, t, rg, tcols, rows):

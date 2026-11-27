@@ -8,6 +8,7 @@ import datetime
 import glob
 import json
 import os
+import shlex
 import shutil
 import sys
 
@@ -21,6 +22,10 @@ PY = "python \"%s\"" % os.path.join(SKILL_DIR, "scripts", "di.py")
 _portable_python = os.path.join(SKILL_DIR, "runtime", "python", "python.exe")
 if os.name == "nt" and os.path.isfile(_portable_python):
     PY = '& "%s" "%s"' % (_portable_python, os.path.join(SKILL_DIR, "scripts", "di.py"))
+elif os.name == "posix":
+    _portable_python = os.path.join(SKILL_DIR, "runtime", "python", "bin", "python3")
+    if os.path.isfile(_portable_python):
+        PY = shlex.join([_portable_python, "-E", "-s", "-B", os.path.join(SKILL_DIR, "scripts", "di.py")])
 
 
 def nxt(*steps):
@@ -180,7 +185,7 @@ def cmd_new(a):
     job = Job.create(a.target, _src_list(a), task=a.task or "", out_root=a.out, name=a.name, profile=a.profile,
                      formats=[f for f in (a.format or "").split(",") if f])
     out("已建立任务：%s" % job.dir)
-    out("源文件：" + "；".join("%s=%s" % (s["alias"], os.path.basename(s["path"])) for s in job.data["sources"]))
+    out("源文件：" + "；".join("%s=%s" % (s["alias"], s["path"]) for s in job.data["sources"]))
     out("")
     for al, md in job.source_models().items():
         out(outline(md, al, max_lines=a.lines, max_depth=a.depth))
@@ -420,19 +425,28 @@ def cmd_find(a):
     home = os.path.expanduser("~")
     dirs = [os.getcwd(), os.path.join(home, "Desktop"), os.path.join(home, "桌面"),
             os.path.join(home, "OneDrive", "Desktop"), os.path.join(home, "OneDrive", "桌面")] + (a.dir or [])
+    if a.exact:
+        dirs = a.dir or [os.getcwd()]
+    queries = {name.casefold() for name in a.query}
     seen, res = set(), []
     for d in dirs:
+        d = os.path.abspath(d)
         if not os.path.isdir(d):
             continue
         for root, subdirs, files in os.walk(d):
-            subdirs[:] = [x for x in subdirs if x not in ("整合输出", "_缓存", ".git", "node_modules", ".claude")]
-            if root.count(os.sep) - d.count(os.sep) > a.depth:
+            subdirs[:] = [x for x in subdirs if x not in ("整合输出", "_缓存", ".git", "node_modules", ".claude", ".agents", ".codex")]
+            depth = a.depth if a.depth is not None else (None if a.exact else 2)
+            if depth is not None and root.count(os.sep) - d.count(os.sep) >= depth:
                 subdirs[:] = []
             for f in files:
                 p = os.path.join(root, f)
                 if f.startswith("~$") or os.path.splitext(f)[1].lower() not in DOC_TYPES or p in seen:
                     continue
                 seen.add(p)
+                if a.exact:
+                    if f.casefold() in queries:
+                        res.append((1.0, p))
+                    continue
                 stem = os.path.splitext(f)[0]
                 sc = 0.0
                 for q in a.query:
@@ -443,10 +457,11 @@ def cmd_find(a):
                     sc = max(sc, contains_score(qs, stem) * 0.7 + sim(qs, stem) * 0.3)
                 if sc >= 0.35:
                     res.append((sc, p))
-    res.sort(key=lambda x: -x[0])
+    res.sort(key=lambda x: (-x[0], x[1].casefold(), x[1]))
     if not res:
         out("没找到匹配文件。请让用户提供完整路径。")
-    for sc, p in res[:a.top]:
+    limit = a.top if a.top is not None else (None if a.exact else 6)
+    for sc, p in res[:limit]:
         out("%.2f  %s" % (sc, p))
     if len(res) > 1 and res[0][0] - res[1][0] < 0.1:
         out("（前几个匹配度接近：如不确定用哪个，请向用户确认）")
@@ -688,7 +703,7 @@ def cmd_status(a):
     qs = job.read("questions.json", []) or []
     out("任务：%s" % job.dir)
     out("目标：%s" % job.data["target"]["path"])
-    out("源文件：" + "；".join("%s=%s" % (s["alias"], os.path.basename(s["path"])) for s in job.data["sources"]))
+    out("源文件：" + "；".join("%s=%s" % (s["alias"], s["path"]) for s in job.data["sources"]))
     out("问题：共 %d，未答 %d" % (len(qs), len(pending(qs))))
     out("草稿：" + ("；".join(os.path.basename(x) for x in job.drafts()) or "无"))
     fins = glob.glob(job.p("终稿", "*"))
@@ -912,8 +927,9 @@ def main(argv=None):
     s = sp.add_parser("find", help="按描述查找文件（当前目录/桌面/指定目录），如 find DEMO-100 详细规范")
     s.add_argument("query", nargs="+")
     s.add_argument("--dir", action="append")
-    s.add_argument("--depth", type=int, default=2)
-    s.add_argument("--top", type=int, default=6)
+    s.add_argument("--exact", action="store_true", help="在指定目录或当前工作区递归列出所有同名文件，供用户确认")
+    s.add_argument("--depth", type=int, help="搜索深度，模糊查找默认 2，精确查找默认不限")
+    s.add_argument("--top", type=int, help="最多显示几项，精确查找默认显示全部")
     s.set_defaults(fn=cmd_find)
 
     s = sp.add_parser("add-op", help="追加手工操作（JSON 或 @文件）")
