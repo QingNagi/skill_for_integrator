@@ -58,7 +58,7 @@ function Get-MissingSkillFiles {
     $ioRoot = Get-OfflineIoPath $Root
     foreach ($relative in 'runtime\python\python.exe', 'runtime\python\python314._pth',
              'runtime\python\python314.dll', 'runtime\python\python314.zip', 'scripts\di.py',
-             'scripts\dilib\cli.py', 'runtime\tessdata\eng.traineddata', 'runtime\tessdata\chi_sim.traineddata',
+             'scripts\dilib\cli.py', 'scripts\dilib\draft_review.py', 'runtime\tessdata\eng.traineddata', 'runtime\tessdata\chi_sim.traineddata',
              'vendor\wheels.lock.json', 'vendor\wheels\win_amd64\pymupdf-1.28.2-cp310-abi3-win_amd64.whl',
              'vendor\py\pypdf-6.21.4-py3-none-any.whl', 'vendor\py\typing_extensions-4.16.0-py3-none-any.whl') {
         $info = [IO.FileInfo]::new([IO.Path]::Combine($ioRoot, $relative))

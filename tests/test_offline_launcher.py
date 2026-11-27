@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 
@@ -21,6 +22,8 @@ RUNTIME = Path(os.environ.get("DI_TEST_EMBEDDED_PYTHON", SOURCE / "runtime" / "p
 FAKE_CLI = """import json, os, sys
 if sys.argv[1:] in (['--help'], ['doctor']):
     print('test CLI ready')
+elif sys.argv[1:] == ['check-parent-env']:
+    print('present' if 'DI_TEST_PARENT_ONLY' in os.environ else 'absent')
 else:
     print(json.dumps([os.getcwd(), sys.argv[1:]], ensure_ascii=True))
     sys.exit(17 if 'test-exit' in sys.argv else 0)
@@ -55,6 +58,7 @@ class LauncherTests(unittest.TestCase):
                     bundle.write(RUNTIME / file, "doc-integrator/runtime/python/" + file)
             for name, contents in {
                 "scripts/di.py": FAKE_CLI, "scripts/dilib/cli.py": "# synthetic",
+                "scripts/dilib/draft_review.py": "# synthetic",
                 "scripts/offline_check.py": FAKE_SMOKE, "SKILL.md": "test",
                 "runtime/tessdata/eng.traineddata": "test",
                 "runtime/tessdata/chi_sim.traineddata": "test",
@@ -78,11 +82,21 @@ class LauncherTests(unittest.TestCase):
         self.values = ["run", "-t", "中文 路径", "-s", "quoted \"value\"", "", "a b\\", "--task", "x; $y"]
         inputs = self.base / "args.json"
         inputs.write_text(json.dumps(self.values, ensure_ascii=False), encoding="utf-8")
-        self.env = dict(os.environ, LOCALAPPDATA=str(self.cache), DI_TEST_INSTALL_LOG=str(self.log),
-                        DI_TEST_LAUNCH=str(self.kit / "run.ps1"), DI_TEST_ARGS=str(inputs))
+        marker = patch.dict(os.environ, DI_TEST_PARENT_ONLY="synthetic-marker")
+        marker.start()
+        self.addCleanup(marker.stop)
+        self.env = {key: os.environ[key] for key in
+                    ("SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "OS",
+                     "ProgramFiles", "ProgramFiles(x86)", "USERPROFILE", "APPDATA")
+                    if key in os.environ}
+        system32 = Path(self.env["SystemRoot"]) / "System32"
+        self.env.update(PATH=os.pathsep.join(map(str, (system32, system32 / "WindowsPowerShell/v1.0"))),
+                        TEMP=str(self.base), TMP=str(self.base), LOCALAPPDATA=str(self.cache),
+                        DI_TEST_INSTALL_LOG=str(self.log), DI_TEST_LAUNCH=str(self.kit / "run.ps1"),
+                        DI_TEST_ARGS=str(inputs))
 
     def call(self, shell="powershell.exe", script=None, extra_args=(), **env):
-        return subprocess.run([shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        return subprocess.run([shutil.which(shell) or shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                                str(script or self.driver), *extra_args],
                               cwd=self.project, env=dict(self.env, **env),
                               capture_output=True, timeout=90)
@@ -91,6 +105,13 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
         self.assertEqual(json.loads(result.stdout.decode("utf-8-sig").strip()),
                          [str(self.project), self.values if values is None else values])
+
+    def test_child_receives_only_launcher_environment(self):
+        Path(self.env["DI_TEST_ARGS"]).write_text('["check-parent-env"]')
+        self.assertIn("DI_TEST_PARENT_ONLY", os.environ)
+        result = self.call()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), b"absent")
 
     def test_first_use_race_and_warm_path(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
@@ -150,6 +171,13 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(model.read_bytes(), b"test")
         self.assertEqual(local.read_text(), "user")
         self.assertEqual(self.log.read_text().splitlines(), ["smoke"] * 3)
+
+        report_module = self.target / "scripts/dilib/draft_review.py"
+        report_module.unlink()
+        self.verify_output(self.call())
+        self.assertTrue(report_module.is_file())
+        self.assertEqual(local.read_text(), "user")
+        self.assertEqual(self.log.read_text().splitlines(), ["smoke"] * 4)
 
 
 if __name__ == "__main__":

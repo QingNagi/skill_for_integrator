@@ -43,8 +43,12 @@ def build_kit(output, sources):
                 archive.write(file, top + file.relative_to(root).as_posix())
             archive.write(payload, top + "payload.zip", compress_type=zipfile.ZIP_STORED)
             archive.writestr(top + "payload.sha256", digest + "\n")
+        package_sha = bundle.fv.sha256_of(kit)
+        checksum = stage / "kit.sha256"
+        checksum.write_bytes(("%s  %s\n" % (package_sha, output.name)).encode("utf-8"))
         os.replace(kit, output)
-    print(str(output), bundle.fv.sha256_of(output))
+        os.replace(checksum, output.with_name(output.name + ".sha256"))
+    print(str(output), package_sha)
 
 
 if __name__ == "__main__":

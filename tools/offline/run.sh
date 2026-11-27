@@ -19,7 +19,7 @@ case "$digest" in ''|*[!0123456789abcdef]*) fail 'payload.sha256 格式无效' ;
 ready() {
     [ -f "$1/.offline-payload.sha256" ] && [ "$(cat -- "$1/.offline-payload.sha256")" = "$digest" ] &&
         [ -x "$1/runtime/python/bin/python3" ] && [ -s "$1/scripts/di.py" ] &&
-        [ -s "$1/scripts/dilib/cli.py" ] && [ -s "$1/vendor/wheels.lock.json" ] &&
+        [ -s "$1/scripts/dilib/cli.py" ] && [ -s "$1/scripts/dilib/draft_review.py" ] && [ -s "$1/vendor/wheels.lock.json" ] &&
         [ -s "$1/runtime/tessdata/chi_sim.traineddata" ] && [ -s "$1/runtime/tessdata/eng.traineddata" ] &&
         [ -s "$1/vendor/wheels/manylinux_$expected_arch/@WHEEL@" ] &&
         [ -s "$1/vendor/py/@PYPDF@" ] && [ -s "$1/vendor/py/@TYPING@" ]

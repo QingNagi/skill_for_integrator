@@ -14,16 +14,16 @@ metadata:
 
 ## Prerequisites
 
-保留调用者当前工作目录。Claude Code 中本技能目录为 `${CLAUDE_SKILL_DIR}`；其他宿主用已加载的 SKILL.md 所在目录。用户指定项目内的 skill 时优先使用该项目入口。只定位一次，后续命令复用同一入口和任务目录。 项目已部署时，Claude 的 Bash 工具可直接执行 `bash .claude/skills/doc-integrator/run.sh …`。同名个人版和项目版并存时，沿用用户指定的项目入口。
+下文的“技能目录”指本次加载的 `SKILL.md` 所在目录。用户指定了项目内的副本时，使用该副本。将表中的入口解析为实际路径，后续调用复用它，并保持发起任务时的工作目录，以便正确定位输入和输出。
 
 | 运行环境 | 执行下文的 DI |
 |---|---|
 | Windows 项目离线包，PowerShell | `& "<技能目录>/run.ps1" <子命令> ...` |
-| Windows Git Bash 或 Linux 的 Claude Bash 工具 | `bash "<技能目录>/run.sh" <子命令> ...`。两种发布包的 Bash 入口相同。 |
-| GNU/Linux x86_64 或 aarch64 离线包 | `bash "<技能目录>/run.sh" <子命令> ...` |
-| 展开版或源码 | 有内置解释器时用它执行 `scripts/di.py`；纯源码用本机 Python 3.8+。 |
+| Windows Git Bash 或 GNU/Linux Bash 离线包 | `bash "<技能目录>/run.sh" <子命令> ...` |
+| 已展开的运行环境 | 用技能目录内的 `runtime/python/python.exe`（Windows）或 `runtime/python/bin/python3`（Linux）执行同一目录下的 `scripts/di.py`。 |
+| 纯源码 | 用本机 Python 3.8+ 执行技能目录内的 `scripts/di.py`。 |
 
-入口会自行完成首次部署。同版已就绪即执行原命令。`doctor` 只在用户要求检查或遇到运行故障时使用。模板和来源需可读，输出目录需可写。旧格式转换与 DOC/PDF 导出使用本机的办公软件。[依赖说明](vendor/README.md)
+已知部署方式时直接执行对应入口。若需判断，可在执行首条命令的同一次 shell 调用中检查同级启动脚本是否存在，缺少时使用表中的解释器。离线包会自行完成首次部署，同版已就绪即执行原命令。`doctor` 只在用户要求检查或遇到运行故障时使用。模板和来源需可读，输出目录需可写。旧格式转换与 DOC/PDF 导出使用本机的办公软件。[依赖说明](vendor/README.md)
 
 ## Available Scripts
 

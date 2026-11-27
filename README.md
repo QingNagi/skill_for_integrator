@@ -23,7 +23,7 @@ GNU/Linux 部署包支持 glibc 2.28+。Intel/AMD 服务器选择 x86_64，ARM64
 | Claude Code | `.claude/skills/doc-integrator/SKILL.md` | `/doc-integrator 按报告里的批注摘入任务书的进度要求，先出草稿` |
 | Codex | `.agents/skills/doc-integrator/SKILL.md` | `$doc-integrator 把规范和测试表填进这份验证记录` |
 
-Claude Code 也可将文件夹放入用户目录下的 `.claude/skills/`，供多个项目使用。技能支持自然语言触发。没有技能加载器时，可在技能目录直接执行 `python scripts/di.py --help`。[命令参考](reference/命令参考.md)
+Claude Code 也可将文件夹放入用户目录下的 `.claude/skills/`，供多个项目使用。请选择项目级或用户级其中一处安装。同一台机器上已经有两份 `doc-integrator` 时，先保留两份中的自定义规则与排版配置，将停用的副本移到 `skills` 目录外备份，重新开始会话。技能支持自然语言触发。没有技能加载器时，可在技能目录直接执行 `python scripts/di.py --help`。[命令参考](reference/命令参考.md)
 
 ## 提交一个任务
 
@@ -59,4 +59,12 @@ Linux 两种架构可在同一构建机生成。以下命令下载并校验固�
 
 ```sh
 python tools/build_linux_agent_kit.py --arch all --fetch-inputs --from-dir ../build-inputs --out ../release
+```
+
+## 发布评审
+
+评审 Windows 自部署包时，在源码仓库根目录用 PowerShell 执行下列命令。脚本校验发布包和 CPython 许可证，为上游署名及两条 DFARS 条款编号加载有期限的逐条豁免，并保存各项检查结果。查看报告中的 `Publication eligibility` 判断发布门禁状态。[评审工具、适用范围与报告说明](https://github.com/QingNagi/skill_for_integrator/blob/main/qa/README.md)
+
+```powershell
+pwsh -File qa/run-tier1.ps1 -Package dist/doc-integrator-offline-win64.zip
 ```
