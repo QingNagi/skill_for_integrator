@@ -11,6 +11,7 @@ import os
 import shlex
 import shutil
 import sys
+import tempfile
 
 from . import office
 from .common import DIError, TOOL_AUTHOR, ensure_dir, out, read_json, setup_console, short, write_json
@@ -726,7 +727,14 @@ def cmd_profile(a):
 
 
 def cmd_convert(a):
-    dst = office.convert(a.file, a.fmt, dst=a.out)
+    dst = a.out
+    if not dst:
+        if not os.path.isfile(a.file) or a.fmt not in office.WORD_FMT.keys() | office.EXCEL_FMT.keys():
+            raise DIError("请指定存在的文件和支持的输出格式")
+        root = ensure_dir(os.path.abspath("整合输出"))
+        folder = tempfile.mkdtemp(prefix="转换_", dir=root)
+        dst = os.path.join(folder, os.path.splitext(os.path.basename(a.file))[0] + "." + a.fmt)
+    dst = office.convert(a.file, a.fmt, dst=dst)
     out("已转换：%s" % dst)
 
 
