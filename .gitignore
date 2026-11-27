@@ -1,4 +1,10 @@
 /runtime/
+/dist/
 __pycache__/
 *.py[cod]
 *.part
+/.build/
+/traced-template-fill/vendor/py/
+/traced-template-fill/vendor/wheels/
+/traced-template-fill/vendor/_unpacked/
+/traced-template-fill/vendor/ocr/

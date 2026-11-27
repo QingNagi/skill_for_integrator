@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$skillName = 'doc-integrator'
+$skillName = 'traced-template-fill'
 $markerName = '.offline-payload.sha256'
 . (Join-Path $PSScriptRoot 'run.ps1')
 
@@ -128,7 +128,7 @@ function Install-ValidatedSkill {
     [void] [IO.Directory]::CreateDirectory($ioParent)
     # Keep the lock filename: process termination releases the exclusive handle,
     # while deleting and recreating a lock file could strand competing installers.
-    $lock = Enter-InstallLock ([IO.Path]::Combine($ioParent, '.doc-integrator.install.lock'))
+    $lock = Enter-InstallLock ([IO.Path]::Combine($ioParent, '.traced-template-fill.install.lock'))
     try {
         if (Test-OfflineReady $Target $Digest) { return }
         $repair = [IO.Directory]::Exists($ioTarget) -or [IO.File]::Exists($ioTarget)
@@ -169,7 +169,7 @@ function Install-ValidatedSkill {
                     }
                 }
             } else {
-                [IO.File]::WriteAllText([IO.Path]::Combine($ioStage, $markerName), $Digest)
+                [IO.File]::WriteAllText([IO.Path]::Combine($ioStage, $markerName), $Digest + "`r`n")
                 Complete-InstallStage $ioStage $ioTarget
             }
         } finally {

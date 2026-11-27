@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 from xml.etree.ElementTree import ParseError
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "traced-template-fill" / "scripts"))
 from dilib import _bootstrap, ooxml, safe_xml
 
 
@@ -35,13 +35,14 @@ class ProcessingTests(unittest.TestCase):
 
     def test_vendor_import_stops_after_replaced_wheel_fails_digest(self):
         tag = "win_amd64"
-        name, size, _, _ = _bootstrap.wheel_manifest()["pymupdf"][tag]
+        spec = _bootstrap.wheel_manifest()["native"][tag]["pypdfium2"]
+        name, size, _, _ = spec
         with tempfile.TemporaryDirectory() as tmp:
             wheel = Path(tmp, "wheels", tag, name)
             wheel.parent.mkdir(parents=True)
             with wheel.open("wb") as stream:
                 stream.truncate(size)
-            with patch.object(_bootstrap, "_VENDOR", tmp), patch.object(_bootstrap, "platform_tag", return_value=tag), \
-                    patch.object(_bootstrap, "_import_first") as imported:
-                self.assertIsNone(_bootstrap._from_vendor())
-                imported.assert_not_called()
+            cache = Path(tmp, "cache")
+            with self.assertRaisesRegex(ValueError, "校验失败"):
+                _bootstrap._unpack(wheel, spec, cache)
+            self.assertFalse(cache.exists())

@@ -1,0 +1,240 @@
+"""Offline PDF libraries and the pinned local Tesseract executable."""
+import base64
+import csv
+import hashlib
+import importlib
+import importlib.metadata
+import io
+import json
+import os
+import platform
+import stat
+import sys
+import sysconfig
+import tempfile
+import zipfile
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[2]
+_VENDOR = _ROOT / "vendor"
+_notes = []
+_cache = {}
+OCR_LANGUAGE = "chi_sim+eng"
+OCR_DPI = 300
+
+
+def _note(text):
+    if text not in _notes:
+        _notes.append(text)
+
+
+def notes():
+    return list(_notes)
+
+
+def init():
+    """Dependencies are loaded lazily."""
+
+
+def wheel_manifest():
+    return json.loads((_ROOT / "vendor/wheels.lock.json").read_text(encoding="utf-8"))
+
+
+def _digest(stream):
+    result = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        result.update(chunk)
+    return result
+
+
+def sha256_of(path):
+    with open(path, "rb") as stream:
+        return _digest(stream).hexdigest()
+
+
+def is_good(path, size, sha):
+    try:
+        return os.path.getsize(path) == size and sha256_of(path) == sha
+    except OSError:
+        return False
+
+
+def platform_tag():
+    if sys.maxsize <= 2 ** 32:
+        return None
+    if sys.platform == "win32" and sysconfig.get_platform() == "win-amd64":
+        return "win_amd64"
+    arch = platform.machine().lower()
+    if sys.platform.startswith("linux") and arch in ("x86_64", "aarch64"):
+        return "manylinux_" + arch
+    return None
+
+
+def _long(path):
+    """The embedded Windows runtime also works with long paths on unmanaged PCs."""
+    path = os.path.abspath(path)
+    if os.name == "nt" and not path.startswith("\\\\?\\"):
+        path = "\\\\?\\UNC\\" + path[2:] if path.startswith("\\\\") else "\\\\?\\" + path
+    return Path(path)
+
+
+def _link(info):
+    return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & 0x400)
+
+
+def _verified_cache(dest, archive):
+    if not dest.is_dir() or _link(dest.lstat()):
+        return False
+    names = {entry.filename for entry in archive.infolist() if not entry.is_dir()}
+    record = next(n for n in names if n.endswith(".dist-info/RECORD"))
+    expected = archive.read(record)
+    if (dest / record).read_bytes() != expected:
+        return False
+    # A cached directory is an import root. Reject injected files and reparse points.
+    actual = set()
+    for folder, dirs, files in os.walk(dest):
+        for item in dirs + files:
+            path = Path(folder) / item
+            if _link(path.lstat()):
+                return False
+        actual.update((Path(folder) / item).relative_to(dest).as_posix() for item in files)
+    if names != actual:
+        return False
+    checked = {record}
+    for name, h, length in csv.reader(io.StringIO(expected.decode("utf-8"))):
+        if name == record:
+            continue
+        path = dest / name
+        if path.stat().st_size != int(length):
+            return False
+        with path.open("rb") as src:
+            value = base64.urlsafe_b64encode(_digest(src).digest()).decode("ascii").rstrip("=")
+        if h != "sha256=" + value:
+            return False
+        checked.add(name)
+    return checked == actual
+
+
+def _unpack(path, spec, cache):
+    name, size, digest, _ = spec
+    with path.open("rb") as stream:
+        if path.name != name or os.fstat(stream.fileno()).st_size != size or _digest(stream).hexdigest() != digest:
+            raise ValueError("轮子校验失败：" + name)
+        stream.seek(0)
+        with zipfile.ZipFile(stream) as archive:
+            cache.mkdir(parents=True, exist_ok=True)
+            dest = cache / digest
+            if not dest.exists():
+                with tempfile.TemporaryDirectory(dir=cache) as tmp:
+                    stage = Path(tmp) / "wheel"
+                    archive.extractall(stage)
+                    try:
+                        os.rename(stage, dest)
+                    except OSError:
+                        if not dest.exists():
+                            raise
+            if not _verified_cache(dest, archive):
+                raise ValueError("轮子缓存校验失败：" + str(dest))
+    return str(dest)
+
+
+def _vendor_root():
+    return _long(os.environ.get("DI_VENDOR_DIR") or _VENDOR)
+
+
+def activate_vendor():
+    """Load the exact private wheels into this interpreter, preserving a pypdf-only kit."""
+    if os.environ.get("DI_NO_VENDOR"):
+        return False
+    if "activated" in _cache:
+        return _cache["activated"]
+    lock = wheel_manifest()
+    root = _vendor_root()
+    tag = platform_tag()
+    full = (root / "wheels" / (tag or "unsupported")).is_dir() and sys.version_info[:2] == (3, 14)
+    packages = [(root / "py", spec) for key, spec in lock["pure"].items()
+                if full or key in ("pypdf", "typing_extensions")]
+    if full:
+        packages.extend((root / "wheels" / tag, spec) for spec in lock["native"][tag].values())
+    default = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    cache = _long(os.environ.get("DI_CACHE_DIR") or default / "traced-template-fill") / "pdf-wheels-v2"
+    paths = []
+    sys.dont_write_bytecode = True
+    try:
+        for folder, spec in packages:
+            paths.append(_unpack(folder / spec[0], spec, cache))
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+        _note("内置 PDF 依赖不可用：" + str(exc))
+        return False
+    sys.path[:0] = [p for p in paths if p not in sys.path]
+    importlib.invalidate_caches()
+    _cache["activated"] = True
+    return True
+
+
+def use_pypdf():
+    activate_vendor()
+    try:
+        return importlib.import_module("pypdf")
+    except ImportError as exc:
+        _note("没有可用的 pypdf：" + str(exc))
+        return None
+
+
+def _parser_signature():
+    if "parser_signature" not in _cache:
+        activate_vendor()
+        versions = []
+        for name in ("pdfplumber", "pdfminer.six", "pypdfium2", "pypdf", "Pillow"):
+            try:
+                version = importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                version = "none"
+            versions.append(name + "=" + version)
+        _cache["parser_signature"] = ",".join(versions)
+    return _cache["parser_signature"]
+
+
+def ocr_hint(probe=False):
+    tag = platform_tag()
+    override = os.environ.get("DI_TESSERACT")
+    executable = _long(override or _ROOT / "runtime/ocr" / ("tesseract.exe" if os.name == "nt" else "tesseract"))
+    models = _long(os.environ.get("TESSDATA_PREFIX") or _ROOT / "runtime/tessdata")
+    res = {"available": False, "engine": None, "executable": str(executable), "tessdata": str(models),
+           "language": OCR_LANGUAGE, "hint": "缺少本地 Tesseract 或语言数据。"}
+    signature = "missing"
+    if os.environ.get("DI_OCR", "").strip().lower() == "off":
+        signature, res["hint"] = "off", "DI_OCR=off 已关闭扫描页识别。"
+    else:
+        try:
+            manifest = json.loads((_ROOT / "vendor/ocr.lock.json").read_text(encoding="utf-8"))
+            if override:
+                engine = sha256_of(executable)
+            else:
+                pin = manifest["binaries"][tag]
+                if not is_good(executable, pin["size"], pin["sha256"]):
+                    raise ValueError("本地 OCR 程序缺失或 SHA256 校验失败")
+                engine = pin["sha256"]
+            fingerprints = [engine]
+            for language in OCR_LANGUAGE.split("+"):
+                name = language + ".traineddata"
+                pin = manifest["models"][name]
+                if not is_good(models / name, pin["size"], pin["sha256"]):
+                    raise ValueError("语言数据缺失或 SHA256 校验失败：" + name)
+                fingerprints.append(pin["sha256"])
+            signature = ":".join(fingerprints)
+            res.update(available=True, engine="Tesseract", hint="本地 Tesseract 简体中文和英文识别。")
+            if probe:
+                activate_vendor()
+                from PIL import Image
+                from .pdf_ocr import recognize_image
+                with Image.open(_ROOT / "assets/offline-ocr.png") as image:
+                    lines = recognize_image(image, res)
+                sample = "".join("".join(line["text"].split()) for line in lines)
+                if "中文离线识别" not in sample or "OFFLINEDOCUMENT2026" not in sample.upper():
+                    raise ValueError("中英文样张识别失败")
+                res["hint"] += "中英文样张自测通过。"
+        except (OSError, ValueError, KeyError, ImportError, RuntimeError) as exc:
+            res.update(available=False, engine=None, hint=str(exc))
+    res["signature"] = "pdf-ocr-v3:%s:%s:%s:%s" % (_parser_signature(), OCR_LANGUAGE, OCR_DPI, signature)
+    return res

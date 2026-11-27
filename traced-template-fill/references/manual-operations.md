@@ -1,0 +1,46 @@
+# 手工操作（manual_ops.json / add-op）
+
+一般用 `set`、`add-section` 命令即可；它们会写入 `<任务目录>/manual_ops.json`。复杂情况可直接追加 JSON：
+```
+DI add-op <任务目录> '{"op":"set_text","cell":"T0.R51.C1","text":"2026年1月1日 至 2026年1月20日"}'
+DI add-op "<任务目录>" "@ops.json"    # 文件内可为单个对象或数组
+```
+手工操作在自动规划之后执行，同一位置的 set_text/set_cell 会覆盖自动填写。修改后重新 `DI draft`。
+
+`set`、`add-section` 和 `add-op` 会先检查位置是否存在，并把模板内容指纹和位置列表记入每条操作。表格坐标取自原模板；规划自动增行时会换算位置。模板换版后，`plan` 和 `draft` 会在写入前列出需要复核的位置。即使只改了模板排版，也需要复核一次。
+
+旧任务没有指纹时，先保留原 `manual_ops.json`，用 `DI outline <任务目录>` 对照新模板逐条核对，更新目标位置及 `clear` 列表，把完整清单另存为 `核对后.json`。运行 `DI add-op <任务目录> "@核对后.json" --replace`，整组校验通过后会重新登记。已有草稿可继续查看。
+
+## 目标位置 ID
+- 段落：`P0`、`P12`（正文段落序号，从 0 开始）
+- 单元格：`T0.R15.C8`（第0个表格、第15行、网格第8列；合并单元格用左上角）
+- 用 `DI outline <任务目录>` 的“目标文件”部分查看字段与数据区的 ID。
+
+## 操作类型
+
+| op | 字段 | 说明 |
+|---|---|---|
+| set_text | cell 或 block, text | 整格/整段替换为文字（沿用原格式） |
+| set_cell | cell, runs | 带格式替换，runs=[["V",""],["DD","_"]]；标志：`_`下标 `^`上标 `b`粗 `i`斜 `u`下划线 |
+| append_runs | cell, runs | 追加到单元格最后（空段落则填入） |
+| fill_blanks | cell, values | 按顺序填行内空白（连续空格/下划线），如 ["3","0"] |
+| comment | anchor, text, links | 加批注；links=[{"label":"打开原文","alias":"S1","ref":"T3.R2"}] |
+| add_section | anchor(目标标题段落ID), alias, sec, title?, mode(append/replace), subheading(true/false) | 把源章节摘入目标章节 |
+| insert_section | anchor, clear, items | 高级：自定义插入内容（见下） |
+
+### insert_section 的 items
+```json
+{"op": "insert_section", "anchor": "P9", "clear": ["P10"], "items": [
+  {"src": {"alias": "S1", "sec": "H14", "title": "进度要求"},
+   "group": [
+     {"type": "subheading", "text": "进度要求"},
+     {"type": "para", "runs": [["正文文字", ""]]},
+     {"type": "table", "alias": "S1", "table": "T3", "caption": "电特性"},
+     {"type": "kvtable", "header": ["序号","里程碑节点","计划完成时间"], "rows": [["1","样品提交","2025.10.31"]], "caption": "进度计划表"},
+     {"type": "figure", "alias": "S1", "fig": "F2", "caption": "功能框图"},
+     {"type": "note", "text": "注：……"}
+   ]}
+]}
+```
+- `subheading` 会自动编号为（1）（2）…；表/图题注自动编号为 表N/图N。
+- `src` 用于生成带“▶打开原文”链接的批注；`warn` 字段会让批注带⚠。

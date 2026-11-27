@@ -4,7 +4,7 @@ set -eu
 umask 077
 
 fail() {
-    printf '%s\n' "doc-integrator: $*" >&2
+    printf '%s\n' "traced-template-fill: $*" >&2
     exit 1
 }
 
@@ -32,10 +32,9 @@ ready() {
     read_checksum "$1/.offline-payload.sha256" && [ "$checksum" = "$digest" ] &&
         [ -x "$1/runtime/python/bin/python3" ] && [ -s "$1/runtime/python/lib/libpython@PYMINOR@.so.1.0" ] &&
         [ -s "$1/runtime/python/lib/python@PYMINOR@/encodings/__init__.py" ] && [ -s "$1/vendor/wheels.lock.json" ] &&
-        [ -s "$1/runtime/tessdata/chi_sim.traineddata" ] && [ -s "$1/runtime/tessdata/eng.traineddata" ] &&
-        [ -s "$1/vendor/wheels/manylinux_$expected_arch/@WHEEL@" ] &&
-        [ -s "$1/vendor/py/@PYPDF@" ] && [ -s "$1/vendor/py/@TYPING@" ] || return 1
-    for script in @SCRIPT_FILES@; do
+        [ -s "$1/rules/test-data.json" ] && [ -s "$1/assets/offline-ocr.png" ] && [ -s "$1/runtime/tessdata/chi_sim.traineddata" ] && [ -s "$1/runtime/tessdata/eng.traineddata" ] &&
+        [ -x "$1/runtime/ocr/tesseract" ] && [ -s "$1/vendor/ocr.lock.json" ] || return 1
+    for script in @REQUIRED_FILES@; do
         [ -s "$1/$script" ] || return 1
     done
     return 0
@@ -44,9 +43,14 @@ ready() {
 if ready "$kit"; then
     installed=$kit
 else
-    data_home=${XDG_DATA_HOME:-"${HOME:?Set HOME or XDG_DATA_HOME}/.local/share"}
-    case "$data_home" in /*) ;; *) fail 'XDG_DATA_HOME 或 HOME 必须为绝对路径' ;; esac
-    cache="$data_home/doc-integrator/offline"
+    if [ -n "${DI_CACHE_DIR:-}" ]; then
+        cache="$DI_CACHE_DIR/offline"
+    else
+        data_home=${XDG_DATA_HOME:-"${HOME:?Set HOME, XDG_DATA_HOME or DI_CACHE_DIR}/.local/share"}
+        case "$data_home" in /*) ;; *) fail 'XDG_DATA_HOME 或 HOME 必须为绝对路径' ;; esac
+        cache="$data_home/traced-template-fill/offline"
+    fi
+    case "$cache" in /*) ;; *) cache="$(pwd -P)/$cache" ;; esac
     installed="$cache/$digest"
     if ! ready "$installed"; then
         mkdir -p -- "$cache"
@@ -75,12 +79,18 @@ else
             if [ -e "$installed" ]; then
                 backup=$(mktemp -d -- "$cache/.previous.XXXXXXXX")
                 # Keep custom rules and retain the prior version if local files were damaged.
+                cp -- "$stage/skill/rules/test-data.json" "$stage/default-rules.json"
                 for custom in profiles rules; do
                     if [ -d "$installed/$custom" ]; then
                         mkdir -p -- "$stage/skill/$custom"
                         cp -a -- "$installed/$custom/." "$stage/skill/$custom/"
                     fi
                 done
+                if ! "$stage/skill/runtime/python/bin/python3" -I -B -c \
+                    'import json, sys; sys.exit(not isinstance(json.load(open(sys.argv[1], encoding="utf-8")), dict))' \
+                    "$stage/skill/rules/test-data.json"; then
+                    cp -- "$stage/default-rules.json" "$stage/skill/rules/test-data.json"
+                fi
                 mv -- "$installed" "$backup/skill"
                 if ! mv -- "$stage/skill" "$installed"; then
                     mv -- "$backup/skill" "$installed"

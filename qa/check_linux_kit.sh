@@ -2,9 +2,10 @@
 # Run from the repository root, as an ordinary user in an isolated network namespace.
 set -euo pipefail
 repo=$(pwd -P)
+kit_dist=${2:-"$repo/dist"}
 arch=$(uname -m)
-archive="doc-integrator-offline-linux-$arch.tar.gz"
-(cd "$repo/dist" && sha256sum --check "$archive.sha256")
+archive="traced-template-fill-offline-linux-$arch.tar.gz"
+(cd "$kit_dist" && sha256sum --check "$archive.sha256")
 [[ $(id -u) != 0 ]] || { echo 'Run acceptance as an ordinary user' >&2; exit 1; }
 python3 - <<'PY'
 import socket
@@ -22,8 +23,8 @@ trap cleanup EXIT
 export HOME="$test_dir/home"
 unset DI_CACHE_DIR DI_NO_VENDOR DI_OCR PYTHONPATH PYTHONHOME
 mkdir -p "$HOME" "$input"
-tar -xzf "$repo/dist/$archive" -C "$test_dir"
-kit="$test_dir/doc-integrator"
+tar -xzf "$kit_dist/$archive" -C "$test_dir"
+kit="$test_dir/traced-template-fill"
 entry="$kit/run.sh"
 read -r digest < "$kit/payload.sha256"
 metrics="$test_dir/samples.tsv"
@@ -91,9 +92,15 @@ for sample in 1 2 3; do
     grep -q '离线自检通过' cold.log
     check_delivery 整合输出/本次
 done
-installed="$XDG_DATA_HOME/doc-integrator/offline/$digest"
+installed="$XDG_DATA_HOME/traced-template-fill/offline/$digest"
 job="$project/整合输出/本次"
 test -x "$installed/runtime/python/bin/python3"
+test -x "$installed/runtime/ocr/tesseract"
+"$installed/runtime/ocr/tesseract" --version > "$project/tesseract-version.log"
+grep -q '^tesseract ' "$project/tesseract-version.log"
+"$installed/runtime/ocr/tesseract" --list-langs --tessdata-dir "$installed/runtime/tessdata" > "$project/languages.log"
+grep -xq chi_sim "$project/languages.log"
+grep -xq eng "$project/languages.log"
 test ! -e "$input/整合输出"
 
 # Remove the distribution media. Ready jobs must keep working without rechecking or reinstalling it.
@@ -155,6 +162,7 @@ test ! -e "$input/目标.pdf"
 printf '{"custom":true}\n' > "$installed/rules/qa-local.json"
 printf '{"profile":"local"}\n' > "$installed/profiles/qa-local.json"
 mv "$installed/scripts/dilib/office.py" "$test_dir/removed-office.py"
+: > "$installed/rules/test-data.json"
 if bash "$entry" --help > absent.log 2>&1; then exit 1; fi
 grep -Fq '本地 payload.tar.gz' absent.log
 mv "$test_dir/隔离载荷" "$kit/payload.tar.gz"
@@ -164,6 +172,7 @@ wait "$first" || { cat repair1.log; exit 1; }
 wait "$second" || { cat repair2.log; exit 1; }
 test "$(grep -h '离线自检通过' repair1.log repair2.log | wc -l)" -eq 1
 cmp "$test_dir/removed-office.py" "$installed/scripts/dilib/office.py"
+test -s "$installed/rules/test-data.json"
 grep -Fq '"custom":true' "$installed/rules/qa-local.json"
 grep -Fq '"profile":"local"' "$installed/profiles/qa-local.json"
 
@@ -174,7 +183,7 @@ cp "$entry" "$kit/payload.sha256" "$bad/"
 printf 'damaged archive\n' > "$bad/payload.tar.gz"
 if XDG_DATA_HOME="$test_dir/bad-home" bash "$bad/run.sh" --help >damaged.log 2>&1; then exit 1; fi
 grep -Fq 'SHA256 校验失败' damaged.log
-test ! -e "$test_dir/bad-home/doc-integrator/offline/$digest/.offline-payload.sha256"
+test ! -e "$test_dir/bad-home/traced-template-fill/offline/$digest/.offline-payload.sha256"
 
 python3 - "$metrics" "$arch" "$digest" "$office_status" "${1:-}" <<'PY'
 import json, platform, statistics, sys

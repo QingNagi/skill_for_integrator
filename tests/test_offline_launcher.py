@@ -20,7 +20,7 @@ import zipfile
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
-from build_win64_agent_kit import render_launcher
+from build_win64_agent_kit import render_launcher, runtime_files
 
 RUNTIME = Path(os.environ.get("DI_TEST_EMBEDDED_PYTHON", SOURCE / "runtime" / "python"))
 FAKE_CLI = """import json, os, sys
@@ -66,36 +66,43 @@ class LauncherTests(unittest.TestCase):
         self.base = Path(self.temp.name)
         self.project = self.base / "测试 project"
         self.project.mkdir()
-        self.kit = self.project / ".agents" / "skills" / "doc-integrator"
+        self.kit = self.project / ".agents" / "skills" / "traced-template-fill"
         self.kit.mkdir(parents=True)
         shutil.copy2(SOURCE / "tools/offline/install.ps1", self.kit / "install.ps1")
         self.archive = self.kit / "payload.zip"
         with zipfile.ZipFile(self.archive, "w") as bundle:
             for file in ["python.exe", "python314.dll", "python314.zip", "python314._pth",
-                         "vcruntime140.dll", "vcruntime140_1.dll"]:
+                         "vcruntime140.dll", "vcruntime140_1.dll", "zlib1.dll", "_sha2.pyd"]:
                 if (RUNTIME / file).is_file():
-                    bundle.write(RUNTIME / file, "doc-integrator/runtime/python/" + file)
+                    bundle.write(RUNTIME / file, "traced-template-fill/runtime/python/" + file)
             for name, contents in {
                 "scripts/di.py": FAKE_CLI, "scripts/dilib/cli.py": "# synthetic",
                 "scripts/dilib/draft_review.py": "# synthetic",
                 "scripts/dilib/office.py": "# synthetic office backend",
                 "scripts/offline_check.py": FAKE_SMOKE, "SKILL.md": "test",
-                "tests/fixtures/offline-ocr.png": "test",
+                "assets/offline-ocr.png": "test",
                 "runtime/tessdata/eng.traineddata": "test",
                 "runtime/tessdata/chi_sim.traineddata": "test",
-                "vendor/wheels.lock.json": "{}",
-                "vendor/wheels/win_amd64/pymupdf-1.28.2-cp310-abi3-win_amd64.whl": "test",
+                "vendor/wheels.lock.json": "{}", "vendor/ocr.lock.json": "{}",
+                "runtime/ocr/tesseract.exe": "test",
+                "vendor/wheels/win_amd64/pypdfium2-test.whl": "test",
                 "vendor/py/pypdf-6.21.4-py3-none-any.whl": "test",
                 "vendor/py/typing_extensions-4.16.0-py3-none-any.whl": "test",
-                "rules/learned.json": "{}",
+                "rules/learned.json": "{}", "rules/test-data.json": "{}",
             }.items():
-                bundle.writestr("doc-integrator/" + name, contents)
+                bundle.writestr("traced-template-fill/" + name, contents)
             template = (SOURCE / "tools/offline/run.ps1").read_text(encoding="utf-8")
             (self.kit / "run.ps1").write_text(render_launcher(template, bundle.namelist()), encoding="utf-8-sig")
         self.digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
-        (self.kit / "payload.sha256").write_text(self.digest, encoding="ascii")
+        (self.kit / "payload.sha256").write_bytes((self.digest + "\r\n").encode("ascii"))
+        with zipfile.ZipFile(self.archive) as archive:
+            required = runtime_files(archive.namelist()) + ["runtime/tessdata/eng.traineddata"]
+        template = (SOURCE / "tools/offline/run.cmd").read_text("ascii")
+        (self.kit / "run.cmd").write_text(template.replace("@PAYLOAD_SHA256@", self.digest), encoding="ascii")
+        (self.kit / "runtime-files.txt").write_text("\n".join(rel.replace("/", "\\") for rel in required), encoding="ascii")
+        shutil.copyfile(SOURCE / "tools/offline/cmd_install.py", self.kit / "cmd_install.py")
         self.cache = self.base / "local-data"
-        self.target = self.cache / "doc-integrator" / "offline" / self.digest / "doc-integrator"
+        self.target = self.cache / "traced-template-fill" / "offline" / self.digest[:24]
         self.log = self.base / "smoke.txt"
         self.driver = self.base / "driver.ps1"
         self.driver.write_text(
@@ -119,7 +126,7 @@ class LauncherTests(unittest.TestCase):
                         DI_TEST_ARGS=str(inputs))
 
     def call(self, shell="powershell.exe", script=None, extra_args=(), **env):
-        return subprocess.run([shutil.which(shell) or shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        return subprocess.run([shutil.which(shell) or shell, "-NoProfile", "-File",
                                str(script or self.driver), *extra_args],
                               cwd=self.project, env=dict(self.env, **env),
                               capture_output=True, timeout=90)
@@ -128,6 +135,39 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
         self.assertEqual(json.loads(result.stdout.decode("utf-8-sig").strip()),
                          [str(self.project), self.values if values is None else values])
+
+    def call_cmd(self, *args, **env):
+        return subprocess.run([str(self.kit / "run.cmd"), *args], cwd=self.project,
+                              env=dict(self.env, **env), capture_output=True, timeout=90)
+
+    def test_cmd_and_powershell_share_installation_and_repair(self):
+        args = ["run", "中文 文件", "test-exit"]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            cmd = pool.submit(self.call_cmd, *args)
+            ps = pool.submit(self.call)
+            self.verify_output(ps.result())
+            invoked = cmd.result()
+        self.assertEqual(invoked.returncode, 17, invoked.stderr)
+        self.assertEqual(json.loads(invoked.stdout), [str(self.project), args])
+        self.assertEqual(self.log.read_text().splitlines(), ["smoke"])
+        (self.target / "rules/test-data.json").write_bytes(b"")
+        rules = self.target / "rules/learned.json"
+        rules.write_text("local")
+        self.assertEqual(self.call_cmd("--help").returncode, 0)
+        self.assertEqual(rules.read_text(), "local")
+        self.assertEqual(self.log.read_text().splitlines(), ["smoke", "smoke"])
+        self.archive.unlink()
+        self.assertEqual(self.call_cmd("--help").returncode, 0)
+        self.assertEqual(self.log.read_text().splitlines(), ["smoke", "smoke"])
+
+    def test_cmd_rejects_damaged_payload_in_workspace_cache(self):
+        with self.archive.open("ab") as stream:
+            stream.write(b"changed")
+        result = self.call_cmd("--help", DI_CACHE_DIR=str(self.project / "local cache"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.log.exists())
+        self.assertFalse(self.cache.exists())
+        self.assertFalse(list((self.project / "local cache").rglob(".offline-payload.sha256")))
 
     def test_child_receives_only_launcher_environment(self):
         Path(self.env["DI_TEST_ARGS"]).write_text('["check-parent-env"]')
@@ -163,7 +203,7 @@ class LauncherTests(unittest.TestCase):
         deploy = self.call(script=self.kit / "install.ps1", extra_args=[
             "-Agent", "Claude", "-ProjectRoot", str(self.project)])
         self.assertEqual(deploy.returncode, 0, deploy.stderr)
-        project_skill = self.project / ".claude/skills/doc-integrator"
+        project_skill = self.project / ".claude/skills/traced-template-fill"
         library = project_skill / "scripts/dilib/office.py"
         library.unlink()
         rules = project_skill / "rules/learned.json"
@@ -211,7 +251,7 @@ class LauncherTests(unittest.TestCase):
         deploy = self.call(script=self.kit / "install.ps1", extra_args=[
             "-Agent", "Claude", "-ProjectRoot", str(self.project)])
         self.assertEqual(deploy.returncode, 0, deploy.stderr)
-        project_entry = self.project / ".claude/skills/doc-integrator/scripts/di.py"
+        project_entry = self.project / ".claude/skills/traced-template-fill/scripts/di.py"
         project_entry.write_text("print('project-local skill')", encoding="ascii")
         self.archive.unlink()
         self.assertTrue(self.target.is_dir())
@@ -234,7 +274,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(local.read_text(), "user")
         self.assertEqual(self.log.read_text().splitlines(), ["smoke"] * 3)
 
-        report_module = self.target / "scripts/dilib/draft_review.py"
+        report_module = self.target / "runtime/ocr/tesseract.exe"
         report_module.unlink()
         self.verify_output(self.call())
         self.assertTrue(report_module.is_file())

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "traced-template-fill" / "scripts"))
 from dilib import word_converter
 from test_selfcheck import CT, make_docx
 

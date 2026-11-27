@@ -54,6 +54,21 @@ class ReviewEntryTests(unittest.TestCase):
         self.assertIn("payload.zip", record["error"])
         self.assertNotIn("evaluator_exit", record)
 
+    def test_new_lite_zip_stages_exact_installable_files(self):
+        package = self.root / "lite.zip"
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("traced-template-fill/SKILL.md", "---\nname: traced-template-fill\n---\n")
+            archive.writestr("traced-template-fill/scripts/di.py", "print(1)\n")
+        digest = hashlib.sha256(package.read_bytes()).hexdigest()
+        self.review("-Package", package, "-PackageSha256", digest, "-Evaluator", "missing-test-evaluator")
+        record, = self.evidence()
+        self.assertEqual(record["skill_name"], "traced-template-fill")
+        self.assertEqual(record["package_sha256"], digest)
+        self.assertNotIn("payload_sha256", record)
+        staged = Path(record["target"])
+        self.assertEqual({p.relative_to(staged).as_posix() for p in staged.rglob("*") if p.is_file()},
+                         {"SKILL.md", "scripts/di.py"})
+
     def test_deployed_tree_cannot_contain_the_audit_snapshot(self):
         installed = self.root / "doc-integrator"
         installed.mkdir()

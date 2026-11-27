@@ -10,7 +10,7 @@ import warnings
 import zipfile
 
 sys.dont_write_bytecode = True
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'traced-template-fill', 'scripts'))
 from dilib import selfcheck as sc  # noqa: E402
 
 W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
@@ -735,7 +735,7 @@ class OutputTests(T):
 class CliTests(T):
     def run_cli(self, *args):
         import subprocess
-        di = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts', 'di.py')
+        di = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'traced-template-fill', 'scripts', 'di.py')
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8', DI_UTF8='1')
         r = subprocess.run([sys.executable, '-B', di] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=300)
         return r.returncode, r.stdout.decode('utf-8', 'replace') + r.stderr.decode('utf-8', 'replace')
@@ -792,7 +792,8 @@ class FinalizeIntegrationTests(T):
         from dilib.finalize import finalize
         job = self.FakeJob(self.d)
         body = BODY + '<w:p><w:pPr><w:jc w:val="left"/><w:spacing w:before="0"/></w:pPr></w:p>'
-        res = finalize(job, self.draft(body), reviewer_comments='keep', accept_unverified=True)
+        res = finalize(job, self.draft(body), reviewer_comments='keep', accept_unverified=True,
+                       user_quote='本次保留已列出的遗留项。')
         self.assertTrue(any(b.startswith('结构问题-') for b in res['blockers']), res['blockers'])
         with open(os.path.join(self.d, '终稿', '终稿遗留项.md'), encoding='utf-8') as f:
             self.assertIn('结构问题-', f.read())

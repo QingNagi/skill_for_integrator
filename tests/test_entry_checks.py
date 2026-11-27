@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Barrier, Lock
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "traced-template-fill" / "scripts"))
 from dilib.common import DIError, file_sha1, write_json
 from dilib.finalize import LOCAL_PATH
 from dilib.job import Job

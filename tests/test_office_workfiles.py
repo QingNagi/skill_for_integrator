@@ -6,11 +6,28 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "traced-template-fill" / "scripts"))
 from dilib import office
 
 
 class WordWorkfileTests(unittest.TestCase):
+    def test_published_lo_conversion_survives_a_busy_profile_during_cleanup(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as root:
+            src, dst = Path(root) / "note.docx", Path(root) / "out.pdf"
+            def convert(command, **kwargs):
+                stage = Path(command[command.index("--outdir") + 1])
+                (stage / "note.pdf").write_bytes(b"fresh")
+                return office.subprocess.CompletedProcess(command, 0)
+            error = io.StringIO()
+            with patch.object(office.subprocess, "run", side_effect=convert), \
+                    patch.object(office.shutil, "rmtree", side_effect=OSError("profile busy")), \
+                    contextlib.redirect_stderr(error):
+                self.assertIsNone(office._lo_convert("soffice", src, "pdf", dst))
+            self.assertEqual(dst.read_bytes(), b"fresh")
+            self.assertIn("di_lo_", error.getvalue())
+
     def test_creates_missing_content_word_under_existing_user_cache(self):
         with tempfile.TemporaryDirectory() as cache:
             with patch.object(office, "_user_internet_cache", return_value=cache):

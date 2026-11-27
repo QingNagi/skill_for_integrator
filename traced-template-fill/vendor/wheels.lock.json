@@ -1,0 +1,120 @@
+{
+  "native": {
+    "manylinux_aarch64": {
+      "Pillow": [
+        "pillow-13.0.0-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+        6516058,
+        "5933fcea5a5ba64c686f55c886a115cbfd92f2900460784a1e79909fdbafd7b6",
+        "83/16/b603274617b3e6728da3a0133d4fba1ea8d7fbe0c4ea5fef9cbffa398b8b"
+      ],
+      "cffi": [
+        "cffi-2.1.1-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        222328,
+        "58acb8ab8e295e6c5ea12f888cbb13cf21511ef2a3303a23f4325c29d17fe5c1",
+        "67/b8/b42132ca113dc567d37684437b46ca1dafc885902b02a110a02d5b511857"
+      ],
+      "cryptography": [
+        "cryptography-50.0.2-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        4731146,
+        "79def8d059362e7831389ed3be0ecdf58a89386e1271e35dd9f5af84e81bffd0",
+        "d9/69/c9bd862c3bf43d6399c433caf002df16e2dffd4be49bdf515cda38038711"
+      ],
+      "pypdfium2": [
+        "pypdfium2-5.15.2-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+        3887212,
+        "dd46e93c0c3a73f6cea8489baff6d77a5d0759dd53fbbce0aeb49c91830176fc",
+        "03/1f/7a18e64c50049dce8512239bcdb9f8469d0a0c352dd42ae85b6b01d143f8"
+      ]
+    },
+    "manylinux_x86_64": {
+      "Pillow": [
+        "pillow-13.0.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        7142574,
+        "e91c2b1cbeae768c98752e67e717e283d68dae45717b41f2d91eaee648e37b7d",
+        "1d/f2/1371707ce438ba9a43f9d24089828494ec6f9396e28cd7903aa704dd6306"
+      ],
+      "cffi": [
+        "cffi-2.1.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        221525,
+        "b0431303acaea1089ad4b3e9ce4e6518193def1118d4073ca848635ee4ea2e96",
+        "e9/02/4e7d553a7ac4b4238b38b3c1b80d486e9d4436f8d2acbf87a0997fe3f402"
+      ],
+      "cryptography": [
+        "cryptography-50.0.2-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        4719841,
+        "630ebfea3bf689d075f82316324ff7433dc447fe6bc1bfc76524b74b4a9567d2",
+        "21/69/64cef1f702bf6657e0cc186ed1a2891d50d29fb41586b254e1c07adea261"
+      ],
+      "pypdfium2": [
+        "pypdfium2-5.15.2-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        4020833,
+        "dc31aea5b0fb9fefc9b537a65f4113980b2c40798445736a7e6565bc85161e37",
+        "c8/e5/2e668bc1bc6fe22f9006694b5571a2dd2c9b874d6a21d16ee839c8f7f6ea"
+      ]
+    },
+    "win_amd64": {
+      "Pillow": [
+        "pillow-13.0.0-cp314-cp314-win_amd64.whl",
+        7281830,
+        "f7cbb7a64e7ec664775195e4f81923bc8a93d9451b963f844e59118f63147a7a",
+        "50/e2/7ad17747517e4c813dca78257d6bb593466f8231baf1384bc98d92745edb"
+      ],
+      "cffi": [
+        "cffi-2.1.1-cp314-cp314-win_amd64.whl",
+        187949,
+        "3222ba5d678f80a030e6afbcc33dc1ae5cb45facabb61cee2c7016b8432fde48",
+        "a7/06/1c3e01e3ba14c39f6d10bfbac52753b7e22259e38088e5cfe1d704918690"
+      ],
+      "cryptography": [
+        "cryptography-50.0.2-cp311-abi3-win_amd64.whl",
+        3824692,
+        "7afa5a6602a9f29af1f3a2965f831bae7c9d5d597b7cbb716d41ab3b7d89879c",
+        "9a/4f/adfc442765721292fff86d314ce385d3249d22db42295c0dd057727b60f3"
+      ],
+      "pypdfium2": [
+        "pypdfium2-5.15.2-py3-none-win_amd64.whl",
+        4187589,
+        "74d1bace34fb01c660d0b64344d5a4b7d276942b7c6623c88ab59ea21c5acfbd",
+        "fe/7f/8aa446529fa14523e5c18f89e823afc95526689f76a75efe68a82a10d850"
+      ]
+    }
+  },
+  "pure": {
+    "charset-normalizer": [
+      "charset_normalizer-3.5.3-py3-none-any.whl",
+      68878,
+      "96e268b0cbda016ac519513294fcd17032264085b600abaac58b93049477e132",
+      "d2/0d/07ab8eb9b7015274353eac2add4067bde1ab1b51912bbae505392905eedd"
+    ],
+    "pdfminer.six": [
+      "pdfminer_six-20260107-py3-none-any.whl",
+      6592252,
+      "366585ba97e80dffa8f00cebe303d2f381884d8637af4ce422f1df3ef38111a9",
+      "20/8b/28c4eaec9d6b036a52cb44720408f26b1a143ca9bce76cc19e8f5de00ab4"
+    ],
+    "pdfplumber": [
+      "pdfplumber-0.11.11-py3-none-any.whl",
+      60456,
+      "81fd7c493ac69a0645a68da49320e4e2cace05d99824439accc7b5b3d955f3bc",
+      "25/27/0b40cb094fe566445fef76ff5c458b63031baf17c246b40b116d472ce2ac"
+    ],
+    "pycparser": [
+      "pycparser-3.12-py3-none-any.whl",
+      62600,
+      "a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e",
+      "b6/ae/315bbeee126a769cbde43cf4908acb4b40408d8bf8bbf334dd7368d8dadf"
+    ],
+    "pypdf": [
+      "pypdf-6.21.4-py3-none-any.whl",
+      410430,
+      "33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c",
+      "3f/4b/77e8ad4ac42c9d93600f40541a50e9feb3a61d2bbee2d76f659346072051"
+    ],
+    "typing_extensions": [
+      "typing_extensions-4.16.0-py3-none-any.whl",
+      45571,
+      "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80"
+    ]
+  }
+}

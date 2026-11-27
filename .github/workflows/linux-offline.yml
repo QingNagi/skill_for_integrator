@@ -1,8 +1,15 @@
 name: Linux offline kits
 on:
+  pull_request:
   push:
     paths:
-      - 'dist/*linux*'
+      - 'traced-template-fill/**'
+      - 'tests/**'
+      - 'tools/build_offline_bundle.py'
+      - 'tools/fetch_vendor.py'
+      - 'tools/prepare_win64_runtime.py'
+      - 'tools/runtime_bom.py'
+      - 'tools/build_ocr_runtime.py'
       - 'tools/offline/run.sh'
       - 'tools/build_linux_agent_kit.py'
       - 'qa/check_linux_kit.sh'
@@ -17,18 +24,44 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Build a missing candidate from pinned upstream inputs
+      - name: Build and identify a native CI runtime in a disposable source copy
         run: |
+          mkdir -p "$RUNNER_TEMP/source"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
           arch=$(uname -m)
-          if [ ! -f "dist/doc-integrator-offline-linux-$arch.tar.gz" ]; then
-            python3 tools/build_linux_agent_kit.py --arch "$arch" --fetch-inputs --from-dir "$RUNNER_TEMP/inputs" --out "$RUNNER_TEMP/dist"
-            cp "$RUNNER_TEMP/dist/"* dist/
-          fi
+          case "$arch" in
+            x86_64) hash=6eb9d4d759b292c83810dbee2e9e8e3fbfbf01d864e6e9811bae711fd74e1c2f ;;
+            aarch64) hash=7994b27f3cbfcedea43f9b7552e38b45857bdf0e9a45065474092dd74e7048cf ;;
+          esac
+          python3 -m venv "$RUNNER_TEMP/zig"
+          printf 'ziglang==0.14.1 --hash=sha256:%s\n' "$hash" > "$RUNNER_TEMP/zig/requirements.txt"
+          "$RUNNER_TEMP/zig/bin/pip" install --no-deps --only-binary=:all: --require-hashes \
+            --report "$RUNNER_TEMP/zig/install.json" -r "$RUNNER_TEMP/zig/requirements.txt"
+          zig=$("$RUNNER_TEMP/zig/bin/python" -c 'import pathlib, ziglang; print(pathlib.Path(ziglang.__file__).with_name("zig"))')
+          python3 tools/build_ocr_runtime.py --platform "manylinux_$arch" --zig "$zig"
+          # The published lock identifies the Windows-hosted cross build. Record the
+          # compiler and executable from this native CI build in this copy only.
+          python3 - "manylinux_$arch" "$RUNNER_TEMP/zig/install.json" <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
+          platform, report = sys.argv[1:]
+          path = Path("traced-template-fill/vendor/ocr.lock.json")
+          lock = json.loads(path.read_text())
+          compiler = json.loads(Path(report).read_text())["install"][0]["download_info"]
+          lock["sources"]["zig-toolchain"].update(url=compiler["url"], sha256=compiler["archive_info"]["hashes"]["sha256"])
+          binary = Path(".build/vendor/ocr") / platform / "tesseract"
+          digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+          print("Native CI OCR SHA256", digest, "published release OCR SHA256", lock["binaries"][platform]["sha256"])
+          lock["binaries"][platform].update(sha256=digest, size=binary.stat().st_size)
+          path.write_text(json.dumps(lock, indent=2) + "\n")
+          PY
+          python3 tools/build_linux_agent_kit.py --arch "$arch" --fetch-inputs --from-dir "$RUNNER_TEMP/inputs" --out "$RUNNER_TEMP/dist"
       - name: Prepare a host with an existing Office conversion backend
         run: |
           if ! command -v soffice >/dev/null; then
@@ -40,7 +73,7 @@ jobs:
           fi
       - name: Validate package on its native CPU without network access
         run: |
-          sudo unshare --net -- runuser -u "$(id -un)" -- bash qa/check_linux_kit.sh "$RUNNER_TEMP/linux-offline.json"
+          sudo unshare --net -- runuser -u "$(id -un)" -- bash qa/check_linux_kit.sh "$RUNNER_TEMP/linux-offline.json" "$RUNNER_TEMP/dist"
           {
             echo "### $(uname -m) offline acceptance"
             echo 'Cold runs use independent application caches. Times are milliseconds.'
@@ -48,3 +81,7 @@ jobs:
             cat "$RUNNER_TEMP/linux-offline.json"
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-acceptance-${{ matrix.runner }}
+          path: ${{ runner.temp }}/linux-offline.json

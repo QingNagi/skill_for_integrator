@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from dilib import cli
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "traced-template-fill" / "scripts"))
+from dilib import cli, source_queries
 from dilib.content import Model
 
 
@@ -22,7 +22,7 @@ class ShowTests(unittest.TestCase):
         }, "S1")
 
     def show(self, *args):
-        with patch.object(cli, "Job") as job, patch.object(cli, "out") as out:
+        with patch.object(source_queries, "Job") as job, patch.object(source_queries, "out") as out:
             job.return_value.model.return_value = self.pdf()
             rc = cli.main(["show", "job", *args])
             job.assert_called_once_with("job")
@@ -41,7 +41,7 @@ class ShowTests(unittest.TestCase):
                  "cells": [cell(0, "row zero"), cell(1, value)]}
         model = Model({"type": "docx", "blocks": [
             dict(table, id="T0"), dict(table, id="T1")]}, "S1")
-        with patch.object(cli, "Job") as job, patch.object(cli, "out") as out:
+        with patch.object(source_queries, "Job") as job, patch.object(source_queries, "out") as out:
             job.return_value.model.return_value = model
             rc = cli.main(["show", "job", "S1:T0", "S1:T1.R1", "--rows", "1-1", "--full"])
         result = "\n".join(c.args[0] for c in out.call_args_list)

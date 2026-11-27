@@ -5,7 +5,6 @@ from contextlib import contextmanager
 import gzip
 import hashlib
 import io
-import json
 import os
 from pathlib import Path, PurePosixPath
 import posixpath
@@ -17,11 +16,14 @@ from urllib import request
 from urllib.parse import quote, urlsplit
 
 sys.dont_write_bytecode = True
-from fetch_vendor import MIRRORS, MirrorRedirect, checked_url
+from build_offline_bundle import TOP, files as skill_files, wheel_specs
+from fetch_vendor import VENDOR, MIRRORS, MirrorRedirect, checked_url
 from prepare_win64_runtime import MODEL_REV, MODEL_URL, MODELS
+from runtime_bom import ocr_binary, runtime_bom
 
 
-ROOT = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[1]
+ROOT = REPO / TOP
 RELEASE = "20261026"
 VERSION = "3.14.10"
 UPSTREAM = "https://github.com/astral-sh/python-build-standalone/releases/download/" + RELEASE + "/"
@@ -60,9 +62,9 @@ def put_bytes(archive, name, contents, mode=0o644):
     archive.addfile(entry, io.BytesIO(contents))
 
 
-def put_file(archive, name, path):
+def put_file(archive, name, path, mode=0o644):
     entry = tarfile.TarInfo(name)
-    entry.mode, entry.size = 0o644, path.stat().st_size
+    entry.mode, entry.size = mode, path.stat().st_size
     with path.open("rb") as stream:
         archive.addfile(entry, stream)
 
@@ -112,7 +114,7 @@ def cached_asset(path, url, size, sha):
     print("Fetching", path.name, flush=True)
     with tempfile.TemporaryDirectory(dir=path.parent) as tmp:
         part = Path(tmp) / path.name
-        with opener.open(request.Request(url, headers={"User-Agent": "doc-integrator-build"}), timeout=90) as src:
+        with opener.open(request.Request(url, headers={"User-Agent": "traced-template-fill-build"}), timeout=90) as src:
             with part.open("wb") as dst:
                 remaining = size
                 while True:
@@ -128,52 +130,50 @@ def cached_asset(path, url, size, sha):
 
 
 def fetch_inputs(architectures, sources, vendor):
-    manifest = json.loads((ROOT / "vendor/wheels.lock.json").read_text(encoding="utf-8"))
-    wheels = [("py", spec) for spec in manifest["pure"].values()]
+    wheels = {}
     for arch in architectures:
         name = runtime_name(arch)
         cached_asset(sources / name, UPSTREAM + quote(name), *PYTHONS[arch])
-        platform = "manylinux_" + arch
-        wheels.append(("wheels/" + platform, manifest["pymupdf"][platform]))
+        for rel, _, spec in wheel_specs("manylinux_" + arch):
+            wheels[rel] = spec
     for name, (size, sha, _) in MODELS.items():
         cached_asset(sources / name, MODEL_URL + name, size, sha)
-    for folder, (name, size, sha, wheel_path) in wheels:
-        cached_asset(vendor / folder / name, MIRRORS["pypi"] + wheel_path + "/" + name, size, sha)
+    for rel, (name, size, sha, wheel_path) in wheels.items():
+        cached_asset(vendor / rel, MIRRORS["pypi"] + wheel_path + "/" + name, size, sha)
 
 
 def build_kit(arch, out, sources, vendor):
     runtime = verified(sources / runtime_name(arch), *PYTHONS[arch])
-    manifest = json.loads((ROOT / "vendor/wheels.lock.json").read_text(encoding="utf-8"))
     platform = "manylinux_" + arch
-    wheel = manifest["pymupdf"][platform]
-    wheels = [("wheels/" + platform, wheel)] + [("py", spec) for spec in manifest["pure"].values()]
-    wheel_paths = []
-    for folder, (name, length, sha, _) in wheels:
-        wheel_paths.append(("vendor/" + folder + "/" + name,
-                            verified(vendor / folder / name, length, sha)))
+    py_minor = ".".join(VERSION.split(".")[:2])
+    bom = runtime_bom(platform, VERSION + "+" + RELEASE, UPSTREAM + quote(runtime.name), *PYTHONS[arch],
+                      "runtime/python/lib/python" + py_minor + "/LICENSE.txt", vendor)
+    engine = ocr_binary(platform, vendor)
+    wheel_paths = [("vendor/" + rel, verified(vendor / rel, spec[1], spec[2]))
+                   for rel, _, spec in wheel_specs(platform)]
     model_paths = [("runtime/tessdata/" + name, verified(sources / name, length, sha))
                    for name, (length, sha, _) in MODELS.items()]
     out = out.resolve()
     if ROOT == out or ROOT in out.parents:
         raise ValueError("Build outside the source tree.")
     out.mkdir(parents=True, exist_ok=True)
-    output = out / ("doc-integrator-offline-linux-" + arch + ".tar.gz")
+    output = out / (TOP + "-offline-linux-" + arch + ".tar.gz")
     public_docs = ["SKILL.md", "THIRD_PARTY_NOTICES.md", "vendor/README.md"]
-    public_docs.extend(p.relative_to(ROOT).as_posix() for p in sorted((ROOT / "reference").glob("*.md")))
-    files = set(public_docs + ["README.md", "tools/fetch_vendor.py", "tools/offline/README.md",
-                               "vendor/wheels.lock.json", "tests/fixtures/offline-ocr.png"])
-    for pattern in ("scripts/*.py", "scripts/dilib/*.py", "profiles/*.json", "rules/*.json", "vendor/licenses/*.txt"):
-        files.update(p.relative_to(ROOT).as_posix() for p in ROOT.glob(pattern))
-    scripts = " ".join(shlex.quote(rel) for rel in sorted(files) if rel.startswith("scripts/") and rel.endswith(".py"))
-    launcher = (ROOT / "tools/offline/run.sh").read_text(encoding="utf-8")
-    for key, value in (("ARCH", arch), ("SCRIPT_FILES", scripts), ("PYMINOR", ".".join(VERSION.split(".")[:2])),
-                       ("WHEEL", wheel[0]), ("PYPDF", manifest["pure"]["pypdf"][0]),
-                       ("TYPING", manifest["pure"]["typing_extensions"][0])):
+    public_docs.extend(p.relative_to(ROOT).as_posix() for p in sorted((ROOT / "references").glob("*.md")))
+    if (ROOT / "LICENSE").is_file():
+        public_docs.append("LICENSE")
+    files = {rel for _, rel in skill_files("source")}
+    required = [rel for rel in files if rel.startswith("scripts/") and rel.endswith(".py")]
+    required.extend(rel for rel, _ in wheel_paths)
+    launcher = (REPO / "tools/offline/run.sh").read_text(encoding="utf-8")
+    for key, value in (("ARCH", arch), ("PYMINOR", py_minor),
+                       ("REQUIRED_FILES", " ".join(shlex.quote(rel) for rel in sorted(required)))):
         launcher = launcher.replace("@" + key + "@", value)
     with tempfile.TemporaryDirectory(dir=out) as tmp:
         staging = Path(tmp)
         payload = staging / "payload.tar.gz"
         with compressed_tar(payload) as archive:
+            put_bytes(archive, "runtime-bom.cdx.json", bom)
             for rel in sorted(files):
                 if rel.endswith(".py"):
                     code = (ROOT / rel).read_bytes()
@@ -183,17 +183,19 @@ def build_kit(arch, out, sources, vendor):
                     put_file(archive, rel, ROOT / rel)
             for rel, path in wheel_paths + model_paths:
                 put_file(archive, rel, path)
+            put_file(archive, "runtime/ocr/" + engine.name, engine, 0o755)
             copy_runtime(archive, runtime)
             source_note = ("CPython %s, python-build-standalone %s, SHA256 %s\n%s%s\n"
                            "OCR models: https://github.com/tesseract-ocr/tessdata_fast/tree/%s\n" %
                            (VERSION, RELEASE, PYTHONS[arch][1], UPSTREAM, runtime.name, MODEL_REV))
             put_bytes(archive, "runtime/SOURCE.txt", source_note.encode("utf-8"))
         kit = staging / output.name
-        top = "doc-integrator/"
+        top = TOP + "/"
         with compressed_tar(kit, level=1) as archive:
+            put_bytes(archive, top + "runtime-bom.cdx.json", bom)
             for rel in public_docs:
                 put_file(archive, top + rel, ROOT / rel)
-            put_file(archive, top + "README.md", ROOT / "tools/offline/README.md")
+            put_file(archive, top + "README.md", REPO / "tools/offline/README.md")
             put_bytes(archive, top + "run.sh", launcher.encode("utf-8"), 0o755)
             put_bytes(archive, top + "payload.sha256", (digest(payload) + "\n").encode("ascii"))
             put_file(archive, top + "payload.tar.gz", payload)
@@ -209,7 +211,7 @@ def main():
     parser.add_argument("--arch", choices=["all", *PYTHONS], default="all")
     parser.add_argument("--out", required=True, type=Path, help="Release output directory")
     parser.add_argument("--from-dir", required=True, type=Path, help="Directory with original CPython archives and OCR files")
-    parser.add_argument("--vendor-dir", type=Path, default=ROOT / "vendor", help="Directory with verified py/ and wheels/ trees")
+    parser.add_argument("--vendor-dir", type=Path, default=Path(VENDOR), help="Directory with verified py/ and wheels/ trees")
     parser.add_argument("--fetch-inputs", action="store_true",
                         help="Build host only: fetch missing or mismatched pinned assets, then build")
     args = parser.parse_args()

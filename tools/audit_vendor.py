@@ -46,15 +46,13 @@ def audit(wheels, extract_to=None, check_pypi=False):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--vendor-dir", type=Path, default=Path(fv.VENDOR), help="Wheel input directory (default: .build/vendor)")
     parser.add_argument("--platform", choices=["lite", "all"] + sorted(fv.WHEELS), default="lite")
     parser.add_argument("--check-pypi", action="store_true", help="Compare with current public release metadata")
     parser.add_argument("--extract-to", type=Path, help="Extract into a new directory for independent scans")
     args = parser.parse_args(argv)
-    root = Path(fv.VENDOR)
-    wheels = [(root / "py" / spec[0], spec) for spec in fv.PURE_WHEELS.values()]
-    for platform, spec in fv.WHEELS.items():
-        if args.platform in ("all", platform):
-            wheels.append((root / "wheels" / platform / spec[0], spec))
+    root = args.vendor_dir
+    wheels = [(root / folder / spec[0], spec) for folder, spec in fv.wheel_specs(args.platform)]
     try:
         if args.extract_to:
             args.extract_to.mkdir(parents=True, exist_ok=False)

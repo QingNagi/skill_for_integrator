@@ -1,0 +1,52 @@
+{
+  "sources": {
+    "tesseract": {
+      "version": "5.5.5",
+      "url": "https://codeload.github.com/tesseract-ocr/tesseract/tar.gz/refs/tags/5.5.5",
+      "sha256": "b02cf6f37cfc95be5bf7e4b2d39e51997b1ac41f7beb4e2bd16777bb67561c79",
+      "license": "Apache-2.0",
+      "notice": "vendor/licenses/Tesseract-LICENSE.txt"
+    },
+    "leptonica": {
+      "version": "1.87.0",
+      "url": "https://codeload.github.com/DanBloomberg/leptonica/tar.gz/refs/tags/1.87.0",
+      "sha256": "fa2b40c5caea96d1bb93a97486262aed8731b69ce25a84a6bf5d25323e33f631",
+      "license": "BSD-2-Clause",
+      "notice": "vendor/licenses/Leptonica-LICENSE.txt"
+    },
+    "zig-toolchain": {
+      "version": "0.14.1",
+      "url": "https://files.pythonhosted.org/packages/9d/53/b15661c6f4442c0e1ec1223c17f7a47e5cc108cb171bbdadbc675479582d/ziglang-0.14.1-py3-none-win_amd64.whl",
+      "sha256": "e4f7e089a44d5ce34181853a90cdb8456e63c6640f5d44b844a117055326c375",
+      "license": "Zig MIT and accompanying compiler-runtime licenses",
+      "notice": "vendor/licenses/Native-runtime-notices.txt"
+    }
+  },
+  "models": {
+    "chi_sim.traineddata": {
+      "size": 2469156,
+      "sha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+    },
+    "eng.traineddata": {
+      "size": 4113088,
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+    }
+  },
+  "binaries": {
+    "manylinux_aarch64": {
+      "name": "tesseract",
+      "size": 3731224,
+      "sha256": "9f35e2521834b8cae6214483f27d5db3047666392573a73d91ad9ef3af4f93ec"
+    },
+    "manylinux_x86_64": {
+      "name": "tesseract",
+      "size": 3753040,
+      "sha256": "356b0c20942728c68c22fd5057ce120f35862c243e6663a77f9512d003d759a6"
+    },
+    "win_amd64": {
+      "name": "tesseract.exe",
+      "size": 4186624,
+      "sha256": "fb4b584e1e7f34e816d67897a6f7ede2687aa41d51679f43a21e0cfa791e6c61"
+    }
+  }
+}

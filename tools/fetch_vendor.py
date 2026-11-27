@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-'''下载并校验 vendor/wheels 里固定版本（1.28.2）的 PyMuPDF 轮子。只用标准库，兼容 Python 3.8+。
-
-  python tools/fetch_vendor.py                  下载本机平台的轮子
-  python tools/fetch_vendor.py --platform all   下载全部 5 个平台
-  python tools/fetch_vendor.py --from-dir D     不联网：在目录 D（含子目录）里找同名文件，校验后复制
-  python tools/fetch_vendor.py --verify         只校验指定平台和纯 Python 轮子
-  --mirror tuna|pypi|URL前缀                     默认先试清华镜像，再试官方；支持断点续传
-'''
+"""Download and verify pinned Python wheel inputs for the offline kits."""
 import argparse
 import http.client
 from http import HTTPStatus
@@ -20,19 +13,20 @@ import urllib.request
 from urllib.parse import urlsplit
 
 sys.dont_write_bytecode = True
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VENDOR = os.path.join(ROOT, 'vendor')
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.join(REPO, 'traced-template-fill')
+VENDOR = os.path.join(REPO, '.build', 'vendor')
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 from dilib import _bootstrap as bs  # noqa: E402
 
 _manifest = bs.wheel_manifest()
-WHEELS = _manifest['pymupdf']
+WHEELS = _manifest['native']
 PURE_WHEELS = _manifest['pure']
 is_good = bs.is_good
 sha256_of = bs.sha256_of
 MIRRORS = {'tuna': 'https://pypi.tuna.tsinghua.edu.cn/packages/',
            'pypi': 'https://files.pythonhosted.org/packages/'}
-UA = 'doc-integrator-fetch'
+UA = 'traced-template-fill-fetch'
 MEBIBYTE = 1 << 20
 DOWNLOAD_CHUNK_BYTES = 64 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
@@ -131,14 +125,21 @@ def sources(a, name, path):
         yield 'url', b + path + '/' + name
 
 
-def fetch_one(plat, a):
-    if plat in PURE_WHEELS:
-        name, size, sha, path = PURE_WHEELS[plat]
-        d = os.path.join(VENDOR, 'py')
-    else:
-        name, size, sha, path = WHEELS[plat]
-        d = os.path.join(VENDOR, 'wheels', plat)
+def wheel_specs(plat):
+    pure = PURE_WHEELS if plat != 'lite' else {key: PURE_WHEELS[key] for key in ('pypdf', 'typing_extensions')}
+    for spec in pure.values():
+        yield 'py', spec
+    tags = sorted(WHEELS) if plat == 'all' else [plat] if plat in WHEELS else []
+    for tag in tags:
+        for spec in WHEELS[tag].values():
+            yield 'wheels/' + tag, spec
+
+
+def fetch_one(folder, spec, a):
+    name, size, sha, path = spec
+    d = os.path.join(a.vendor_dir, folder)
     dest = os.path.join(d, name)
+    plat = folder
     part = dest + '.part'
     if is_good(dest, size, sha):
         print('[已就绪] %s  %s' % (plat, name))
@@ -166,6 +167,7 @@ def fetch_one(plat, a):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='按 vendor/wheels.lock.json 下载或校验离线依赖')
+    ap.add_argument('--vendor-dir', default=VENDOR, help='轮子目录，默认 .build/vendor')
     ap.add_argument('--platform', default='current',
                     help='current / all / lite / 平台名（逗号分隔）：' + ', '.join(sorted(WHEELS)))
     ap.add_argument('--mirror', help='tuna / pypi / 以 /packages/ 结尾的网址前缀；默认先 tuna 后 pypi')
@@ -178,8 +180,8 @@ def main(argv=None):
         plats = []
     elif a.platform == 'current':
         cur = bs.platform_tag()
-        if not cur or cur not in WHEELS:
-            print('本机平台没有对应的 PyMuPDF 轮子，PDF 将用 pypdf 降级。可用 --platform 指定。')
+        if cur not in WHEELS:
+            print('本机没有对应原生 wheel。可用 --platform lite 下载纯文本后备。')
             return 2
         plats = [cur]
     else:
@@ -189,7 +191,8 @@ def main(argv=None):
             print('未知平台：%s。可选：%s' % (', '.join(unknown), ', '.join(sorted(WHEELS))))
             return 2
     try:
-        results = [fetch_one(p, a) for p in list(PURE_WHEELS) + plats]
+        specs = dict(((folder, spec[0]), spec) for p in (plats or ['lite']) for folder, spec in wheel_specs(p))
+        results = [fetch_one(folder, spec, a) for (folder, name), spec in specs.items()]
     except (ValueError, OSError) as exc:
         print('无法获取轮子：%s' % exc)
         return 1

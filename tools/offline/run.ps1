@@ -39,12 +39,11 @@ function Get-PrivateSkillPath {
     $local = $env:LOCALAPPDATA
     if (-not $local) { $local = [Environment]::GetFolderPath('LocalApplicationData') }
     if (-not $local) { throw 'Cannot locate the local application data directory for this user.' }
-    $parent = [IO.Path]::GetFullPath((Join-Path $local 'doc-integrator\offline'))
-    $standard = [IO.Path]::Combine($parent, $Digest, 'doc-integrator')
-    # Leave space for the embedded interpreter's own native DLL search paths.
-    # The readiness marker and archive validation always use the full digest.
-    if ($standard.Length -gt 195) { return [IO.Path]::Combine($parent, $Digest.Substring(0, 24)) }
-    return $standard
+    $parent = if ($env:DI_CACHE_DIR) {
+        [IO.Path]::GetFullPath((Join-Path $env:DI_CACHE_DIR 'offline'))
+    } else { [IO.Path]::GetFullPath((Join-Path $local 'traced-template-fill\offline')) }
+    # Keep native DLL and OCR paths short. The marker stores the full digest.
+    return [IO.Path]::Combine($parent, $Digest.Substring(0, 24))
 }
 
 function Test-InstalledDigest {
@@ -62,7 +61,7 @@ function Get-MissingSkillFiles {
         'runtime\tessdata\chi_sim.traineddata'
         'vendor\wheels.lock.json'
         'SKILL.md'
-        'tests\fixtures\offline-ocr.png'
+        'assets\offline-ocr.png'
     )
     foreach ($relative in $required) {
         $info = [IO.FileInfo]::new([IO.Path]::Combine($ioRoot, $relative))
@@ -93,9 +92,17 @@ function Find-InstalledSkill {
     foreach ($base in $bases) {
         if ($base -and $seen.Add($base)) {
             foreach ($agentDir in '.agents', '.claude', '.codex') {
-                $candidate = [IO.Path]::Combine($base, $agentDir, 'skills', 'doc-integrator')
-                if (Test-InstalledDigest $candidate $Digest) { return $candidate }
+                foreach ($name in 'traced-template-fill', 'doc-integrator') {
+                    $candidate = [IO.Path]::Combine($base, $agentDir, 'skills', $name)
+                    if (Test-InstalledDigest $candidate $Digest) { return $candidate }
+                }
             }
+        }
+    }
+    if (-not $env:DI_CACHE_DIR -and $env:LOCALAPPDATA) {
+        $legacyParent = Join-Path $env:LOCALAPPDATA 'doc-integrator\offline'
+        foreach ($candidate in [IO.Path]::Combine($legacyParent, $Digest, 'doc-integrator'), [IO.Path]::Combine($legacyParent, $Digest.Substring(0, 24))) {
+            if (Test-InstalledDigest $candidate $Digest) { return $candidate }
         }
     }
     return $Private
@@ -118,7 +125,7 @@ function Invoke-OfflinePython {
         '"' + [regex]::Replace($quoted, '(\\+)$', '$1$1') + '"'
     }) -join ' ')
     if ($BundledDefaults) {
-        foreach ($name in 'DI_OCR', 'DI_NO_VENDOR', 'DI_CACHE_DIR') {
+        foreach ($name in 'DI_OCR', 'DI_NO_VENDOR') {
             $native.EnvironmentVariables.Remove($name)
         }
     }

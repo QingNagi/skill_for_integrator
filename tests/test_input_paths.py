@@ -8,7 +8,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "traced-template-fill" / "scripts"))
 from dilib.cli import main
 from dilib.content import load_model
 from dilib.job import Job
