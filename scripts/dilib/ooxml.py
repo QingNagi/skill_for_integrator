@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from functools import lru_cache
 import io
 import posixpath
 import re
@@ -48,6 +49,7 @@ for _p, _u in NS.items():
         ET.register_namespace(_p, _u)
 
 
+@lru_cache(maxsize=128)
 def qn(tag):
     p, l = tag.split(":")
     return "{%s}%s" % (NS[p], l)
@@ -57,6 +59,7 @@ W = NS["w"]
 R = NS["r"]
 
 
+@lru_cache(maxsize=256)
 def w(local):
     return "{%s}%s" % (W, local)
 
@@ -474,8 +477,11 @@ def make_ppr(jc=None, first_line_chars=None, line_spacing=None, line_rule="auto"
 
 def iter_skip_fallback(el):
     """深度优先遍历，跳过 mc:Fallback（避免 Choice/Fallback 的图片、文本框重复）。"""
-    stack = [el]
     fb = qn("mc:Fallback")
+    if next(el.iter(fb), None) is None:
+        yield from el.iter()
+        return
+    stack = [el]
     while stack:
         e = stack.pop()
         yield e

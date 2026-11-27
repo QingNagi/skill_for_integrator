@@ -17,6 +17,7 @@ from . import office
 from .common import DIError, TOOL_AUTHOR, ensure_dir, out, read_json, setup_console, short, write_json
 from .content import Model, load_model, outline, parse_ref, render_block, render_sheet, search
 from .draft_review import check_with_office, pending, run_selfcheck, write_report
+from .input_paths import cmd_find, expand_pattern, join_paths, split_paths
 from .job import Job
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -175,7 +176,7 @@ def cmd_doctor(a):
 def _src_list(a):
     srcs = []
     for s in a.source or []:
-        srcs += [x for x in s.split(";") if x.strip()]
+        srcs.extend(split_paths(s))
     return srcs
 
 
@@ -446,59 +447,6 @@ def cmd_add_section(a):
     nxt("重新生成草稿：%s draft \"%s\"" % (PY, job.dir))
 
 
-def cmd_find(a):
-    """按用户描述中的文件名（可不完整）在当前目录、桌面及指定目录中查找文件。"""
-    from .common import contains_score, sim
-    from .job import DOC_TYPES
-    home = os.path.expanduser("~")
-    dirs = [os.getcwd(), os.path.join(home, "Desktop"), os.path.join(home, "桌面"),
-            os.path.join(home, "OneDrive", "Desktop"), os.path.join(home, "OneDrive", "桌面")] + (a.dir or [])
-    if a.exact:
-        dirs = a.dir or [os.getcwd()]
-    queries = {name.casefold() for name in a.query}
-    seen, res = set(), []
-    for d in dirs:
-        d = os.path.abspath(d)
-        if not os.path.isdir(d):
-            continue
-        for root, subdirs, files in os.walk(d):
-            subdirs[:] = [x for x in subdirs if x not in ("整合输出", "_缓存", ".git", "node_modules", ".claude", ".agents", ".codex")]
-            depth = a.depth if a.depth is not None else (None if a.exact else 2)
-            if depth is not None and root.count(os.sep) - d.count(os.sep) >= depth:
-                subdirs[:] = []
-            for f in files:
-                p = os.path.join(root, f)
-                if f.startswith("~$") or os.path.splitext(f)[1].lower() not in DOC_TYPES or p in seen:
-                    continue
-                seen.add(p)
-                if a.exact:
-                    if f.casefold() in queries:
-                        res.append((1.0, p))
-                    continue
-                stem = os.path.splitext(f)[0]
-                sc = 0.0
-                for q in a.query:
-                    qs, qe = os.path.splitext(q) if os.path.splitext(q)[1].lower() in DOC_TYPES else (q, "")
-                    if f.lower() == q.lower() or (qe and stem.lower() == qs.lower()):
-                        sc = 1.0
-                        break
-                    sc = max(sc, contains_score(qs, stem) * 0.7 + sim(qs, stem) * 0.3)
-                if sc >= 0.35:
-                    res.append((sc, p))
-    res.sort(key=lambda x: (-x[0], x[1].casefold(), x[1]))
-    if not res:
-        out("没找到匹配文件。请让用户提供完整路径。")
-    limit = a.top if a.top is not None else (None if a.exact else 6)
-    for sc, p in res[:limit]:
-        out("%.2f  %s" % (sc, p))
-    if a.exact:
-        names = [os.path.basename(p).casefold() for _, p in res]
-        if len(names) != len(set(names)):
-            out("有同名文件。请列出对应路径，请用户确认需要哪份。")
-    elif len(res) > 1 and res[0][0] - res[1][0] < 0.1:
-        out("（前几个匹配度接近：如不确定用哪个，请向用户确认）")
-
-
 def cmd_add_op(a):
     job = Job(a.job)
     ops = job.read("manual_ops.json", []) or []
@@ -712,14 +660,18 @@ def cmd_batch(a):
         raise DIError("请提供清单文件或批量任务 json 路径")
     if a.action == "init":
         rows = []
-        targets = sorted(set(sum([glob.glob(t) for t in a.targets.split(";")], [])))
-        common = [s for s in (a.sources or "").split(";") if s.strip()]
+        if not a.targets:
+            raise DIError("批量建清单需要 --targets 指定目标文件或通配符")
+        targets = sorted({p for t in split_paths(a.targets) for p in expand_pattern(t) if os.path.isfile(p)})
+        if not targets:
+            raise DIError("没有找到匹配的目标文件：%s" % a.targets)
+        common = split_paths(a.sources)
         for t in targets:
             stem = os.path.splitext(os.path.basename(t))[0]
             srcs = list(common)
             if a.pair:
-                srcs += glob.glob(a.pair.replace("{stem}", stem))
-            rows.append({"目标": t, "源文件": ";".join(srcs), "任务": a.task or "", "格式": a.format or "", "排版": ""})
+                srcs += expand_pattern(a.pair.replace("{stem}", stem))
+            rows.append({"目标": t, "源文件": join_paths(srcs), "任务": a.task or "", "格式": a.format or "", "排版": ""})
         path = a.manifest or "批量清单.csv"
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
             wr = csv.DictWriter(f, fieldnames=["目标", "源文件", "任务", "格式", "排版"])
@@ -735,7 +687,7 @@ def cmd_batch(a):
         jobs = []
         for r in rows:
             tgt = r.get("目标") or r.get("target")
-            srcs = [x for x in (r.get("源文件") or r.get("sources") or "").split(";") if x.strip()]
+            srcs = split_paths(r.get("源文件") or r.get("sources"))
             job = Job.create(tgt, srcs, task=r.get("任务") or r.get("task") or a.task or "", out_root=out_root,
                              profile=(r.get("排版") or r.get("profile") or None),
                              formats=[x for x in (r.get("格式") or r.get("formats") or "").split(",") if x])
@@ -822,7 +774,7 @@ def main(argv=None):
         s.add_argument("--target", "-t", required=True, help="目标文件（要填写/整合的文档）")
         s.add_argument("--source", "-s", action="append", required=True, help="源文件，可多次；也可用分号分隔或文件夹/通配符")
         s.add_argument("--task", default="", help="用户原话（任务描述，用于识别取值规则）")
-        s.add_argument("--out", help="输出根目录（默认 目标所在目录/整合输出）")
+        s.add_argument("--out", help="输出根目录（默认 当前工作目录/整合输出）")
         s.add_argument("--name", help="任务目录名")
         s.add_argument("--profile", help="排版规范名或 json 路径（默认=文档摘抄提示词）")
         s.add_argument("--format", help="终稿额外格式，如 doc,pdf,md")
@@ -968,4 +920,7 @@ def main(argv=None):
         return rc if isinstance(rc, int) else 0
     except DIError as e:
         out("错误：%s" % e)
+        return 2
+    except OSError as e:
+        out("文件访问失败：%s" % e)
         return 2

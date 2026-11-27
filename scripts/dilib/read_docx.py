@@ -15,6 +15,7 @@ import re
 
 from .common import norm_text, short
 from .numbering import Numbering
+from .text_patterns import CAPTION_RE, HEAD_PATTERNS
 from .ooxml import (Package, W, W_P, W_PPR, W_R, W_RPR, W_T, W_TBL, W_TC, W_TR, W_VAL, iter_skip_fallback, qn, w)
 
 SYMBOL_MAP = {
@@ -32,19 +33,6 @@ V_SHAPE = qn("v:shape")
 R_EMBED = qn("r:embed")
 R_LINK = qn("r:link")
 R_ID = qn("r:id")
-
-HEAD_PATTERNS = [
-    (1, re.compile(r"^第[一二三四五六七八九十百零\d]+[章篇部分]")),
-    (2, re.compile(r"^[一二三四五六七八九十]+[、．.]")),
-    (3, re.compile(r"^\d+[、]")),
-    # 用先行断言而不“吃掉”编号后的首字，sub() 去编号时才不会截掉标题第一个字
-    (3, re.compile(r"^\d+\.(?!\d)\s*(?=[^\d\s])")),
-    (4, re.compile(r"^\d+\.\d+(?!\.\d)\s*(?=[^\d\s.])")),
-    (5, re.compile(r"^\d+\.\d+\.\d+\s*(?=[^\d\s.])")),
-    (6, re.compile(r"^[（(][一二三四五六七八九十]+[)）]")),
-    (7, re.compile(r"^[（(]\d+[)）]")),
-]
-CAPTION_RE = re.compile(r"^\s*(表|图|附表|附图|Table|Figure|Fig\.)\s*([A-Z]?[\d.\-－]+)", re.I)
 
 
 def _rpr_flags(rpr):
@@ -287,6 +275,8 @@ class DocxReader:
                 continue
             part = self.pkg.resolve("word/document.xml", tgt)
             imgs.append({"part": part, "kind": kind})
+        if not imgs:
+            return []
         # 尺寸
         ext = None
         for e in iter_skip_fallback(p):

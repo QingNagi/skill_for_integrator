@@ -12,7 +12,7 @@ import zipfile
 from .safe_xml import parse_xml
 
 from .common import DIError, short
-from .read_docx import CAPTION_RE, HEAD_PATTERNS
+from .text_patterns import CAPTION_RE, HEAD_PATTERNS
 
 S = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 RNS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,17 +19,24 @@ import zipfile
 
 
 SOURCE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SOURCE / "tools"))
+from build_win64_agent_kit import render_launcher
+
 RUNTIME = Path(os.environ.get("DI_TEST_EMBEDDED_PYTHON", SOURCE / "runtime" / "python"))
 FAKE_CLI = """import json, os, sys
 if sys.argv[1:] in (['--help'], ['doctor']):
     print('test CLI ready')
 elif sys.argv[1:] == ['check-parent-env']:
     print('present' if 'DI_TEST_PARENT_ONLY' in os.environ else 'absent')
+elif sys.argv[1:] == ['check-user-options']:
+    print(os.environ['DI_OCR'] + '/' + os.environ['DI_NO_VENDOR'])
 else:
     print(json.dumps([os.getcwd(), sys.argv[1:]], ensure_ascii=True))
     sys.exit(17 if 'test-exit' in sys.argv else 0)
 """
 FAKE_SMOKE = """import os, time
+if os.environ.get('DI_OCR') == 'off' or os.environ.get('DI_NO_VENDOR'):
+    raise SystemExit(8)
 with open(os.environ['DI_TEST_INSTALL_LOG'], 'a', encoding='utf-8') as log:
     log.write('smoke\\n')
 time.sleep(0.35)
@@ -48,8 +56,7 @@ class LauncherTests(unittest.TestCase):
         self.project.mkdir()
         self.kit = self.project / ".agents" / "skills" / "doc-integrator"
         self.kit.mkdir(parents=True)
-        for script in ("install.ps1", "run.ps1"):
-            shutil.copy2(SOURCE / "tools" / "offline" / script, self.kit / script)
+        shutil.copy2(SOURCE / "tools/offline/install.ps1", self.kit / "install.ps1")
         self.archive = self.kit / "payload.zip"
         with zipfile.ZipFile(self.archive, "w") as bundle:
             for file in ["python.exe", "python314.dll", "python314.zip", "python314._pth",
@@ -59,7 +66,9 @@ class LauncherTests(unittest.TestCase):
             for name, contents in {
                 "scripts/di.py": FAKE_CLI, "scripts/dilib/cli.py": "# synthetic",
                 "scripts/dilib/draft_review.py": "# synthetic",
+                "scripts/dilib/office.py": "# synthetic office backend",
                 "scripts/offline_check.py": FAKE_SMOKE, "SKILL.md": "test",
+                "tests/fixtures/offline-ocr.png": "test",
                 "runtime/tessdata/eng.traineddata": "test",
                 "runtime/tessdata/chi_sim.traineddata": "test",
                 "vendor/wheels.lock.json": "{}",
@@ -69,6 +78,8 @@ class LauncherTests(unittest.TestCase):
                 "rules/learned.json": "{}",
             }.items():
                 bundle.writestr("doc-integrator/" + name, contents)
+            template = (SOURCE / "tools/offline/run.ps1").read_text(encoding="utf-8")
+            (self.kit / "run.ps1").write_text(render_launcher(template, bundle.namelist()), encoding="utf-8-sig")
         self.digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
         (self.kit / "payload.sha256").write_text(self.digest, encoding="ascii")
         self.cache = self.base / "local-data"
@@ -112,6 +123,34 @@ class LauncherTests(unittest.TestCase):
         result = self.call()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), b"absent")
+
+    def test_first_use_checks_bundle_and_keeps_user_options(self):
+        Path(self.env["DI_TEST_ARGS"]).write_text('["check-user-options"]')
+        result = self.call(DI_OCR="off", DI_NO_VENDOR="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), b"off/1")
+
+    def test_first_use_with_minimal_windows_environment(self):
+        self.env.pop("OS", None)
+        self.env.pop("PATHEXT", None)
+        self.verify_output(self.call())
+
+    def test_damaged_project_repaired_in_place_with_private_cache_present(self):
+        self.verify_output(self.call())
+        deploy = self.call(script=self.kit / "install.ps1", extra_args=[
+            "-Agent", "Claude", "-ProjectRoot", str(self.project)])
+        self.assertEqual(deploy.returncode, 0, deploy.stderr)
+        project_skill = self.project / ".claude/skills/doc-integrator"
+        library = project_skill / "scripts/dilib/office.py"
+        library.unlink()
+        rules = project_skill / "rules/learned.json"
+        rules.write_text("kept")
+        (project_skill / "scripts/di.py").write_text("print('project')", encoding="ascii")
+        result = self.call()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), b"project")
+        self.assertEqual(library.read_text(), "# synthetic office backend")
+        self.assertEqual(rules.read_text(), "kept")
 
     def test_first_use_race_and_warm_path(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:

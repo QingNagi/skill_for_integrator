@@ -84,14 +84,16 @@ def is_good(path, size, sha):
 def platform_tag():
     '''返回本机对应 vendor/wheels 下的目录名；不支持返回 None。'''
     try:
-        import platform
-        m = platform.machine().lower()
         if sys.maxsize <= 2 ** 32:
             return None
+        if sys.platform.startswith('win'):
+            # The wheel must match the interpreter ABI, even under Windows emulation.
+            import sysconfig
+            return 'win_amd64' if sysconfig.get_platform() == 'win-amd64' else None
+        import platform
+        m = platform.machine().lower()
         x64 = m in ('amd64', 'x86_64')
         arm = m in ('arm64', 'aarch64')
-        if sys.platform.startswith('win'):
-            return 'win_amd64' if x64 else None
         if sys.platform == 'darwin':
             return 'macosx_x86_64' if x64 else ('macosx_arm64' if arm else None)
         if sys.platform.startswith('linux'):
@@ -127,14 +129,17 @@ def _wheel_usable(name):
     return cur >= need if abi == 'abi3' else cur == need
 
 
-def _find_wheel(plat):
+def _wheel_candidate(plat):
     spec = wheel_manifest()['pymupdf'].get(plat)
-    if spec:
-        name, size, digest, _ = spec
-        path = os.path.join(_VENDOR, 'wheels', plat, name)
-        if _wheel_usable(name) and is_good(path, size, digest):
-            return path
-    return None
+    if not spec or not _wheel_usable(spec[0]):
+        return None
+    name, size, digest, _ = spec
+    return os.path.join(_VENDOR, 'wheels', plat, name), size, digest
+
+
+def _find_wheel(plat):
+    candidate = _wheel_candidate(plat)
+    return candidate[0] if candidate and is_good(*candidate) else None
 
 
 def _cache_dirs(plat):
@@ -152,22 +157,30 @@ def _cache_dirs(plat):
     return [_local_io_path(path) for path in out]
 
 
-def _linked(path):
-    info = os.lstat(path)
+def _is_link(info):
     return stat.S_ISLNK(info.st_mode) or bool(getattr(info, 'st_file_attributes', 0) & 0x400)
 
 
 def _cached_wheel_matches(dest, archive):
     """与已校验轮子内的 RECORD 比对，额外的可导入文件也会使缓存失效。"""
-    if not os.path.isdir(dest) or _linked(dest):
+    if not os.path.isdir(dest) or _is_link(os.lstat(dest)):
         return False
-    files = set()
-    for folder, dirs, names in os.walk(dest):
-        if any(_linked(os.path.join(folder, name)) for name in dirs + names):
-            return False
-        files.update(os.path.relpath(os.path.join(folder, n), dest).replace(os.sep, '/') for n in names)
+    sizes = {}
+    pending = [(dest, '')]
+    while pending:
+        folder, prefix = pending.pop()
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                info = entry.stat(follow_symlinks=False)
+                if _is_link(info):
+                    return False
+                name = prefix + entry.name
+                if stat.S_ISDIR(info.st_mode):
+                    pending.append((entry.path, name + '/'))
+                else:
+                    sizes[name] = info.st_size
     members = {i.filename for i in archive.infolist() if not i.is_dir()}
-    if files != members:
+    if sizes.keys() != members:
         return False
     record = next(name for name in members if name.endswith('.dist-info/RECORD'))
     expected_record = archive.read(record)
@@ -179,7 +192,7 @@ def _cached_wheel_matches(dest, archive):
         if name == record:
             continue
         path = os.path.join(dest, *name.split('/'))
-        if name not in members or os.path.getsize(path) != int(size):
+        if sizes.get(name) != int(size):
             return False
         with open(path, 'rb') as src:
             actual = base64.urlsafe_b64encode(_digest(src).digest()).decode('ascii').rstrip('=')
@@ -237,11 +250,12 @@ def _from_vendor():
     if not plat:
         _note('本平台没有内置 PyMuPDF 轮子，PDF 降级')
         return None
-    whl = _find_wheel(plat)
-    if not whl:
+    candidate = _wheel_candidate(plat)
+    if not candidate or not os.path.isfile(candidate[0]):
         _note('vendor 里没有本平台可用的 PyMuPDF 轮子，PDF 降级')
         return None
-    dest = _unpack(whl, plat)
+    # _unpack verifies the pinned digest on the same handle it then extracts.
+    dest = _unpack(candidate[0], plat)
     if not dest:
         _note('PyMuPDF 轮子或解压缓存校验失败，或目录不可写，PDF 降级')
         return None

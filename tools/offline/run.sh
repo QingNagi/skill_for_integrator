@@ -12,17 +12,33 @@ kit=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 expected_arch='@ARCH@'
 [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = "$expected_arch" ] ||
     fail "需要 Linux $expected_arch。请选择与本机架构匹配的离线包。"
-digest=$(cat -- "$kit/payload.sha256")
+# Read one checksum without spawning cat on every warm invocation.
+read_checksum() {
+    [ -f "$1" ] && [ -r "$1" ] || return 1
+    checksum=
+    {
+        IFS= read -r checksum || [ -n "$checksum" ] || return 1
+        while IFS= read -r extra || [ -n "$extra" ]; do
+            [ -z "$extra" ] || return 1
+        done
+    } < "$1"
+}
+read_checksum "$kit/payload.sha256" || fail '无法读取有效的 payload.sha256'
+digest=$checksum
 case "$digest" in ''|*[!0123456789abcdef]*) fail 'payload.sha256 格式无效' ;; esac
 [ "${#digest}" = 64 ] || fail 'payload.sha256 长度无效'
 
 ready() {
-    [ -f "$1/.offline-payload.sha256" ] && [ "$(cat -- "$1/.offline-payload.sha256")" = "$digest" ] &&
-        [ -x "$1/runtime/python/bin/python3" ] && [ -s "$1/scripts/di.py" ] &&
-        [ -s "$1/scripts/dilib/cli.py" ] && [ -s "$1/scripts/dilib/draft_review.py" ] && [ -s "$1/vendor/wheels.lock.json" ] &&
+    read_checksum "$1/.offline-payload.sha256" && [ "$checksum" = "$digest" ] &&
+        [ -x "$1/runtime/python/bin/python3" ] && [ -s "$1/runtime/python/lib/libpython@PYMINOR@.so.1.0" ] &&
+        [ -s "$1/runtime/python/lib/python@PYMINOR@/encodings/__init__.py" ] && [ -s "$1/vendor/wheels.lock.json" ] &&
         [ -s "$1/runtime/tessdata/chi_sim.traineddata" ] && [ -s "$1/runtime/tessdata/eng.traineddata" ] &&
         [ -s "$1/vendor/wheels/manylinux_$expected_arch/@WHEEL@" ] &&
-        [ -s "$1/vendor/py/@PYPDF@" ] && [ -s "$1/vendor/py/@TYPING@" ]
+        [ -s "$1/vendor/py/@PYPDF@" ] && [ -s "$1/vendor/py/@TYPING@" ] || return 1
+    for script in @SCRIPT_FILES@; do
+        [ -s "$1/$script" ] || return 1
+    done
+    return 0
 }
 
 if ready "$kit"; then

@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'dist/*linux*'
+      - 'tools/offline/run.sh'
+      - 'tools/build_linux_agent_kit.py'
       - 'qa/check_linux_kit.sh'
       - '.github/workflows/linux-offline.yml'
   workflow_dispatch:
@@ -29,4 +31,11 @@ jobs:
           fi
       - name: Validate package on its native CPU without network access
         run: |
-          sudo unshare --net -- runuser -u "$(id -un)" -- bash qa/check_linux_kit.sh
+          sudo unshare --net -- runuser -u "$(id -un)" -- bash qa/check_linux_kit.sh "$RUNNER_TEMP/linux-offline.json"
+          {
+            echo "### $(uname -m) offline acceptance"
+            echo 'Cold runs use independent application caches. Times are milliseconds.'
+            echo '~~~json'
+            cat "$RUNNER_TEMP/linux-offline.json"
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"

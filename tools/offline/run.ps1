@@ -49,18 +49,22 @@ function Get-PrivateSkillPath {
 
 function Test-InstalledDigest {
     param([string] $Root, [string] $Digest)
-    $marker = Get-OfflineIoPath (Join-Path $Root '.offline-payload.sha256')
+    $marker = Get-OfflineIoPath ([IO.Path]::Combine($Root, '.offline-payload.sha256'))
     return ([IO.File]::Exists($marker) -and [IO.File]::ReadAllText($marker).Trim() -eq $Digest)
 }
 
 function Get-MissingSkillFiles {
     param([string] $Root)
     $ioRoot = Get-OfflineIoPath $Root
-    foreach ($relative in 'runtime\python\python.exe', 'runtime\python\python314._pth',
-             'runtime\python\python314.dll', 'runtime\python\python314.zip', 'scripts\di.py',
-             'scripts\dilib\cli.py', 'scripts\dilib\draft_review.py', 'runtime\tessdata\eng.traineddata', 'runtime\tessdata\chi_sim.traineddata',
-             'vendor\wheels.lock.json', 'vendor\wheels\win_amd64\pymupdf-1.28.2-cp310-abi3-win_amd64.whl',
-             'vendor\py\pypdf-6.21.4-py3-none-any.whl', 'vendor\py\typing_extensions-4.16.0-py3-none-any.whl') {
+    $required = @(
+        # @RUNTIME_FILES@
+        'runtime\tessdata\eng.traineddata'
+        'runtime\tessdata\chi_sim.traineddata'
+        'vendor\wheels.lock.json'
+        'SKILL.md'
+        'tests\fixtures\offline-ocr.png'
+    )
+    foreach ($relative in $required) {
         $info = [IO.FileInfo]::new([IO.Path]::Combine($ioRoot, $relative))
         if (-not $info.Exists -or $info.Length -eq 0) { $relative }
     }
@@ -89,12 +93,46 @@ function Find-InstalledSkill {
     foreach ($base in $bases) {
         if ($base -and $seen.Add($base)) {
             foreach ($agentDir in '.agents', '.claude', '.codex') {
-                $candidate = Join-Path $base "$agentDir\skills\doc-integrator"
-                if (Test-OfflineReady $candidate $Digest) { return $candidate }
+                $candidate = [IO.Path]::Combine($base, $agentDir, 'skills', 'doc-integrator')
+                if (Test-InstalledDigest $candidate $Digest) { return $candidate }
             }
         }
     }
-    if (Test-OfflineReady $Private $Digest) { return $Private }
+    return $Private
+}
+
+function Invoke-OfflinePython {
+    param([string] $Python, [string[]] $Arguments, [ref] $ExitCode, [switch] $BundledDefaults)
+    # Windows PowerShell 5.1 drops empty argv entries and embedded quotes in native
+    # calls. Quote each token according to the Windows argv rules on every host.
+    $native = [Diagnostics.ProcessStartInfo]::new()
+    $native.FileName = $python
+    $native.WorkingDirectory = (Get-Location).ProviderPath
+    $native.UseShellExecute = $false
+    $native.RedirectStandardOutput = $true
+    $native.RedirectStandardError = $true
+    $native.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $native.StandardErrorEncoding = [Text.Encoding]::UTF8
+    $native.Arguments = (@($Arguments | ForEach-Object {
+        $quoted = [regex]::Replace([string] $_, '(\\*)"', '$1$1\"')
+        '"' + [regex]::Replace($quoted, '(\\+)$', '$1$1') + '"'
+    }) -join ' ')
+    if ($BundledDefaults) {
+        foreach ($name in 'DI_OCR', 'DI_NO_VENDOR', 'DI_CACHE_DIR') {
+            $native.EnvironmentVariables.Remove($name)
+        }
+    }
+    $process = [Diagnostics.Process]::Start($native)
+    try {
+        $stderr = $process.StandardError.ReadToEndAsync()
+        while ($null -ne ($line = $process.StandardOutput.ReadLine())) { Write-Output $line }
+        $process.WaitForExit()
+        $errors = $stderr.GetAwaiter().GetResult()
+        if ($errors) { [Console]::Error.Write($errors) }
+        $ExitCode.Value = $process.ExitCode
+    } finally {
+        $process.Dispose()
+    }
 }
 
 if ($MyInvocation.InvocationName -eq '.') { return }
@@ -105,37 +143,14 @@ $cliArguments = @($args)
 $digest = Read-OfflineDigest $PSScriptRoot
 $private = Get-PrivateSkillPath $digest
 $installed = Find-InstalledSkill $digest $private $PSScriptRoot
-if (-not $installed) {
-    & (Join-Path $PSScriptRoot 'install.ps1') -PrivateCache | ForEach-Object { [Console]::Error.WriteLine($_) }
-    $installed = $private
+if (-not (Test-OfflineReady $installed $digest)) {
+    $options = if ($installed -eq $private) { @{ PrivateCache = $true } } else { @{ RepairRoot = $installed } }
+    & (Join-Path $PSScriptRoot 'install.ps1') @options | ForEach-Object { [Console]::Error.WriteLine($_) }
 }
 
 $executionRoot = Get-OfflineExecutionRoot $installed
 $python = Get-OfflineIoPath (Join-Path $executionRoot 'runtime\python\python.exe')
 $entry = Get-OfflineIoPath (Join-Path $executionRoot 'scripts\di.py')
-# Windows PowerShell 5.1 drops empty argv entries and embedded quotes in native
-# calls. Quote each token according to the Windows argv rules on every host.
-$native = [Diagnostics.ProcessStartInfo]::new()
-$native.FileName = $python
-$native.WorkingDirectory = (Get-Location).ProviderPath
-$native.UseShellExecute = $false
-$native.RedirectStandardOutput = $true
-$native.RedirectStandardError = $true
-$native.StandardOutputEncoding = [Text.Encoding]::UTF8
-$native.StandardErrorEncoding = [Text.Encoding]::UTF8
-$native.Arguments = (@(@('-B', '-X', 'utf8', $entry) + $cliArguments | ForEach-Object {
-    $quoted = [regex]::Replace([string] $_, '(\\*)"', '$1$1\"')
-    '"' + [regex]::Replace($quoted, '(\\+)$', '$1$1') + '"'
-}) -join ' ')
-$process = [Diagnostics.Process]::Start($native)
-try {
-    $stderr = $process.StandardError.ReadToEndAsync()
-    while ($null -ne ($line = $process.StandardOutput.ReadLine())) { Write-Output $line }
-    $process.WaitForExit()
-    $errors = $stderr.GetAwaiter().GetResult()
-    if ($errors) { [Console]::Error.Write($errors) }
-    $code = $process.ExitCode
-} finally {
-    $process.Dispose()
-}
+$code = 0
+Invoke-OfflinePython $python (@('-B', '-X', 'utf8', $entry) + $cliArguments) ([ref]$code)
 exit $code

@@ -12,6 +12,18 @@ import build_offline_bundle as bundle
 from prepare_win64_runtime import stage_runtime
 
 
+def render_launcher(template, members):
+    """Embed runtime files from this payload, including modules imported by individual commands."""
+    top = "doc-integrator/"
+    files = sorted(name[len(top):] for name in members if name.startswith(top) and not name.endswith("/")
+                   and (name.startswith(top + "scripts/") and name.endswith(".py")
+                        or name.startswith(top + "runtime/python/") and Path(name).suffix.lower()
+                        in {".exe", ".dll", ".pyd", ".zip", "._pth"}
+                        or name.startswith(top + "vendor/") and name.endswith(".whl")))
+    entries = "\n".join("        '" + rel.replace("/", "\\").replace("'", "''") + "'" for rel in files)
+    return template.replace("        # @RUNTIME_FILES@", entries)
+
+
 def build_kit(output, sources):
     root = Path(bundle.ROOT)
     if root in output.parents:
@@ -31,11 +43,13 @@ def build_kit(output, sources):
             bad = archive.testzip()
             if bad:
                 raise ValueError("损坏的发布文件：" + bad)
+            launcher = render_launcher((root / "tools/offline/run.ps1").read_text(encoding="utf-8"), archive.namelist())
         digest = bundle.fv.sha256_of(payload)
         kit = stage / "kit.zip"
         with zipfile.ZipFile(kit, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             top = "doc-integrator/"
-            for name in ("run.ps1", "install.ps1", "README.md"):
+            archive.writestr(top + "run.ps1", launcher.encode("utf-8-sig"))
+            for name in ("install.ps1", "README.md"):
                 archive.write(root / "tools" / "offline" / name, top + name)
             archive.writestr(top + "run.sh", (root / "tools/offline/windows-bash.sh").read_text(encoding="utf-8"))
             docs = [root / "SKILL.md", root / "vendor/README.md", root / "THIRD_PARTY_NOTICES.md"]

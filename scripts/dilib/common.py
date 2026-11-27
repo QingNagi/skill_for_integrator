@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import unicodedata
+import uuid
 
 TOOL_AUTHOR = "文档整合助手"      # 草稿批注作者名（定稿时据此删除）
 TOOL_INITIALS = "AI"
@@ -46,14 +47,20 @@ def read_json(path, default=None):
 
 
 def write_json(path, data, compact=False):
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        if compact:
-            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-        else:
-            json.dump(data, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, path)
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    tmp = os.path.join(directory, ".di-" + uuid.uuid4().hex + ".tmp")
+    stream = open(tmp, "x", encoding="utf-8")
+    try:
+        with stream:
+            if compact:
+                json.dump(data, stream, ensure_ascii=False, separators=(",", ":"))
+            else:
+                json.dump(data, stream, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def cache_hasher():
@@ -143,13 +150,19 @@ def bigrams(s):
     return toks
 
 
+def token_scores(query, candidate):
+    """Return query coverage and similarity using one intersection."""
+    shared = len(query & candidate)
+    if not shared:
+        return 0.0, 0.0
+    union_size = len(query) + len(candidate) - shared
+    similarity = shared / min(len(query), len(candidate)) * 0.7 + shared / union_size * 0.3
+    return shared / len(query), similarity
+
+
 def sim(a, b):
     """基于二元组的相似度（0~1），对中文短语足够稳健且无需分词库。"""
-    A, B = bigrams(a), bigrams(b)
-    if not A or not B:
-        return 0.0
-    inter = len(A & B)
-    return inter / min(len(A), len(B)) * 0.7 + inter / len(A | B) * 0.3
+    return token_scores(bigrams(a), bigrams(b))[1]
 
 
 def contains_score(query, text):

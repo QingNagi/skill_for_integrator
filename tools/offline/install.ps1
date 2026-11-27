@@ -6,7 +6,9 @@ param(
     [Parameter(ParameterSetName='Discoverable')]
     [string] $ProjectRoot,
     [Parameter(Mandatory=$true, ParameterSetName='Cache')]
-    [switch] $PrivateCache
+    [switch] $PrivateCache,
+    [Parameter(Mandatory=$true, ParameterSetName='Repair')]
+    [string] $RepairRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,14 +82,12 @@ function Test-OfflineSkill {
     $python = Get-OfflineIoPath $python
     $entry = Get-OfflineIoPath $entry
     $smoke = Get-OfflineIoPath $smoke
-    & $python -B --version
-    if ($LASTEXITCODE -ne 0) { throw "Embedded Python could not start (exit $LASTEXITCODE)." }
-    & $python -B $entry --help | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Skill CLI help failed (exit $LASTEXITCODE). If Windows reports a DLL pathname is too long, use install.ps1 -ProjectRoot with a shorter existing project path." }
-    & $python -B $entry doctor
-    if ($LASTEXITCODE -ne 0) { throw "Skill CLI doctor failed (exit $LASTEXITCODE)." }
-    & $python -B $smoke
-    if ($LASTEXITCODE -ne 0) { throw "Offline document/OCR check failed (exit $LASTEXITCODE). For a Windows native model/DLL path-length error, use install.ps1 -ProjectRoot with a shorter existing project path." }
+    # CLI import/argument parsing and real bilingual PDF processing exercise the installed runtime.
+    $code = 0
+    Invoke-OfflinePython $python @('-B', '-X', 'utf8', $entry, '--help') ([ref]$code) -BundledDefaults | Out-Null
+    if ($code -ne 0) { throw "Skill CLI help failed (exit $code). If Windows reports a DLL pathname is too long, use install.ps1 -ProjectRoot with a shorter existing project path." }
+    Invoke-OfflinePython $python @('-B', '-X', 'utf8', $smoke) ([ref]$code) -BundledDefaults
+    if ($code -ne 0) { throw "Offline document/OCR check failed (exit $code). For a Windows native model/DLL path-length error, use install.ps1 -ProjectRoot with a shorter existing project path." }
 }
 
 function Enter-InstallLock {
@@ -177,11 +177,14 @@ function Install-ValidatedSkill {
     }
 }
 
-if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitOperatingSystem) {
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or -not [Environment]::Is64BitOperatingSystem) {
     throw 'This offline kit requires 64-bit Windows with x64 application support.'
 }
 $digest = Read-OfflineDigest $PSScriptRoot
-if ($PrivateCache) {
+if ($RepairRoot) {
+    $target = [IO.Path]::GetFullPath($RepairRoot)
+    if (-not (Test-InstalledDigest $target $digest)) { throw "Cannot repair an unmanaged or different kit: $target" }
+} elseif ($PrivateCache) {
     $target = Get-PrivateSkillPath $digest
 } else {
     if ($ProjectRoot) {

@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -15,6 +16,37 @@ from dilib.write_docx import Snapshots
 
 
 class InputPathsTests(unittest.TestCase):
+    def test_literal_and_list_sources_in_single_and_batch_tasks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "目标[1].txt"
+            target.write_text("目标", encoding="utf-8")
+            a, b = root / "来件;甲.txt", root / "来件乙.txt"
+            for src in (a, b):
+                src.write_text("数据", encoding="utf-8")
+            manifest = root / "清单.csv"
+            out = root / "输出"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["new", "-t", str(target), "-s", str(a), "-s", str(b),
+                                       "--out", str(out), "--name", "单份"]), 0)
+                self.assertEqual(main(["batch", "init", str(manifest), "--targets", str(target),
+                                       "--sources", str(a), "--pair", str(b)]), 0)
+                self.assertEqual(main(["batch", "new", str(manifest), "--out", str(out)]), 0)
+            jobs = list(out.glob("*/job.json"))
+            self.assertEqual(len(jobs), 2)
+            for job in jobs:
+                data = json.loads(job.read_text(encoding="utf-8"))
+                self.assertEqual([s["path"] for s in data["sources"]], [str(a), str(b)])
+
+    def test_batch_init_reports_missing_targets_and_preserves_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "清单.csv"
+            manifest.write_text("已有清单", encoding="utf-8")
+            for extra in ([], ["--targets", str(Path(tmp) / "*.docx")]):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(["batch", "init", str(manifest), *extra]), 2)
+                self.assertEqual(manifest.read_text(encoding="utf-8"), "已有清单")
+
     def test_default_output_uses_callers_directory_for_external_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

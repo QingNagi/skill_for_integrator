@@ -1,36 +1,160 @@
 #!/usr/bin/env bash
-# Run from the repository root in a fresh Linux network namespace.
+# Run from the repository root, as an ordinary user in an isolated network namespace.
 set -euo pipefail
-dist="$(pwd)/dist"
-archive="doc-integrator-offline-linux-$(uname -m).tar.gz"
-(cd "$dist" && sha256sum -c "$archive.sha256")
-test_dir=$(mktemp -d)
-trap 'rm -rf -- "$test_dir"' EXIT
-export HOME="$test_dir/home" XDG_DATA_HOME="$test_dir/测试 用户"
-mkdir -p "$HOME" "$test_dir/项目" "$XDG_DATA_HOME"
-tar -xzf "$dist/$archive" -C "$test_dir"
-entry="$test_dir/doc-integrator/run.sh"
-cd "$test_dir/项目"
-# Host Python only produces the synthetic input. The kit must use its own interpreter.
+repo=$(pwd -P)
+arch=$(uname -m)
+archive="doc-integrator-offline-linux-$arch.tar.gz"
+(cd "$repo/dist" && sha256sum --check "$archive.sha256")
+[[ $(id -u) != 0 ]] || { echo 'Run acceptance as an ordinary user' >&2; exit 1; }
 python3 - <<'PY'
-from zipfile import ZipFile
-with ZipFile("目标.docx", "w") as z:
-    z.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
-    z.writestr("_rels/.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
-    z.writestr("word/document.xml", '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>交接记录</w:t></w:r></w:p><w:sectPr/></w:body></w:document>')
+import socket
+interfaces = {name for _, name in socket.if_nameindex()}
+assert interfaces <= {'lo'}, f'Run inside a fresh network namespace: {interfaces}'
 PY
-printf '验收读数为 17.8 V。\n' > 测量.txt
-mkdir -p "$test_dir/输入"
-mv 目标.docx 测量.txt "$test_dir/输入/"
-bash "$entry" run -t "$test_dir/输入/目标.docx" -s "$test_dir/输入/测量.txt" --name 本次 --task '核对原始读数' 2>首次.log
-cat 首次.log
-grep -q '离线自检通过' 首次.log
-test -s 整合输出/本次/plan.json
-test ! -e "$test_dir/输入/整合输出"
-mv "$test_dir/doc-integrator/payload.tar.gz" "$test_dir/隔离载荷"
-bash "$entry" search 整合输出/本次 '验收读数' | tee 搜索.log
-ref=$(sed -nE 's/^.*(S1:P[0-9]+).*17\.8 V.*$/\1/p' 搜索.log | head -1)
+
+test_dir=$(mktemp -d)
+input="$test_dir/只读 输入"
+cleanup() {
+    if [[ -d $input ]]; then chmod u+w "$input"; fi
+    rm -rf -- "$test_dir"
+}
+trap cleanup EXIT
+export HOME="$test_dir/home"
+unset DI_CACHE_DIR DI_NO_VENDOR DI_OCR PYTHONPATH PYTHONHOME
+mkdir -p "$HOME" "$input"
+tar -xzf "$repo/dist/$archive" -C "$test_dir"
+kit="$test_dir/doc-integrator"
+entry="$kit/run.sh"
+read -r digest < "$kit/payload.sha256"
+metrics="$test_dir/samples.tsv"
+
+# Host Python produces synthetic inputs and measures child processes. The skill uses embedded Python.
+python3 - "$input/目标.docx" <<'PY'
+import sys
+from zipfile import ZipFile
+with ZipFile(sys.argv[1], 'w') as z:
+    z.writestr('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+    z.writestr('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+    z.writestr('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>交接记录</w:t></w:r></w:p><w:sectPr/></w:body></w:document>')
+PY
+printf '验收读数为 17.8 V。\n' > "$input/测量.txt"
+chmod 444 "$input/目标.docx" "$input/测量.txt"
+chmod 555 "$input"
+
+measure() {
+    python3 - "$metrics" "$@" <<'PY'
+import subprocess, sys, time
+from pathlib import Path
+metrics, label, log, *command = sys.argv[1:]
+with open(log, 'wb') as stream:
+    start = time.perf_counter_ns()
+    result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT)
+    elapsed = (time.perf_counter_ns() - start) / 1_000_000
+with open(metrics, 'a', encoding='utf-8') as samples:
+    print(label, f'{elapsed:.3f}', sep='\t', file=samples)
+if result.returncode:
+    sys.stderr.buffer.write(Path(log).read_bytes())
+    sys.exit(result.returncode)
+PY
+}
+
+task=(run -t "$input/目标.docx" -s "$input/测量.txt" --task '核对原始读数')
+for sample in 1 2 3; do
+    export XDG_DATA_HOME="$test_dir/测试 用户 $sample"
+    project="$test_dir/工作 项目 $sample"
+    mkdir -p "$project"
+    cd "$project"
+    measure cold_run "$project/cold.log" bash "$entry" "${task[@]}" --name 本次
+    grep -q '离线自检通过' cold.log
+    test -s 整合输出/本次/plan.json
+done
+installed="$XDG_DATA_HOME/doc-integrator/offline/$digest"
+job="$project/整合输出/本次"
+test -x "$installed/runtime/python/bin/python3"
+test ! -e "$input/整合输出"
+
+# Remove the distribution media. Ready jobs must keep working without rechecking or reinstalling it.
+mv "$kit/payload.tar.gz" "$test_dir/隔离载荷"
+direct=("$installed/runtime/python/bin/python3" -E -s -B -X utf8 "$installed/scripts/di.py")
+for sample in 1 2 3 4 5; do
+    measure warm_run "warm-run-$sample.log" bash "$entry" "${task[@]}" --name "复用$sample"
+    test -s "整合输出/复用$sample/plan.json"
+    # Alternate measurements of the same read-only query to see the warm launcher's overhead.
+    if (( sample % 2 )); then
+        measure warm_search "search-$sample.log" bash "$entry" search "$job" '验收读数'
+        measure direct_search "direct-$sample.log" "${direct[@]}" search "$job" '验收读数'
+    else
+        measure direct_search "direct-$sample.log" "${direct[@]}" search "$job" '验收读数'
+        measure warm_search "search-$sample.log" bash "$entry" search "$job" '验收读数'
+    fi
+    cmp "search-$sample.log" "direct-$sample.log"
+done
+if grep -q '离线自检通过' warm-run-*.log search-*.log; then exit 1; fi
+ref=$(sed -nE 's/^.*(S1:P[0-9]+).*17\.8 V.*$/\1/p' search-1.log | head -1)
 test -n "$ref"
-bash "$entry" show 整合输出/本次 "$ref" --full | tee 回读.log
-grep -Fq '17.8 V' 回读.log
-echo "First use, bilingual OCR and warm reuse passed on $(uname -m)"
+bash "$installed/run.sh" show "$job" "$ref" --full > show.log
+grep -Fq '17.8 V' show.log
+bash "$entry" "${task[@]}" --out "$test_dir/指定 输出" --name 指定 > explicit.log
+test -s "$test_dir/指定 输出/指定/plan.json"
+test ! -e "$input/整合输出"
+if bash "$entry" unknown-test-command >error.log 2>&1; then exit 1; else test "$?" -eq 2; fi
+
+if command -v soffice >/dev/null || command -v libreoffice >/dev/null || [[ -x /opt/libreoffice/program/soffice ]]; then
+    bash "$entry" convert "$input/目标.docx" pdf > convert.log
+    pdfs=(整合输出/转换_*/目标.pdf)
+    test "${#pdfs[@]}" -eq 1
+    test -s "${pdfs[0]}"
+    grep -aFq '%PDF-' "${pdfs[0]}"
+    office_status=converted
+else
+    if bash "$entry" convert "$input/目标.docx" pdf >convert.log 2>&1; then exit 1; fi
+    grep -Fq '转换失败' convert.log
+    office_status=unavailable
+fi
+test ! -e "$input/整合输出"
+test ! -e "$input/目标.pdf"
+
+# Missing code must trigger recovery before Python starts, while keeping user rules and profiles.
+printf '{"custom":true}\n' > "$installed/rules/qa-local.json"
+printf '{"profile":"local"}\n' > "$installed/profiles/qa-local.json"
+mv "$installed/scripts/dilib/office.py" "$test_dir/removed-office.py"
+if bash "$entry" --help > absent.log 2>&1; then exit 1; fi
+grep -Fq '本地 payload.tar.gz' absent.log
+mv "$test_dir/隔离载荷" "$kit/payload.tar.gz"
+bash "$entry" --help >repair1.log 2>&1 & first=$!
+bash "$entry" --help >repair2.log 2>&1 & second=$!
+wait "$first" || { cat repair1.log; exit 1; }
+wait "$second" || { cat repair2.log; exit 1; }
+test "$(grep -h '离线自检通过' repair1.log repair2.log | wc -l)" -eq 1
+cmp "$test_dir/removed-office.py" "$installed/scripts/dilib/office.py"
+grep -Fq '"custom":true' "$installed/rules/qa-local.json"
+grep -Fq '"profile":"local"' "$installed/profiles/qa-local.json"
+
+# A fresh user must reject altered bytes and must not publish an installation marker.
+bad="$test_dir/损坏套装"
+mkdir "$bad"
+cp "$entry" "$kit/payload.sha256" "$bad/"
+printf 'damaged archive\n' > "$bad/payload.tar.gz"
+if XDG_DATA_HOME="$test_dir/bad-home" bash "$bad/run.sh" --help >damaged.log 2>&1; then exit 1; fi
+grep -Fq 'SHA256 校验失败' damaged.log
+test ! -e "$test_dir/bad-home/doc-integrator/offline/$digest/.offline-payload.sha256"
+
+python3 - "$metrics" "$arch" "$digest" "$office_status" "${1:-}" <<'PY'
+import json, platform, statistics, sys
+from pathlib import Path
+metrics, arch, digest, office, output = sys.argv[1:]
+samples = {}
+for line in Path(metrics).read_text(encoding='utf-8').splitlines():
+    name, value = line.split('\t')
+    samples.setdefault(name, []).append(float(value))
+report = {
+    'arch': arch, 'glibc': platform.libc_ver(), 'kernel': platform.release(),
+    'payload_sha256': digest, 'libreoffice': office, 'clock': 'perf_counter_ns',
+    'cold_condition': 'new application cache per sample; OS disk cache not flushed',
+    'timings_ms': {name: {'samples': values, 'median': statistics.median(values)}
+                   for name, values in samples.items()},
+}
+print('LINUX_OFFLINE_RESULT ' + json.dumps(report, ensure_ascii=False))
+if output:
+    Path(output).write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+PY

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import posixpath
+import shlex
 import sys
 import tarfile
 import tempfile
@@ -163,8 +164,10 @@ def build_kit(arch, out, sources, vendor):
                                "vendor/wheels.lock.json", "tests/fixtures/offline-ocr.png"])
     for pattern in ("scripts/*.py", "scripts/dilib/*.py", "profiles/*.json", "rules/*.json", "vendor/licenses/*.txt"):
         files.update(p.relative_to(ROOT).as_posix() for p in ROOT.glob(pattern))
+    scripts = " ".join(shlex.quote(rel) for rel in sorted(files) if rel.startswith("scripts/") and rel.endswith(".py"))
     launcher = (ROOT / "tools/offline/run.sh").read_text(encoding="utf-8")
-    for key, value in (("ARCH", arch), ("WHEEL", wheel[0]), ("PYPDF", manifest["pure"]["pypdf"][0]),
+    for key, value in (("ARCH", arch), ("SCRIPT_FILES", scripts), ("PYMINOR", ".".join(VERSION.split(".")[:2])),
+                       ("WHEEL", wheel[0]), ("PYPDF", manifest["pure"]["pypdf"][0]),
                        ("TYPING", manifest["pure"]["typing_extensions"][0])):
         launcher = launcher.replace("@" + key + "@", value)
     with tempfile.TemporaryDirectory(dir=out) as tmp:
