@@ -308,17 +308,18 @@ def convert_many(items):
             if typ == "com":
                 if val == 'Word.Application':
                     workfile_error = word_workfile_error()
-                    if workfile_error:
-                        remaining = []
-                        for src, dst, fmt in pending:
-                            if dst not in errors and fmt == "docx" and os.path.splitext(src)[1].lower() == ".doc":
-                                from .word_converter import try_convert_doc
-                                if try_convert_doc(src, dst):
-                                    results[dst] = None
-                                    continue
+                    remaining = []
+                    for src, dst, fmt in pending:
+                        if dst not in errors and fmt == "docx" and os.path.splitext(src)[1].lower() == ".doc":
+                            from .word_converter import eligible_word_2010_doc, try_convert_doc
+                            if (workfile_error or eligible_word_2010_doc(src)) and try_convert_doc(src, dst):
+                                results[dst] = None
+                                continue
+                        if workfile_error:
                             errors.setdefault(dst, workfile_error)
-                            remaining.append((src, dst, fmt))
-                        pending = remaining
+                        remaining.append((src, dst, fmt))
+                    pending = remaining
+                    if not pending or workfile_error:
                         continue
                 fmap = WORD_FMT if kind == "word" else EXCEL_FMT
                 pairs = [(s, d, fmap[f]) for s, d, f in pending if f in fmap]

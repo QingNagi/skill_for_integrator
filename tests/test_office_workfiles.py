@@ -205,6 +205,32 @@ class WordWorkfileTests(unittest.TestCase):
             self.assertEqual(Path(good).read_bytes(), b"new")
             self.assertEqual(Path(bad).read_bytes(), b"previous")
 
+    def test_word_2010_uses_verified_converter_before_com(self):
+        from dilib import word_converter
+        with tempfile.TemporaryDirectory() as tmp:
+            dst = str(Path(tmp) / 'out.docx')
+            with patch.object(office, '_engines', return_value=[('com', 'Word.Application')]), \
+                    patch.object(office, 'word_workfile_error', return_value=None), \
+                    patch.object(word_converter, 'eligible_word_2010_doc', return_value=True), \
+                    patch.object(word_converter, 'try_convert_doc', return_value=True) as helper, \
+                    patch.object(office, '_com_batch', return_value={}) as com:
+                self.assertEqual(office.convert_many([('legacy.doc', dst, 'docx')]), {dst: None})
+                helper.assert_called_once_with('legacy.doc', dst)
+                com.assert_not_called()
+
+    def test_unsuccessful_preferred_converter_defers_to_word(self):
+        from dilib import word_converter
+        with tempfile.TemporaryDirectory() as tmp:
+            dst = str(Path(tmp) / 'out.docx')
+            with patch.object(office, '_engines', return_value=[('com', 'Word.Application')]), \
+                    patch.object(office, 'word_workfile_error', return_value=None), \
+                    patch.object(word_converter, 'eligible_word_2010_doc', return_value=True), \
+                    patch.object(word_converter, 'try_convert_doc', return_value=False) as helper, \
+                    patch.object(office, '_com_batch', return_value={'*':'Word refused'}) as com:
+                self.assertEqual(office.convert_many([('legacy.doc', dst, 'docx')]), {dst: 'Word refused'})
+                helper.assert_called_once()
+                com.assert_called_once()
+
     def test_previous_backend_denial_prevents_wordconv_recovery(self):
         from dilib import word_converter
         with tempfile.TemporaryDirectory() as tmp:

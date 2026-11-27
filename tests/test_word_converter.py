@@ -1,6 +1,7 @@
 """Regressions for the same-token Microsoft Office legacy Word converter fallback."""
 import os
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tempfile
@@ -21,9 +22,11 @@ class WordConverterTests(unittest.TestCase):
         self.source.write_bytes(bytes.fromhex("D0CF11E0A1B11AE1") + b"synthetic")
         self.dest = self.root / "result.docx"
         self.dest.write_bytes(b"previous destination")
-        patcher = patch.object(word_converter, "_installed_converter", return_value=str(self.root / "Wordconv.exe"))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (patch.object(word_converter, "_installed_converter", return_value=str(self.root / "Wordconv.exe")),
+                        patch("dilib.environment._progid_ver", return_value=14),
+                        patch.object(word_converter, "_file_block_configured", return_value=False)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_valid_docx_is_published_after_success(self):
         def convert(args, **options):
@@ -57,6 +60,32 @@ class WordConverterTests(unittest.TestCase):
                 self.assertFalse(word_converter.try_convert_doc(self.source, self.dest))
                 self.assertEqual(self.dest.read_bytes(), b"previous destination")
                 self.assertEqual(set(self.root.iterdir()), {self.source, self.dest})
+
+    def test_standard_word_shortcut_excludes_encrypted_and_older_binary_formats(self):
+        data = bytearray(1536)
+        data[:8] = bytes.fromhex('D0CF11E0A1B11AE1')
+        struct.pack_into('<H', data, 30, 9)
+        struct.pack_into('<I', data, 48, 1)
+        data[1104:1120] = bytes.fromhex('0609020000000000c000000000000046')
+        entry = 1152
+        name = 'WordDocument'.encode('utf-16-le')
+        data[entry:entry+len(name)] = name
+        data[entry+66] = 2
+        struct.pack_into('<IQ', data, entry+116, 0, 8192)
+        for version, flags, accepted in ((0xc1, 0, True), (0xc1, 0x100, False),
+                                         (0xc1, 1, False), (0x65, 0, False)):
+            struct.pack_into('<HH', data, 512, 0xa5ec, version)
+            struct.pack_into('<H', data, 522, flags)
+            self.source.write_bytes(data)
+            with self.subTest(version=version, flags=flags):
+                self.assertEqual(word_converter._standard_word_binary(self.source), accepted)
+
+    @unittest.skipUnless(os.name == 'nt', 'Office registry policies')
+    def test_file_block_delegates_to_word_without_running_converter(self):
+        with patch.object(word_converter, '_file_block_configured', return_value=True), \
+                patch.object(subprocess, 'run') as launch:
+            self.assertFalse(word_converter.try_convert_doc(self.source, self.dest))
+            launch.assert_not_called()
 
     def test_only_local_legacy_word_to_docx_is_attempted(self):
         with patch.object(subprocess, "run") as launch:

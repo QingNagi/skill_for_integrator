@@ -2,6 +2,7 @@
 import configparser
 import os
 from pathlib import Path
+import struct
 import subprocess
 import tempfile
 from xml.etree.ElementTree import ParseError
@@ -33,6 +34,81 @@ def _installed_converter():
         except (OSError, ValueError):
             continue
     return None
+
+
+def _file_block_configured(major):
+    """Let Word evaluate configured Trust Center and administrative File Block settings."""
+    if os.name != 'nt':
+        return False
+    import winreg
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        for view in (winreg.KEY_WOW64_32KEY, winreg.KEY_WOW64_64KEY):
+            for prefix in (r'SOFTWARE\Microsoft', r'SOFTWARE\Policies\Microsoft'):
+                for section in ('FileBlock', 'FileOpenBlock', 'FileSaveBlock'):
+                    key = prefix + r'\Office\%s.0\Word\Security\%s' % (major, section)
+                    try:
+                        with winreg.OpenKey(hive, key, 0, winreg.KEY_READ | view) as handle:
+                            subkeys, values, _ = winreg.QueryInfoKey(handle)
+                        if subkeys or values:
+                            return True
+                    except FileNotFoundError:
+                        continue
+                    except OSError:
+                        return True
+    return False
+
+
+def _standard_word_binary(source):
+    """Recognise ordinary Word.Document.8 with an unencrypted Word97+ FIB.
+
+    The first directory sector suffices for typical Word saves. Unusual stream
+    layouts, templates and earlier Word formats stay with the desktop reader.
+    """
+    with source.open('rb') as handle:
+        header = handle.read(512)
+        if len(header) < 512 or header[:8] != _OLE:
+            return False
+        shift = struct.unpack_from('<H', header, 30)[0]
+        if shift not in (9, 12):
+            return False
+        sector_size = 1 << shift
+        directory = struct.unpack_from('<I', header, 48)[0]
+        handle.seek((1 + directory) * sector_size)
+        entries = handle.read(sector_size)
+        # Word.Document.8 CLSID (little-endian GUID) in the CFB root entry.
+        if entries[80:96] != bytes.fromhex('0609020000000000c000000000000046'):
+            return False
+        name = 'WordDocument'.encode('utf-16-le') + b'\x00\x00'
+        for offset in range(128, len(entries) - 127, 128):
+            if entries[offset:offset + len(name)] != name or entries[offset + 66] != 2:
+                continue
+            start, length = struct.unpack_from('<IQ', entries, offset + 116)
+            if length < 4096:  # A mini-stream needs the full CFB allocation tables.
+                return False
+            handle.seek((start + 1) * sector_size)
+            fib = handle.read(12)
+            if len(fib) < 12:
+                return False
+            magic, version = struct.unpack_from('<HH', fib)
+            flags = struct.unpack_from('<H', fib, 10)[0]
+            return magic == 0xa5ec and version >= 0xc1 and not flags & 0x8101
+    return False
+
+
+def eligible_word_2010_doc(src):
+    from .environment import _progid_ver
+    if os.name != 'nt' or _progid_ver('Word.Application') != 14:
+        return False
+    from ctypes import windll
+    try:
+        path = Path(src).resolve(strict=True)
+        if windll.kernel32.GetDriveTypeW(path.anchor) != 3:
+            return False
+        # Windows uses these directories for cached Internet content and Outlook attachments.
+        unsafe = {'content.outlook', 'content.ie5', 'inetcache', 'temporary internet files'}
+        return not unsafe.intersection(p.casefold() for p in path.parts) and _standard_word_binary(path)
+    except (OSError, ValueError):
+        return False
 
 
 def _local_legacy_document(source):
@@ -74,6 +150,11 @@ def try_convert_doc(src, dst):
     source, destination = Path(src).absolute(), Path(dst).absolute()
     if source.suffix.lower() != ".doc" or destination.suffix.lower() != ".docx":
         return False
+    if os.name == 'nt':
+        from .environment import _progid_ver
+        major = _progid_ver('Word.Application')
+        if not major or _file_block_configured(major):
+            return False
     converter = _installed_converter()
     if not converter:
         return False
