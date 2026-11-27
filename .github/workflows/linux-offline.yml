@@ -29,6 +29,12 @@ jobs:
             python3 tools/build_linux_agent_kit.py --arch "$arch" --fetch-inputs --from-dir "$RUNNER_TEMP/inputs" --out "$RUNNER_TEMP/dist"
             cp "$RUNNER_TEMP/dist/"* dist/
           fi
+      - name: Prepare a host with an existing Office conversion backend
+        run: |
+          if ! command -v soffice >/dev/null; then
+            sudo apt-get -qq update
+            sudo apt-get install -y --no-install-recommends libreoffice-writer
+          fi
       - name: Validate package on its native CPU without network access
         run: |
           sudo unshare --net -- runuser -u "$(id -un)" -- bash qa/check_linux_kit.sh "$RUNNER_TEMP/linux-offline.json"

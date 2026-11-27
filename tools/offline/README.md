@@ -4,6 +4,8 @@
 
 ## 选择离线包
 
+Windows 全量包当前的 SkillSpector 安装建议为 `CRITICAL / DO_NOT_INSTALL`，内网正式部署待安全复核。下列步骤用于功能验收及通过组织审核后的部署。[发布评审说明](https://github.com/QingNagi/skill_for_integrator/blob/main/qa/README.md)
+
 三种机器共用同一个 skill 和同一套文档命令。把下载目录交给 Agent，让它识别系统和 CPU 后选择对应文件。
 
 | 目标机 | 文件 | 首次及后续入口 |
@@ -38,7 +40,7 @@ Linux 原生 PDF/OCR 库要求 glibc 2.28 或更高。可用 `getconf GNU_LIBC_V
 arch=$(uname -m)
 mkdir -p .agents/skills
 tar -xzf "/交接/doc-integrator-offline-linux-${arch}.tar.gz" -C .agents/skills
-bash .agents/skills/doc-integrator/run.sh run -t "/模板/验证记录.docx" -s "/来件/扫描规范.pdf" --task "先生成草稿"
+bash .agents/skills/doc-integrator/run.sh run --draft -t "/模板/验证记录.docx" -s "/来件/扫描规范.pdf" --task "先生成草稿"
 ```
 
 同一用户首次运行会从本地载荷部署环境并识别中英文扫描样文。需要系统已有的 shell、GNU tar、gzip、sha256sum 和 flock。运行时默认放在 `~/.local/share/doc-integrator/offline/`；已设置 `XDG_DATA_HOME` 时使用该数据目录。该文件系统须允许执行程序。后续使用同一入口和参数。变更既有的入口版本前请保存该项目的自定义规则。
@@ -86,10 +88,10 @@ Windows x64 脚本要求 Windows PowerShell 5.1 或 PowerShell 7，且组织策�
 
 ```powershell
 $di = (Resolve-Path '.\.agents\skills\doc-integrator\run.ps1').Path
-& $di run -t '.\验证记录.docx' -s '.\扫描规范.pdf' -s '.\测试数据.xlsx' --task '按批注填写，实测数值取范围'
+& $di run --draft -t '.\验证记录.docx' -s '.\扫描规范.pdf' -s '.\测试数据.xlsx' --task '按批注填写，实测数值取范围'
 ```
 
-后续命令中的任务目录、引用编号和问题编号以本次输出为准。项目目录名含空格或中文时保留引号。
+路径明确时，这一条命令从建任务一直做到草稿、来源快照和审核报告。遇到来源不明、缺件或 OCR 原页待核，就在本次输出里列出问题；在同一任务里记录回答后继续。只想先看方案时，使用 `run`。项目目录名含空格或中文时保留引号。
 
 | 你要做什么 | 命令示例 |
 |---|---|
@@ -128,7 +130,7 @@ doc-integrator/
 |---|---|
 | 换电脑后是否要重新部署 | 将与目标系统和 CPU 匹配的完整套装拷到新机器。首次任务会校验载荷并用内置样文实测中英文 OCR。以后复用同版环境。保留解压的载荷，启动器发现必需脚本缺失或为空时会用它修复。 |
 | 首次验收通过，任务中扫描页仍然没有文字 | 首次验收验证套装自带的 OCR；业务命令沿用用户设置。检查 `DI_OCR`、`DI_NO_VENDOR` 和 `DI_CACHE_DIR`，再结合审核报告中的页码核对。 |
-| Word 报“无法创建工作文件” | 旧版 Word 转换依赖当前用户的临时目录和 Internet 缓存可写。按提示检查具体路径，或在日常桌面 Word 中将原件另存为 DOCX。用新包处理 DOCX 模板无需启动 Word。 |
+| Word 报“无法创建工作文件” | 转换器为本次任务创建可写的临时目录。当前账户能够创建缺失的 Word 缓存时会自动补建。如果系统拒绝写入 `Content.Word`，读取旧 `.doc` 会尝试本机 Microsoft Office 自带的 Wordconv，并核对生成的 DOCX。仍不可用时继续尝试本机可用的其他办公后端。DOC、PDF 导出需要支持相应格式的可用后端；错误信息会指出失败原因。 |
 | 更新了项目里的 skill，Claude 仍用旧版 | 核对本次加载的 `SKILL.md` 路径。个人和项目目录各有一份 `doc-integrator` 时，保留所需的 `rules/`、`profiles/`，把停用的一份移到技能发现目录外备份，再打开新会话。 |
 | 新机器提示找不到 python 或 pip | 用套装根目录的 `run.ps1` 运行。它会选择内置解释器。核对拿到的是带 `payload.zip` 的自部署版。 |
 | 扫描页未识别，或者单位、数值看起来不对 | 运行 `doctor`，确认中英文模型可用，检查当前会话是否设置了 `DI_OCR=off`。打开审核报告列出的原页；必要时提供更清晰的扫描件或原始电子表格。 |

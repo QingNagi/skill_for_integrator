@@ -29,16 +29,22 @@ read -r digest < "$kit/payload.sha256"
 metrics="$test_dir/samples.tsv"
 
 # Host Python produces synthetic inputs and measures child processes. The skill uses embedded Python.
-python3 - "$input/目标.docx" <<'PY'
+python3 - "$repo/tests" "$input" <<'PY'
 import sys
-from zipfile import ZipFile
-with ZipFile(sys.argv[1], 'w') as z:
-    z.writestr('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
-    z.writestr('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
-    z.writestr('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>交接记录</w:t></w:r></w:p><w:sectPr/></w:body></w:document>')
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from test_selfcheck import COMMENTS, doc_xml, make_docx
+root = Path(sys.argv[2])
+heading = '<w:pPr><w:outlineLvl w:val="0"/></w:pPr>'
+target = ('<w:p>' + heading + '<w:commentRangeStart w:id="0"/><w:r><w:t>一、交接记录</w:t></w:r>'
+          '<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p><w:p/>')
+source = ('<w:p>' + heading + '<w:r><w:t>1 项目背景</w:t></w:r></w:p>'
+          '<w:p><w:r><w:t>验收读数为 17.8 V。</w:t></w:r></w:p>')
+make_docx(root / '目标.docx', {'word/document.xml': doc_xml(target),
+                             'word/comments.xml': COMMENTS.replace('note', '研制任务书中的项目背景')})
+make_docx(root / '研制任务书.docx', {'word/document.xml': doc_xml(source)})
 PY
-printf '验收读数为 17.8 V。\n' > "$input/测量.txt"
-chmod 444 "$input/目标.docx" "$input/测量.txt"
+chmod 444 "$input"/*.docx
 chmod 555 "$input"
 
 measure() {
@@ -58,7 +64,24 @@ if result.returncode:
 PY
 }
 
-task=(run -t "$input/目标.docx" -s "$input/测量.txt" --task '核对原始读数')
+task=(run --draft -t "$input/目标.docx" -s "$input/研制任务书.docx" --task '按批注摘录来源并交付草稿')
+check_delivery() {
+    python3 - "$1" <<'PY'
+from pathlib import Path
+from sys import argv
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
+job = Path(argv[1])
+draft, = (job / '草稿').glob('*.docx')
+w = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+with ZipFile(draft) as archive:
+    assert archive.testzip() is None
+    assert '验收读数为 17.8 V。' in [el.text for el in ET.fromstring(archive.read('word/document.xml')).iter(w+'t')]
+    assert len(ET.fromstring(archive.read('word/comments.xml')).findall(w+'comment')) == 2
+assert 'S1:H0' in (job / '审核报告.md').read_text(encoding='utf-8')
+assert any((job / '草稿/源文件快照').glob('*.docx'))
+PY
+}
 for sample in 1 2 3; do
     export XDG_DATA_HOME="$test_dir/测试 用户 $sample"
     project="$test_dir/工作 项目 $sample"
@@ -66,7 +89,7 @@ for sample in 1 2 3; do
     cd "$project"
     measure cold_run "$project/cold.log" bash "$entry" "${task[@]}" --name 本次
     grep -q '离线自检通过' cold.log
-    test -s 整合输出/本次/plan.json
+    check_delivery 整合输出/本次
 done
 installed="$XDG_DATA_HOME/doc-integrator/offline/$digest"
 job="$project/整合输出/本次"
@@ -78,7 +101,7 @@ mv "$kit/payload.tar.gz" "$test_dir/隔离载荷"
 direct=("$installed/runtime/python/bin/python3" -E -s -B -X utf8 "$installed/scripts/di.py")
 for sample in 1 2 3 4 5; do
     measure warm_run "warm-run-$sample.log" bash "$entry" "${task[@]}" --name "复用$sample"
-    test -s "整合输出/复用$sample/plan.json"
+    check_delivery "整合输出/复用$sample"
     # Alternate measurements of the same read-only query to see the warm launcher's overhead.
     if (( sample % 2 )); then
         measure warm_search "search-$sample.log" bash "$entry" search "$job" '验收读数'
@@ -105,6 +128,20 @@ if command -v soffice >/dev/null || command -v libreoffice >/dev/null || [[ -x /
     test "${#pdfs[@]}" -eq 1
     test -s "${pdfs[0]}"
     grep -aFq '%PDF-' "${pdfs[0]}"
+    mkdir '旧格式'
+    bad_temp="$project/不可作临时目录"
+    printf 'ordinary file' > "$bad_temp"
+    TEMP="$bad_temp" TMP="$bad_temp" TMPDIR="$bad_temp" bash "$entry" convert "$input/研制任务书.docx" doc --out '旧格式/来源.doc'
+    TEMP="$bad_temp" TMP="$bad_temp" TMPDIR="$bad_temp" bash "$entry" convert '旧格式/来源.doc' docx --out '旧格式/往返.docx'
+    python3 - <<'PY'
+from pathlib import Path
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
+assert Path('旧格式/来源.doc').read_bytes()[:8].hex() == 'd0cf11e0a1b11ae1'
+with ZipFile('旧格式/往返.docx') as archive:
+    assert archive.testzip() is None
+    assert '验收读数为 17.8 V。' in ''.join(ET.fromstring(archive.read('word/document.xml')).itertext())
+PY
     office_status=converted
 else
     if bash "$entry" convert "$input/目标.docx" pdf >convert.log 2>&1; then exit 1; fi

@@ -185,6 +185,8 @@ def cmd_new(a):
                      formats=[f for f in (a.format or "").split(",") if f])
     out("已建立任务：%s" % job.dir)
     out("源文件：" + "；".join("%s=%s" % (s["alias"], s["path"]) for s in job.data["sources"]))
+    if getattr(a, "draft", False):
+        return generate_draft(job, stop_if_unmapped=True)
     out("")
     for al, md in job.source_models().items():
         out(outline(md, al, max_lines=a.lines, max_depth=a.depth))
@@ -457,14 +459,23 @@ def cmd_add_op(a):
 
 
 def cmd_draft(a):
+    return generate_draft(Job(a.job), defaults=a.defaults, check=a.check,
+                          raw_snapshot=getattr(a, "raw_snapshot", False),
+                          discard_edits=getattr(a, "discard_edits", False))
+
+
+def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, discard_edits=False,
+                   stop_if_unmapped=False):
     from .profile import load as load_profile
     from .write_docx import DocxWriter
-    job = Job(a.job)
     plan = do_plan(job, quiet=True)
     pend = pending(plan["questions"])
-    if pend and not a.defaults:
+    if pend and not defaults:
         print_plan(job, plan)
         out("\n还有 %d 个问题未回答，暂不生成草稿。若用户同意全部按推荐处理，可加 --defaults。" % len(pend))
+        return
+    if stop_if_unmapped and all(op["op"] == "format_heading" for op in plan["ops"]):
+        out("尚未找到可填写的目标与来源。请指定模板位置和对应的来源章节或字段，然后在本任务中继续。")
         return
     if pend:
         extra = {}
@@ -484,7 +495,7 @@ def cmd_draft(a):
     prof = load_profile(job.data.get("profile"), SKILL_DIR)
     tmp = ensure_dir(job.p("草稿", ".tmp"))
     prev_draft = (job.drafts() or [None])[-1]       # 上一版草稿（要在新版文件生成之前取）
-    job.raw_snapshot = bool(getattr(a, "raw_snapshot", False))
+    job.raw_snapshot = raw_snapshot
     wr = DocxWriter(work, job, prof, draft)
     warns = wr.apply(plan["ops"], tmp)
     # 先留下新规划的原样副本（定稿时据此认出人工修改），上一版的人工修改在后面并入
@@ -508,14 +519,13 @@ def cmd_draft(a):
     job.data.setdefault("unverified", {})[os.path.basename(draft)] = unv
     job.save()
     # 重新草稿：并入上一版草稿里审核人的直接修改和人工批注（--discard-edits 则丢弃）；合并出错也要登记，不能当作“没有人工修改”
-    discard = bool(getattr(a, "discard_edits", False))
     try:
         from . import merge as _mg
-        mres = _mg.merge_previous(job, prev_draft, draft, discard=discard)
-        mlines = _mg.summary_lines(mres, discard)
+        mres = _mg.merge_previous(job, prev_draft, draft, discard=discard_edits)
+        mlines = _mg.summary_lines(mres, discard_edits)
     except Exception as e:
         mres, mlines = {"items": [], "notes": []}, []
-        if prev_draft and not discard:
+        if prev_draft and not discard_edits:
             msg = "重新草稿时合并上一版的人工修改没跑完（%s: %s），人工修改没有带到新版" % (type(e).__name__, e)
             mres["items"].append({"kind": "unread", "key": "merge:crash", "name": "上一版人工修改", "detail": msg})
             mres["notes"].append("合并：" + msg)
@@ -529,17 +539,22 @@ def cmd_draft(a):
     for ln in mlines:
         out("  " + ln)
     write_report(job, plan, draft, ver, warns, used_defaults=bool(pend))
-    ncom = sum(1 for o in plan["ops"] if o["op"] in ("comment", "insert_section"))
     out("草稿已生成（v%d）：%s" % (ver, draft))
     out("  源文件快照（批注链接指向这里，已用黄色高亮被引用处）：%s" % os.path.join(os.path.dirname(draft), "源文件快照"))
     out("  审核报告：%s" % job.p("审核报告.md"))
+    report = plan["report"]
+    unread = sum(item.get("kind") == "unread" for item in report.get("unverified_sources", []))
+    out("  审核记录 %d 项，未填 %d 项，原有值本批未核 %d 项，未读取 %d 项。"
+        % (len(report["fills"]), len(report["unfilled"]), len(report.get("stale", [])), unread))
+    for fill in report["fills"][:6]:
+        out("    %s ← %s：%s" % (fill.get("target", ""), fill.get("source", ""), short(str(fill.get("value", "")), 64)))
     if pend:
         out("  [注意] %d 个问题按推荐默认处理，已在批注中标“⚠”，请审核时确认" % len(pend))
     if unv:
         out("  [未核] %d 项需要确认（原有值本批未核 / 数据来源未核对 / 有未读取内容），已在批注标“⚠”；没处理之前 final 会拦截" % len(unv))
-    for wmsg in warns[:10]:
+    for wmsg in (report["warnings"] + warns)[:10]:
         out("  [警告] " + wmsg)
-    if a.check:
+    if check:
         chk = check_with_office(draft)
         out("  办公软件打开校验：" + chk)
     run_selfcheck(draft)
@@ -779,6 +794,8 @@ def main(argv=None):
         s.add_argument("--profile", help="排版规范名或 json 路径（默认=文档摘抄提示词）")
         s.add_argument("--format", help="终稿额外格式，如 doc,pdf,md")
         s.add_argument("--plan", action="store_true", help="建立后立即规划")
+        if name == "run":
+            s.add_argument("--draft", action="store_true", help="直接生成审核草稿；有待确认问题时列出选项并暂停")
         s.add_argument("--lines", type=int, default=40)
         s.add_argument("--depth", type=int, default=2)
         s.set_defaults(fn=fn)

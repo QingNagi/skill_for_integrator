@@ -5,6 +5,8 @@
    环境变量 DI_OFFICE=word|wps|libreoffice 可强制指定。"""
 from __future__ import annotations
 
+from collections import ChainMap
+from pathlib import Path
 import os
 import shutil
 import subprocess
@@ -173,18 +175,16 @@ def _user_internet_cache():
 
 
 def word_workfile_error():
-    """Check actual create/delete access from the same token before starting Word."""
+    """Check the configured Word cache. The conversion process gets its own TEMP and TMP."""
     path = 'Content.Word'
     try:
-        path = os.path.join(_user_internet_cache(), 'Content.Word')
-        try:
-            os.mkdir(path)
-        except FileExistsError:
+        configured = _user_internet_cache()
+        if not os.path.isabs(configured):
+            raise OSError('Word 的 Internet Cache 未配置为绝对路径')
+        path = os.path.join(configured, 'Content.Word')
+        os.makedirs(path, exist_ok=True)
+        with tempfile.TemporaryFile(dir=path):
             pass
-        dirs = [path] + [os.environ[k] for k in ('TEMP', 'TMP') if os.environ.get(k)]
-        for path in dict.fromkeys(dirs):
-            with tempfile.TemporaryFile(dir=path):
-                pass
     except OSError as exc:
         return ('Word 无法创建工作文件，当前进程不能使用 %s（%s）。'
                 '请在日常桌面 Word 中打开原件并另存为 DOCX，再用该副本作为输入；'
@@ -193,49 +193,78 @@ def word_workfile_error():
 
 
 def _run_ps(script, args, timeout=600):
-    tmpdir = tempfile.mkdtemp(prefix="di_ps_")
+    tmpdir = os.path.dirname(os.path.abspath(args[1]))
     sp = os.path.join(tmpdir, "run.ps1")
     with open(sp, "w", encoding="utf-8-sig") as f:      # 必须带 BOM，否则 PowerShell 5 按 GBK 读取
         f.write(script)
     ps = detect()["powershell"] or "powershell"
     cmd = [ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", sp] + list(args)
     try:
-        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+        child_env = ChainMap({"TEMP": tmpdir, "TMP": tmpdir}, os.environ)
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=child_env,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:
         raise DIError("办公软件转换超时（可能有弹窗或文件被占用）")
-    return tmpdir
 
 
 def _com_batch(progid, kind, pairs):
-    tmpdir = tempfile.mkdtemp(prefix="di_job_")
-    jf = os.path.join(tmpdir, "jobs.txt")
-    rf = os.path.join(tmpdir, "result.txt")
-    with open(jf, "w", encoding="utf-8-sig") as f:
-        for src, dst, fmt in pairs:
-            f.write("%s\t%s\t%d\n" % (os.path.abspath(src), os.path.abspath(dst), fmt))
-    _run_ps(_PS_SCRIPT, [jf, rf, progid, kind])
-    res = {}
-    if os.path.exists(rf):
-        for ln in open(rf, encoding="utf-8-sig").read().splitlines():
-            p = ln.split("\t")
-            if p[0] == "OK":
-                res[os.path.normcase(os.path.abspath(p[1]))] = None
-            elif p[0] in ("ERR", "FATAL"):
-                res[os.path.normcase(os.path.abspath(p[1])) if p[1] else "*"] = p[2] if len(p) > 2 else "未知错误"
-    return res
+    if not pairs:
+        return {}
+    # Keep the control files and native scratch together, even if the host TEMP is unusable.
+    parents = dict.fromkeys(os.path.dirname(os.path.abspath(dst)) for _, dst, _ in pairs)
+    for parent in parents:
+        try:
+            work = tempfile.TemporaryDirectory(prefix="di_job_", dir=parent)
+            break
+        except OSError as exc:
+            error = str(exc)
+    else:
+        return {"*": "无法在输出目录创建临时工作目录：" + error}
+    with work as tmpdir:
+        jf = os.path.join(tmpdir, "jobs.txt")
+        rf = os.path.join(tmpdir, "result.txt")
+        with open(jf, "w", encoding="utf-8-sig") as f:
+            for src, dst, fmt in pairs:
+                f.write("%s\t%s\t%d\n" % (os.path.abspath(src), os.path.abspath(dst), fmt))
+        _run_ps(_PS_SCRIPT, [jf, rf, progid, kind])
+        res = {}
+        if os.path.exists(rf):
+            with open(rf, encoding="utf-8-sig") as stream:
+                for line in stream:
+                    fields = line.rstrip("\r\n").split("\t")
+                    if len(fields) >= 2 and fields[0] in ("OK", "ERR", "FATAL"):
+                        key = os.path.normcase(os.path.abspath(fields[1])) if fields[1] else "*"
+                        res[key] = None if fields[0] == "OK" else (fields[2] if len(fields) > 2 else "未知错误")
+        return res
 
 
-def _lo_convert(soffice, src, dst_fmt, out_dir):
+def _lo_convert(soffice, src, dst_fmt, dst):
+    """Convert under a fresh profile and publish only the new output from this process."""
     filt = {"docx": "docx:MS Word 2007 XML", "doc": "doc:MS Word 97", "pdf": "pdf", "xlsx": "xlsx:Calc MS Excel 2007 XML",
             "xls": "xls:MS Excel 97", "png": "png", "csv": "csv"}.get(dst_fmt, dst_fmt)
-    prof = os.path.join(tempfile.gettempdir(), "di_lo_profile")
-    url = "file:///" + prof.replace("\\", "/").lstrip("/")
-    cmd = [soffice, "-env:UserInstallation=" + url, "--headless", "--norestore", "--convert-to", filt,
-           "--outdir", out_dir, src]
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
-    cand = os.path.join(out_dir, os.path.splitext(os.path.basename(src))[0] + "." + dst_fmt)
-    return cand if os.path.exists(cand) else None
+    source, destination = Path(src).absolute(), Path(dst).absolute()
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="di_lo_", dir=str(destination.parent)) as work:
+            stage = Path(work, "output")
+            stage.mkdir()
+            profile = Path(work, "profile").as_uri()
+            cmd = [soffice, "-env:UserInstallation=" + profile, "--headless", "--norestore",
+                   "--convert-to", filt, "--outdir", str(stage), str(source)]
+            env = ChainMap({"TEMP": work, "TMP": work, "TMPDIR": work}, os.environ)
+            run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600,
+                                 cwd=work, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if run.returncode:
+                return "LibreOffice 转换失败（退出码 %d）" % run.returncode
+            generated = stage / (source.stem + "." + dst_fmt)
+            if generated.is_symlink() or not generated.is_file() or not generated.stat().st_size:
+                return "LibreOffice 未生成有效的输出文件"
+            os.replace(generated, destination)
+    except subprocess.TimeoutExpired:
+        return "LibreOffice 转换超时"
+    except OSError as exc:
+        return "LibreOffice 转换失败：%s" % exc
+    return None
 
 
 def convert_many(items):
@@ -243,6 +272,11 @@ def convert_many(items):
     results = {}
     groups = {"word": [], "excel": []}
     for src, dst, fmt in items:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
+        except OSError as exc:
+            results[dst] = "无法创建输出目录：%s" % exc
+            continue
         ext = os.path.splitext(src)[1].lower()
         kind = "excel" if ext in EXCEL_INPUT else "word"
         groups[kind].append((src, dst, fmt))
@@ -258,31 +292,40 @@ def convert_many(items):
                 if val == 'Word.Application':
                     workfile_error = word_workfile_error()
                     if workfile_error:
-                        errors.update((dst, workfile_error) for _, dst, _ in pending)
+                        remaining = []
+                        for src, dst, fmt in pending:
+                            if dst not in errors and fmt == "docx" and os.path.splitext(src)[1].lower() == ".doc":
+                                from .word_converter import try_convert_doc
+                                if try_convert_doc(src, dst):
+                                    results[dst] = None
+                                    continue
+                            errors.setdefault(dst, workfile_error)
+                            remaining.append((src, dst, fmt))
+                        pending = remaining
                         continue
                 fmap = WORD_FMT if kind == "word" else EXCEL_FMT
                 pairs = [(s, d, fmap[f]) for s, d, f in pending if f in fmap]
-                res = _com_batch(val, kind, pairs)
+                try:
+                    res = _com_batch(val, kind, pairs)
+                except (DIError, OSError) as exc:
+                    res = {"*": str(exc)}
                 still = []
                 for s, d, f in pending:
                     key = os.path.normcase(os.path.abspath(d))
                     if key in res and res[key] is None and os.path.exists(d):
                         results[d] = None
                     else:
-                        errors[d] = res.get(key) or res.get("*") or "转换失败"
+                        errors.setdefault(d, res.get(key) or res.get("*") or "转换失败")
                         still.append((s, d, f))
                 pending = still
             else:
                 still = []
                 for s, d, f in pending:
-                    out_dir = tempfile.mkdtemp(prefix="di_lo_")
-                    got = _lo_convert(val, s, f, out_dir)
-                    if got:
-                        os.makedirs(os.path.dirname(os.path.abspath(d)), exist_ok=True)
-                        shutil.move(got, d)
+                    failure = _lo_convert(val, s, f, d)
+                    if failure is None:
                         results[d] = None
                     else:
-                        errors[d] = "LibreOffice 转换失败"
+                        errors[d] = errors[d] + " / " + failure if d in errors else failure
                         still.append((s, d, f))
                 pending = still
         for s, d, f in pending:
@@ -327,9 +370,6 @@ def metafile_to_png(pairs, scale=2.0):
     so = detect()["soffice"]
     if so:
         for s, d in pairs:
-            got = _lo_convert(so, s, "png", os.path.dirname(os.path.abspath(d)))
-            if got:
-                if os.path.abspath(got) != os.path.abspath(d):
-                    shutil.move(got, d)
+            if _lo_convert(so, s, "png", d) is None:
                 ok.append(d)
     return ok
