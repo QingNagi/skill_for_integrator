@@ -65,4 +65,8 @@ $LASTEXITCODE
 
 历史 Windows 发布包中，SkillSpector 2.13.6 和 2.13.7 都对 PyMuPDF wheel 报告过 `size_limit` 与 `archive_malformed`。当时 19,826,532 字节的 wheel 超过扫描器的 16,777,216 字节缓存，导致缓存前缀缺少 ZIP 中央目录。具体版本的完整性、告警和风险建议以本次报告为准。
 
+2026-11-27，对 SHA-256 为 `8d5df8e65e7cc82c81342056b14dd8c61cc38b7dffd468f7e542ce1e944f55cf` 的 Windows 完整包运行 SkillEvaluator 1.2.1。Tier 1 共 13 项，12 项通过、0 项失败、1 项未完成。三条上游许可证 PII 豁免精确命中，质量评分为 100/A。独立使用 SkillSpector 2.13.6 对同一快照复核，覆盖率 77.6%，660 个 HIGH，未抑制任何发现，原始建议为 **CRITICAL / DO_NOT_INSTALL**，发布资格仍为 **INCOMPLETE**。
+
+本次 PyMuPDF wheel 与 PyPI 发布的原件 SHA-256 相符。660 个 HIGH 中，592 项关联运行时，67 项关联 vendor 下的依赖，1 项关联 SKILL.md 引用对象的分析不完整。正式部署前，应对未覆盖的原生组件做全量供应链审查，逐项处置高风险发现，按组织的发布标准记录结论。哈希核验和业务测试各自验证了文件身份和运行结果。[NVIDIA 扫描容量说明](https://github.com/NVIDIA/SkillSpector/blob/v2.13.7/docs/ANALYSIS_RESOURCE_BOUNDS.md)
+
 维护入口时，可从仓库根目录执行 `python -m unittest discover -s qa -v`，检查双层摘要、重复运行的证据保留和部署树的快照边界。
