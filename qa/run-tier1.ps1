@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory, ParameterSetName='Installed')][string]$InstalledDirectory,
     [string]$OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) 'doc-integrator-reviews'),
     [string]$Evaluator = 'skillevaluator',
-    [string]$SkillSpector = $(if ($env:SKILLEVALUATOR_SKILLSPECTOR_PATH) { $env:SKILLEVALUATOR_SKILLSPECTOR_PATH } else { 'skillspector' }),
+    [string]$SkillSpector = $env:SKILLEVALUATOR_SKILLSPECTOR_PATH,
     [string]$Gitleaks = 'gitleaks',
     [switch]$ScannerDiagnostics
 )
@@ -127,6 +127,11 @@ try {
     if (![IO.File]::Exists((Join-Path $skill 'SKILL.md'))) { throw 'The staged skill has no SKILL.md.' }
 
     $Evaluator = (Get-Command $Evaluator -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    if (!$SkillSpector) {
+        $reviewBin = if ($IsWindows) { 'Scripts/skillspector.exe' } else { 'bin/skillspector' }
+        $installed = Join-Path $HOME ".venvs/doc-integrator-zipreview-1/$reviewBin"
+        $SkillSpector = if (Test-Path -LiteralPath $installed -PathType Leaf) { $installed } else { 'skillspector' }
+    }
     $SkillSpector = (Get-Command $SkillSpector -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $Gitleaks = (Get-Command $Gitleaks -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $env:SKILLEVALUATOR_SKILLSPECTOR_PATH = $SkillSpector

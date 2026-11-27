@@ -1,0 +1,325 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 29412d8..f5cdc96 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
+ 
+ [project]
+ name = "skillspector"
+-version = "2.13.7"
++version = "2.13.7001"
+ description = "SkillSpector: Security scanner for AI agent skills (Claude Code, Cursor, and similar). Scans skills for vulnerabilities, malicious patterns, and security risks before installation. Supports Git repos, URLs, zips, and local directories; runs static pattern checks and optional LLM semantic analysis; outputs terminal, JSON, and Markdown reports with risk scoring."
+ readme = "README.md"
+ license = "Apache-2.0"
+diff --git a/src/skillspector/nested_artifacts.py b/src/skillspector/nested_artifacts.py
+index de5f840..4174c52 100644
+--- a/src/skillspector/nested_artifacts.py
++++ b/src/skillspector/nested_artifacts.py
+@@ -1891,6 +1891,7 @@ def inspect_nested_artifacts(
+     *,
+     clock: Callable[[], float] = time.monotonic,
+     raw_file_cache: Mapping[str, bytes] | None = None,
++    original_sizes: Mapping[str, int] | None = None,
+     max_members: int | None = None,
+     max_uncompressed_bytes: int | None = None,
+     max_seconds: float | None = None,
+@@ -1900,7 +1901,9 @@ def inspect_nested_artifacts(
+ 
+     ``raw_file_cache`` may provide bytes already read under the caller's bundle
+     limits. Supplying it avoids a second filesystem read without weakening the
+-    archive-specific member, expansion, or deadline bounds. Callers may pass
++    archive-specific member, expansion, or deadline bounds. ``original_sizes``
++    identifies cached prefixes whose source was larger than the supplied bytes.
++    Callers may pass
+     their remaining aggregate member/expanded-byte budgets and an absolute
+     deadline in the same clock domain. ``None`` preserves the module defaults.
+     """
+@@ -1955,21 +1958,28 @@ def inspect_nested_artifacts(
+         if raw_file_cache is not None and path in raw_file_cache:
+             data = raw_file_cache[path]
+             size = len(data)
++            input_limit = size
++            if original_sizes is not None:
++                size = original_sizes.get(path, size)
+         else:
+             try:
+                 size = full_path.stat().st_size
+             except OSError:
+                 continue
+-        if not supplied and size > budget.max_uncompressed_bytes:
++            input_limit = budget.max_uncompressed_bytes
++        if size > input_limit:
+             # Only classify content that begins like an archive; avoid reading arbitrary
+             # large files merely to decide whether they are containers. Caller-
+             # supplied bytes were already bounded and charged by the caller;
+             # ``max_uncompressed_bytes`` applies to newly expanded members.
+-            try:
+-                with _open_regular_file_no_follow(full_path) as source:
+-                    signature = source.read(1024)
+-            except (OSError, _FileOpenError, _UnsafeFileError):
+-                continue
++            if supplied:
++                signature = data[:1024]
++            else:
++                try:
++                    with _open_regular_file_no_follow(full_path) as source:
++                        signature = source.read(1024)
++                except (OSError, _FileOpenError, _UnsafeFileError):
++                    continue
+             if (kind := _archive_type(signature)) is not None:
+                 result.recognized_container_paths.add(path)
+                 if kind == "zip":
+@@ -1986,7 +1996,7 @@ def inspect_nested_artifacts(
+                     path=path,
+                     reason=LedgerReason.ARCHIVE_SIZE_LIMIT,
+                     observed_bytes=size,
+-                    limit_bytes=budget.max_uncompressed_bytes,
++                    limit_bytes=input_limit,
+                 )
+             elif expected_type is not None:
+                 _record_outer_metadata(
+diff --git a/src/skillspector/nodes/build_context.py b/src/skillspector/nodes/build_context.py
+index 6e408a4..ef525f7 100644
+--- a/src/skillspector/nodes/build_context.py
++++ b/src/skillspector/nodes/build_context.py
+@@ -71,11 +71,13 @@ from skillspector.inspection_ledger import (
+ from skillspector.llm_provenance import capture_llm_provenance, capture_static_llm_provenance
+ from skillspector.logging_config import get_logger
+ from skillspector.nested_artifacts import (
++    ARCHIVE_MAX_UNCOMPRESSED_BYTES,
+     expected_container_type,
+     has_binary_executable_magic,
+     inspect_nested_artifacts,
+     is_archive_content,
+     is_executable_content,
++    is_zip_content,
+ )
+ from skillspector.oms import project_oms_content
+ from skillspector.providers import prepare_chat_model_imports
+@@ -310,6 +312,26 @@ def _read_bytes_no_follow(path: Path, *, max_bytes: int | None = None) -> bytes:
+         return cast(bytes, source.read() if max_bytes is None else source.read(max_bytes))
+ 
+ 
++def _read_zip_candidate(path: Path, prefix_limit: int, expected_size: int) -> bytes:
++    """Read a ZIP envelope from one descriptor. Other artifacts keep their static prefix."""
++    with _open_regular_file_no_follow(path) as source:
++        before = os.fstat(source.fileno())
++        prefix = source.read(prefix_limit + 1)
++        if len(prefix) <= prefix_limit or not is_zip_content(prefix):
++            return prefix
++        if before.st_size != expected_size:
++            raise OSError("Archive changed before its envelope could be read")
++        tail = source.read(expected_size - len(prefix) + 1)
++        after = os.fstat(source.fileno())
++        if (
++            len(prefix) + len(tail) != expected_size
++            or after.st_size != before.st_size
++            or after.st_mtime_ns != before.st_mtime_ns
++        ):
++            raise OSError("Archive changed while reading its envelope")
++        return prefix + tail
++
++
+ def _walk_skill_files(
+     skill_dir: Path,
+     state: SkillspectorState | None = None,
+@@ -1764,6 +1786,7 @@ def _read_file_cache(
+     started_at: float | None = None,
+     state: SkillspectorState | None = None,
+     provider_submission_allowed: bool = True,
++    zip_tails: dict[str, bytes] | None = None,
+ ) -> tuple[
+     dict[str, str],
+     dict[str, bytes],
+@@ -1992,7 +2015,18 @@ def _read_file_cache(
+             # stat and open, and a stale size must not turn this into an
+             # unbounded allocation.
+             per_file_limit = min(MAX_ANALYZABLE_FILE_BYTES, remaining_bundle_bytes)
+-            observed = _read_bytes_no_follow(full, max_bytes=per_file_limit + 1)
++            # The archive reader already accepts disk containers up to its 25 MiB
++            # input bound. Keep any additional bytes local to nested inspection,
++            # charging them to this bundle and its transitive workflow.
++            tail = b""
++            if zip_tails is not None and per_file_limit < file_stat.st_size <= min(
++                ARCHIVE_MAX_UNCOMPRESSED_BYTES, remaining_bundle_bytes
++            ):
++                observed = _read_zip_candidate(full, per_file_limit, file_stat.st_size)
++                if is_zip_content(observed) and len(observed) == file_stat.st_size:
++                    tail = observed[per_file_limit:]
++            else:
++                observed = _read_bytes_no_follow(full, max_bytes=per_file_limit + 1)
+             per_file_truncated = (
+                 file_stat.st_size > MAX_ANALYZABLE_FILE_BYTES
+                 or len(observed) > MAX_ANALYZABLE_FILE_BYTES
+@@ -2005,7 +2039,7 @@ def _read_file_cache(
+             observed_total_bytes = total_cached_bytes + max(file_stat.st_size, len(observed))
+             record_bytes = getattr(traversal, "record_bytes", None)
+             if callable(record_bytes):
+-                record_bytes(len(raw))
++                record_bytes(len(raw) + len(tail))
+             if _record_cache_runtime_limit(
+                 path,
+                 component_index,
+@@ -2029,8 +2063,10 @@ def _read_file_cache(
+                 current_size=max(file_stat.st_size, len(observed)),
+             ):
+                 break
+-            total_cached_bytes += len(raw)
++            total_cached_bytes += len(raw) + len(tail)
+             raw_file_cache[path] = raw
++            if tail and zip_tails is not None:
++                zip_tails[path] = tail
+             file_cache[path] = content
+             if truncated:
+                 observed_size = max(file_stat.st_size, len(observed))
+@@ -2867,6 +2903,7 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+     for path in selected_baselines:
+         excluded_artifacts[path] = LedgerReason.BASELINE_FILE
+     cache_candidates = [path for path in inventoried_components if path not in selected_baselines]
++    zip_tails: dict[str, bytes] = {}
+     processing_started = monotonic()
+     processing_deadline = processing_started + MAX_BUNDLE_CACHE_SECONDS
+     shared_remaining_seconds = transitive_remaining_seconds(state)
+@@ -2887,7 +2924,9 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+         started_at=processing_started,
+         state=state,
+         provider_submission_allowed=not source_local_only,
++        zip_tails=zip_tails,
+     )
++    cached_input_bytes = sum(map(len, raw_file_cache.values())) + sum(map(len, zip_tails.values()))
+     (
+         excluded_inventory,
+         excluded_component_metadata,
+@@ -2902,7 +2941,7 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+         deadline=processing_deadline,
+         max_input_bytes=max(
+             0,
+-            MAX_TOTAL_CACHED_BYTES - sum(len(data) for data in raw_file_cache.values()),
++            MAX_TOTAL_CACHED_BYTES - cached_input_bytes,
+         ),
+         incomplete_exclusions=excluded_inspection_gaps,
+     )
+@@ -3168,7 +3207,7 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+     remaining_bytes = max(
+         0,
+         MAX_TOTAL_CACHED_BYTES
+-        - sum(len(data) for data in raw_file_cache.values())
++        - cached_input_bytes
+         - excluded_input_bytes,
+     )
+     shared_nested_bytes = transitive_remaining_bytes(state)
+@@ -3182,6 +3221,9 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+             monotonic() + max(0.0, shared_nested_seconds),
+         )
+     nested_input_cache = {**raw_file_cache, **excluded_archive_cache}
++    for path, tail in zip_tails.items():
++        nested_input_cache[path] = raw_file_cache[path] + tail
++    zip_tails.clear()
+     nested = inspect_nested_artifacts(
+         skill_dir,
+         sorted(
+@@ -3193,11 +3235,17 @@ def build_context(state: SkillspectorState) -> dict[str, object]:
+             key=lambda path: -path.count("!/"),
+         ),
+         raw_file_cache=nested_input_cache,
++        original_sizes={
++            path: item["size_bytes"]
++            for path, item in inventory_by_path.items()
++            if path in raw_file_cache and item.get("size_bytes", 0) > len(nested_input_cache[path])
++        },
+         max_members=remaining_artifacts,
+         max_uncompressed_bytes=remaining_bytes,
+         absolute_deadline=nested_deadline,
+         clock=monotonic,
+     )
++    del nested_input_cache
+     unstarted_excluded_archives = [
+         path for path in excluded_archive_cache if path not in nested.outer_metadata
+     ]
+diff --git a/src/skillspector/nodes/report.py b/src/skillspector/nodes/report.py
+index 08fed21..949e334 100644
+--- a/src/skillspector/nodes/report.py
++++ b/src/skillspector/nodes/report.py
+@@ -1540,6 +1540,11 @@ def _build_metadata(
+     meta: dict[str, object] = {
+         "has_executable_scripts": has_executable_scripts,
+         "skillspector_version": skillspector_version,
++        "distribution_build": {
++            "project": "QingNagi/skill_for_integrator",
++            "revision": "zipreview.1",
++            "upstream_commit": "c323ad4c43e3c8f2de051572cc25b2711d11e648",
++        },
+         "llm_requested": use_llm,
+         # llm_available reflects runtime truth: the binary/credentials were
+         # available AND meta_analyzer's own call (if it ran) succeeded.
+diff --git a/tests/nodes/test_zip_cache_extent.py b/tests/nodes/test_zip_cache_extent.py
+new file mode 100644
+index 0000000..d47f9f1
+--- /dev/null
++++ b/tests/nodes/test_zip_cache_extent.py
+@@ -0,0 +1,65 @@
++"""Regression cases for full ZIP envelopes and ordinary prefix projections."""
++import importlib
++import zipfile
++
++import pytest
++
++from skillspector.nodes.build_context import build_context
++
++
++def scan(tmp_path, monkeypatch, *, total=32_768, broken=False):
++    module = importlib.import_module("skillspector.nodes.build_context")
++    monkeypatch.setattr(module, "MAX_ANALYZABLE_FILE_BYTES", 256)
++    monkeypatch.setattr(module, "MAX_TOTAL_CACHED_BYTES", total)
++    (tmp_path / "SKILL.md").write_text("---\nname: sample\ndescription: Sample\n---\n", encoding="utf-8")
++    wheel = tmp_path / "sample.whl"
++    if broken:
++        wheel.write_bytes(b"PK\x03\x04" + b"X" * 512)
++    else:
++        with zipfile.ZipFile(wheel, "w") as archive:
++            archive.writestr("sample/notes.txt", b"abcdefgh" * 64)
++            archive.writestr("sample/module.py", b"label = 'archive member'\n")
++    result = build_context({"skill_path": str(tmp_path), "source_local_only": True})
++    reasons = {
++        e["reason_code"] for e in result["inspection_ledger"] if e.get("path") == wheel.name
++    }
++    return result, reasons
++
++
++def test_zip_central_directory_after_the_static_prefix(tmp_path, monkeypatch):
++    result, reasons = scan(tmp_path, monkeypatch)
++    assert "sample.whl!/sample/module.py" in result["raw_file_cache"]
++    assert len(result["raw_file_cache"]["sample.whl"]) == 256
++    assert "size_limit" in reasons
++    assert "archive_malformed" not in reasons
++
++
++def test_known_incomplete_zip_records_the_limit(tmp_path, monkeypatch):
++    result, reasons = scan(tmp_path, monkeypatch, total=512)
++    assert "archive_size_limit" in reasons
++    assert "archive_malformed" not in reasons
++    assert "sample.whl!/sample/module.py" not in result["raw_file_cache"]
++
++
++def test_complete_but_invalid_zip_keeps_the_parser_failure(tmp_path, monkeypatch):
++    _, reasons = scan(tmp_path, monkeypatch, broken=True)
++    assert "archive_malformed" in reasons
++
++
++def test_archive_input_limit_is_independent_of_bundle_space(tmp_path, monkeypatch):
++    module = importlib.import_module("skillspector.nodes.build_context")
++    monkeypatch.setattr(module, "ARCHIVE_MAX_UNCOMPRESSED_BYTES", 512)
++    result, reasons = scan(tmp_path, monkeypatch)
++    assert "archive_size_limit" in reasons
++    assert "archive_malformed" not in reasons
++    assert "sample.whl!/sample/module.py" not in result["raw_file_cache"]
++
++
++def test_non_zip_keeps_prefix_and_zip_size_change_is_rejected(tmp_path):
++    module = importlib.import_module("skillspector.nodes.build_context")
++    candidate = tmp_path / "candidate"
++    candidate.write_bytes(b"A" * 128)
++    assert len(module._read_zip_candidate(candidate, 16, 128)) == 17
++    candidate.write_bytes(b"PK\x03\x04" + b"A" * 128)
++    with pytest.raises(OSError, match="changed"):
++        module._read_zip_candidate(candidate, 16, 128)

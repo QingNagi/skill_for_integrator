@@ -1,0 +1,2 @@
+# A unified diff needs its single-space context lines, including on Windows checkouts.
+zip-cache.patch text eol=lf whitespace=-blank-at-eol

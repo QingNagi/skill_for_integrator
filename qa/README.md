@@ -1,6 +1,8 @@
 # Windows 离线技能的完整 Tier 1 复核
 
-在评审机的 PowerShell 7.2 或更新版本中，从仓库根目录调用 `qa/run-tier1.ps1`。评审机需有 SkillEvaluator、SkillSpector 和 Gitleaks。已验证的版本分别为 1.2.1、2.13.6 和 8.30.1。评审入口从 PATH 查找三个工具，也接受其可执行文件的绝对路径。静态评审使用 `--no-llm`。
+复核包含 PyMuPDF 的 Windows 发布包时，可在评审机使用项目修复版 SkillSpector。安装命令、同包对照结果及仍需复核的发现见 [PyMuPDF 归档扫描修复](skillspector-zip/README.md)。下文保留上游原版扫描器的历史结果。
+
+在评审机的 PowerShell 7.2 或更新版本中，从仓库根目录调用 `qa/run-tier1.ps1`。评审机需有 SkillEvaluator、SkillSpector 和 Gitleaks。已验证 SkillEvaluator 1.2.1、Gitleaks 8.30.1、上游 SkillSpector 2.13.6 / 2.13.7 和本项目的修复版。入口支持指定工具绝对路径。未指定扫描器时，优先使用安装在用户目录的项目修复版，再查找 PATH。静态评审使用 `--no-llm`。
 
 **2026-11-27 实测。** Windows ZIP 的 SHA-256 为 `6650f0a6ecb429360b4ca152485d6947d21a2b57da091ce65a7c2a491f6dbfe2`。13 项验证中 12 项通过，PII 精确应用 3 条许可证豁免，质量分 100/100（A）。Security Scan 的 SkillSpector 退出码为 2，发布资格为 `incomplete`。PyMuPDF wheel 的完整字节数为 19,826,532，超过扫描器单文件缓存的 16 MiB，其 ZIP 中央目录从偏移 19,816,122 开始。完整 wheel 的 119 个条目通过 CRC 校验。
 
