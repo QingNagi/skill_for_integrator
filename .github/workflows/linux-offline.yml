@@ -32,8 +32,11 @@ jobs:
       - name: Prepare a host with an existing Office conversion backend
         run: |
           if ! command -v soffice >/dev/null; then
-            sudo apt-get -qq update
-            sudo apt-get install -y --no-install-recommends libreoffice-writer
+            sources=/etc/apt/sources.list.d/ubuntu.sources
+            if [[ ! -s "$sources" ]]; then sources=/etc/apt/sources.list; fi
+            apt_sources=(-o "Dir::Etc::sourcelist=$sources" -o 'Dir::Etc::sourceparts=-' -o Acquire::Retries=3)
+            sudo apt-get "${apt_sources[@]}" -qq update
+            sudo apt-get "${apt_sources[@]}" install -y --no-install-recommends libreoffice-writer
           fi
       - name: Validate package on its native CPU without network access
         run: |

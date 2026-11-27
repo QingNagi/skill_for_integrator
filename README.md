@@ -4,7 +4,7 @@
 
 ## 内网首次使用
 
-**发布评审状态为待复核。** Windows 全量套装的 SkillSpector 原始建议为 `CRITICAL / DO_NOT_INSTALL`。PyMuPDF wheel 超过扫描器的单文件读取上限，同时报告保留了其他高风险发现。部署验收和 SHA-256 校验不能代替安全放行。[Tier 1 复核记录](qa/README.md)
+**发布评审状态为待复核。** Windows 全量套装的 SkillSpector 原始建议为 `CRITICAL / DO_NOT_INSTALL`。PyMuPDF wheel 超过扫描器的单文件读取上限，同时报告保留了其他高风险发现。部署验收和 SHA-256 校验不能代替安全放行。[Tier 1 复核记录](https://github.com/QingNagi/skill_for_integrator/blob/main/qa/README.md)
 
 从仓库下载下方的完整 ZIP，再拷入内网交给 Agent。GitHub 页面上的 “Download ZIP” 下载的是源码，预装的解释器和 OCR 模型在部署包内。
 
