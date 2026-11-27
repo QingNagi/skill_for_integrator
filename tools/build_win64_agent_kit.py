@@ -37,6 +37,7 @@ def build_kit(output, sources):
             top = "doc-integrator/"
             for name in ("run.ps1", "install.ps1", "README.md"):
                 archive.write(root / "tools" / "offline" / name, top + name)
+            archive.writestr(top + "run.sh", (root / "tools/offline/windows-bash.sh").read_text(encoding="utf-8"))
             docs = [root / "SKILL.md", root / "vendor/README.md", root / "THIRD_PARTY_NOTICES.md"]
             for file in docs + sorted((root / "reference").glob("*.md")):
                 archive.write(file, top + file.relative_to(root).as_posix())

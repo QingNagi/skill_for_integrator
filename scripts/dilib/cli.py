@@ -222,17 +222,47 @@ def cmd_outline(a):
 
 
 def cmd_show(a):
+    import re
+    from .content import render_table
+
     job = Job(a.job)
-    alias, ref = parse_ref(a.ref)
-    md = job.model(alias)
-    if md.m["type"] == "xlsx":
-        out(render_sheet(md, ref if ref != "*" else None, max_rows=a.rows_max))
-    else:
-        if a.rows and ref.startswith("T"):
-            from .content import render_table
-            out(render_table(md, ref, rows=a.rows, full=a.full))
+    refs = list(dict.fromkeys(parse_ref(value) for value in a.ref))
+    if a.rows:
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", a.rows)
+        if not match or (match[2] and int(match[2]) < int(match[1])):
+            raise DIError("--rows 应为从 0 起的行号或行范围，例如 2 或 2-5")
+
+    def render(md, ref):
+        row = re.fullmatch(r"(T\d+)\.R(\d+)", ref)
+        if row and md.get(row[1]) is not None:
+            if int(row[2]) >= md.get(row[1])["nrows"]:
+                raise DIError("找不到表格行 " + ref)
+            return render_table(md, row[1], rows=row[2], full=a.full)
+        if a.rows and md.get(ref) is not None and md.get(ref).get("t") == "tbl":
+            return render_table(md, ref, rows=a.rows, full=a.full)
+        return render_block(md, ref, full=a.full)
+
+    for alias, ref in refs:
+        md = job.model(alias)
+        page_ref = re.fullmatch(r"page(\d+)", ref) if md.m["type"] == "pdf" else None
+        if len(a.ref) > 1 or page_ref:
+            out("[%s:%s]" % (alias, ref))
+        if md.m["type"] == "xlsx":
+            out(render_sheet(md, ref if ref != "*" else None, max_rows=a.rows_max))
+        elif page_ref:
+            page = int(page_ref[1])
+            blocks = [b for b in md.m["blocks"] if b.get("page") == page]
+            unread = [u for u in md.m.get("unread", []) if u.get("page") == page]
+            if page < 1 or (not blocks and not unread and page > md.m.get("stats", {}).get("pages", 0)):
+                raise DIError("%s 找不到第 %d 页" % (alias, page))
+            for b in blocks:
+                out("%s:%s" % (alias, render(md, b["id"])))
+            for item in unread:
+                out("未读取：" + item["why"])
+            if not blocks and not unread:
+                out("本页没有可显示的内容。")
         else:
-            out(render_block(md, ref, full=a.full))
+            out(render(md, ref))
 
 
 def cmd_search(a):
@@ -464,7 +494,11 @@ def cmd_find(a):
     limit = a.top if a.top is not None else (None if a.exact else 6)
     for sc, p in res[:limit]:
         out("%.2f  %s" % (sc, p))
-    if len(res) > 1 and res[0][0] - res[1][0] < 0.1:
+    if a.exact:
+        names = [os.path.basename(p).casefold() for _, p in res]
+        if len(names) != len(set(names)):
+            out("有同名文件。请列出对应路径，请用户确认需要哪份。")
+    elif len(res) > 1 and res[0][0] - res[1][0] < 0.1:
         out("（前几个匹配度接近：如不确定用哪个，请向用户确认）")
 
 
@@ -580,6 +614,8 @@ def run_selfcheck(path):
         return None
     for ln in selfcheck.render(rep):
         out('  ' + ln)
+    if rep.comment_counts is not None:
+        out('  实际 Word 批注共 %d 条，其中本助手署名 %d 条。' % tuple(rep.comment_counts))
     if rep.has_errors():
         out('  [注意] 草稿有结构问题：在 Word/WPS 里可能打不开或批注链接失效；定稿时严重项会拦截')
     return rep
@@ -877,9 +913,9 @@ def main(argv=None):
     s.add_argument("--depth", type=int, default=3)
     s.set_defaults(fn=cmd_outline)
 
-    s = sp.add_parser("show", help="按ID查看局部内容，如 S1:H5 / S1:T3 / S2:Sheet1!A1:D20")
+    s = sp.add_parser("show", help="一次查看多个章节、表格或 PDF 页，如 S1:H5 S1:T3 S2:page1")
     s.add_argument("job")
-    s.add_argument("ref")
+    s.add_argument("ref", nargs="+", help="一个或多个来源引用；相同引用只显示一次")
     s.add_argument("--full", action="store_true")
     s.add_argument("--rows", help="表格行范围，如 0-10")
     s.add_argument("--rows-max", type=int, default=40)

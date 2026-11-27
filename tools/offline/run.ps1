@@ -100,6 +100,7 @@ function Find-InstalledSkill {
 if ($MyInvocation.InvocationName -eq '.') { return }
 
 $ErrorActionPreference = 'Stop'
+if ([Console]::IsOutputRedirected) { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) }
 $cliArguments = @($args)
 $digest = Read-OfflineDigest $PSScriptRoot
 $private = Get-PrivateSkillPath $digest

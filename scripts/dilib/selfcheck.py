@@ -15,6 +15,7 @@ import zipfile
 from urllib.parse import unquote
 
 from .environment import environment_lines
+from .common import TOOL_AUTHOR
 from .safe_xml import parse_xml
 
 ERROR, WARN, INFO = 'error', 'warn', 'info'
@@ -55,6 +56,7 @@ class Report(object):
         self.over = {}
         self._seen = set()
         self._n = {}
+        self.comment_counts = None
 
     def add(self, sev, code, part, msg):
         key = (sev, code, part, msg)
@@ -538,9 +540,13 @@ def check_comments(pkg, rep):
     cids = {}
     have = cpart in pkg.index
     root = pkg.xml(cpart) if have else None
+    rep.comment_counts = [0, 0] if root is not None or not have else None
     for c in (root if root is not None else []):
         if _local(c.tag) != 'comment':
             continue
+        rep.comment_counts[0] += 1
+        if c.get(W('author')) == TOOL_AUTHOR:
+            rep.comment_counts[1] += 1
         cid = c.get(W('id'))
         if not _isnum(cid):
             rep.add(ERROR, 'comment-id-bad', cpart, '批注 id 缺失或不是数字：%s' % cid)
