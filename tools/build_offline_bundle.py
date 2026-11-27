@@ -31,6 +31,9 @@ def files(plat):
     pure = {'vendor/py/' + spec[0] for spec in fv.PURE_WHEELS.values()}
     native = 'vendor/wheels/%s/%s' % (plat, fv.WHEELS[plat][0]) if plat else None
     for r, ds, fs in os.walk(ROOT):
+        if r == ROOT:
+            ds[:] = [d for d in ds if d in ('profiles', 'reference', 'rules', 'scripts', 'tests', 'tools', 'vendor')]
+            fs = [f for f in fs if f in ('SKILL.md', 'README.md', 'THIRD_PARTY_NOTICES.md')]
         ds[:] = sorted(d for d in ds if d not in SKIP_DIRS)
         for f in sorted(fs):
             if f.endswith(SKIP_EXT):

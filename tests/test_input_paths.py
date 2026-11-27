@@ -1,5 +1,6 @@
 import contextlib
 import io
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -9,10 +10,31 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from dilib.cli import main
 from dilib.content import load_model
+from dilib.job import Job
 from dilib.write_docx import Snapshots
 
 
 class InputPathsTests(unittest.TestCase):
+    def test_default_output_uses_callers_directory_for_external_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inputs, project = root / "来件", root / "本项目"
+            inputs.mkdir()
+            project.mkdir()
+            target, source = inputs / "目标.txt", inputs / "来源.txt"
+            target.write_text("模板", encoding="utf-8")
+            source.write_text("文本", encoding="utf-8")
+            original = os.getcwd()
+            try:
+                os.chdir(project)
+                job = Job.create(str(target), [str(source)], name="本次")
+                other = Job.create(str(target), [str(source)], out_root="另存", name="本次")
+            finally:
+                os.chdir(original)
+            self.assertEqual(Path(job.dir), project / "整合输出" / "本次")
+            self.assertEqual(Path(other.dir), project / "另存" / "本次")
+            self.assertFalse((inputs / "整合输出").exists())
+
     def test_identical_bytes_keep_the_selected_path_and_format(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

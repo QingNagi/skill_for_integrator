@@ -216,7 +216,7 @@ def cmd_outline(a):
             else:
                 out(outline(md, al, max_lines=a.lines, max_depth=a.depth, section=a.section))
     else:
-        cache = os.path.join(os.path.dirname(os.path.abspath(f)), "整合输出", "_缓存")
+        cache = os.path.abspath(os.path.join("整合输出", "_缓存"))
         out(outline(Model(load_model(f, cache), "F"), "F", max_lines=a.lines, max_depth=a.depth, section=a.section))
 
 
@@ -761,7 +761,7 @@ def cmd_batch(a):
     if a.action == "new":
         with open(a.manifest, encoding="utf-8-sig") as f:
             rows = list(csv.DictReader(f)) if a.manifest.lower().endswith(".csv") else json.load(f)
-        out_root = a.out or os.path.join(os.path.dirname(os.path.abspath(a.manifest)), "整合输出")
+        out_root = os.path.abspath(a.out or "整合输出")
         jobs = []
         for r in rows:
             tgt = r.get("目标") or r.get("target")

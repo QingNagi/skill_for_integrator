@@ -50,3 +50,7 @@
 | PyMuPDF（Windows wheel） | 1 / 0 / 199 | 高告警在 `get_tessdata()` 中的 shell 调用，命令参数来自固定的两个可执行文件名。技能的常规文本读取不调用该 OCR 配置函数。|
 
 PII 扫描报告 1 个高级别分组（pypdf 源文件公开的作者署名联系方式），以及 5 个中级别分组（PDF 规范章节编号及 UTC 时区偏移量）。上游文件与许可保持原样。上述结果仅覆盖指定的展开文件与扫描器规则，不构成全平台二进制审计。复核命令见 [vendor 说明](vendor/README.md)。
+
+## 5. GNU/Linux 自部署套装
+
+两个架构使用 [Astral python-build-standalone 20261026](https://github.com/astral-sh/python-build-standalone/releases/tag/20261026) 的可迁移 CPython 3.14.10。对应归档的文件名、字节数和 SHA-256 固定在 `tools/build_linux_agent_kit.py`，载荷保留上游随附许可。两种架构使用表中对应的 manylinux wheel 和同版本中英文 OCR 模型。

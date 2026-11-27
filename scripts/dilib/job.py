@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """任务目录管理。
 
-<输出根目录>/                       默认 = 目标文件所在目录/整合输出
+<输出根目录>/                       默认 = 发起命令的工作目录/整合输出
   _缓存/                            解析结果与格式转换缓存（多任务共享，按内容哈希）
   <目标名>_<时间>/                  一个任务
     job.json                        任务信息（目标、源文件、任务描述、排版规范、输出格式）
@@ -60,7 +60,7 @@ class Job:
                     srcs.append(p)
         if not srcs:
             raise DIError("至少需要一个源文件（--source）")
-        out_root = os.path.abspath(out_root or os.path.join(os.path.dirname(target), "整合输出"))
+        out_root = os.path.abspath(out_root or "整合输出")
         stem = os.path.splitext(os.path.basename(target))[0]
         name = safe_name(name or "%s_%s" % (stem, datetime.datetime.now().strftime("%Y%m%d-%H%M%S")))
         d = os.path.join(out_root, name)
