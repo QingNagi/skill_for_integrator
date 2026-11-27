@@ -2,6 +2,7 @@
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 
@@ -46,6 +47,29 @@ class VendorIntegrityTests(unittest.TestCase):
                 changed = Path(tmp) / wheel
                 changed.write_bytes(data)
                 self.assertFalse(fetch.is_good(changed, size, digest))
+
+    def test_transient_windows_share_denial_does_not_abort_verified_publication(self):
+        spec = fetch.PURE_WHEELS["pdfplumber"]
+        path = Path(fetch.VENDOR) / "py" / spec[0]
+        if not path.exists():
+            self.skipTest("Prepare verified wheel inputs")
+        rename = bs.os.rename
+        denied = PermissionError("Temporary share denial")
+        denied.winerror = 5
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache"
+            calls = []
+
+            def initially_busy(src, dst):
+                calls.append(dst)
+                if len(calls) == 1:
+                    raise denied
+                rename(src, dst)
+
+            with patch.object(bs.os, "rename", side_effect=initially_busy):
+                dest = Path(bs._unpack(path, spec, cache))
+            self.assertEqual(calls, [dest, dest])
+            self.assertTrue((dest / "pdfplumber/__init__.py").is_file())
 
     def test_untrusted_wheel_and_modified_extracted_code_are_rejected(self):
         spec = fetch.PURE_WHEELS["pypdf"]

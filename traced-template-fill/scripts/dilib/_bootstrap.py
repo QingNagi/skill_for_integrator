@@ -12,6 +12,7 @@ import stat
 import sys
 import sysconfig
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -115,6 +116,24 @@ def _verified_cache(dest, archive):
     return checked == actual
 
 
+def _publish_wheel(stage, dest):
+    # On Windows a file observer can hold a child without delete sharing.
+    # The extracted tree stays private until a single rename succeeds.
+    deadline = time.monotonic() + 5
+    delay = 0.05
+    while True:
+        try:
+            os.rename(stage, dest)
+            return
+        except OSError as exc:
+            if dest.exists():
+                return  # A concurrent publisher won. The caller verifies its tree.
+            if getattr(exc, "winerror", None) not in (5, 32, 33) or time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.4)
+
+
 def _unpack(path, spec, cache):
     name, size, digest, _ = spec
     with path.open("rb") as stream:
@@ -128,11 +147,7 @@ def _unpack(path, spec, cache):
                 with tempfile.TemporaryDirectory(dir=cache) as tmp:
                     stage = Path(tmp) / "wheel"
                     archive.extractall(stage)
-                    try:
-                        os.rename(stage, dest)
-                    except OSError:
-                        if not dest.exists():
-                            raise
+                    _publish_wheel(stage, dest)
             if not _verified_cache(dest, archive):
                 raise ValueError("轮子缓存校验失败：" + str(dest))
     return str(dest)
