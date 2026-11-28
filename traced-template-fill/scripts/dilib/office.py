@@ -5,7 +5,6 @@
    环境变量 DI_OFFICE=word|wps|libreoffice 可强制指定。"""
 from __future__ import annotations
 
-from collections import ChainMap
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 import os
@@ -15,6 +14,7 @@ import sys
 import tempfile
 
 from .common import DIError, file_sha1
+from .child_process import child_environment, program_directories
 
 WORD_FMT = {"docx": 16, "doc": 0, "pdf": 17, "rtf": 6, "txt": 7, "html": 10}
 EXCEL_FMT = {"xlsx": 51, "xls": 56, "pdf": 57, "csv": 6}
@@ -38,16 +38,12 @@ def _reg_has(progid):
 
 
 def _program_on_path(name):
-    if os.name != "nt":
-        return shutil.which(name)
-    # Windows which() can put the current project ahead of PATH.
-    cwd = Path.cwd()
-    for directory in os.get_exec_path():
-        folder = Path(directory.strip('"'))
-        if folder.is_absolute() and Path(os.path.abspath(folder)) != cwd:
-            executable = folder / (name + ".exe")
-            if executable.is_file():
-                return str(executable)
+    if name not in ("soffice", "libreoffice", "powershell", "pwsh"):
+        return None
+    for directory in program_directories():
+        executable = Path(directory) / (name + ".exe" if os.name == "nt" else name)
+        if executable.is_file() and os.access(executable, os.X_OK):
+            return str(executable)
     return None
 
 
@@ -60,7 +56,7 @@ def _find_soffice():
               "/usr/bin/soffice", "/usr/local/bin/soffice",
               "/Applications/LibreOffice.app/Contents/MacOS/soffice",
               "/opt/libreoffice/program/soffice"):
-        if os.path.exists(c):
+        if os.path.isabs(c) and os.path.isfile(c) and os.access(c, os.X_OK):
             return c
     return None
 
@@ -154,9 +150,9 @@ def _run_ps(script, args, timeout=600):
         raise DIError("找不到已安装的 PowerShell")
     cmd = [ps, "-NoProfile", "-NonInteractive", "-File", str(script)] + list(args)
     try:
-        child_env = ChainMap({"TEMP": tmpdir, "TMP": tmpdir}, os.environ)
-        run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=child_env,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        run = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             timeout=timeout, cwd=tmpdir, env=child_environment(scratch=tmpdir),
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if run.returncode:
             raise DIError("PowerShell 转换脚本未完成（退出码 %d），请检查脚本执行策略或使用 LibreOffice" % run.returncode)
     except subprocess.TimeoutExpired:
@@ -232,9 +228,9 @@ def _lo_convert(soffice, src, dst_fmt, dst):
             profile = profile_dir.as_uri()
             cmd = [soffice, "-env:UserInstallation=" + profile, "--headless", "--norestore",
                    "--convert-to", filt, "--outdir", str(stage), str(source)]
-            env = ChainMap({"TEMP": work, "TMP": work, "TMPDIR": work}, os.environ)
-            run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600,
-                                 cwd=work, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            run = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 timeout=600, cwd=work, env=child_environment(scratch=work),
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if run.returncode:
                 return "LibreOffice 转换失败（退出码 %d）" % run.returncode
             generated = stage / (source.stem + "." + dst_fmt)
@@ -343,6 +339,9 @@ def convert_many(items):
     results = {}
     groups = {"word": [], "excel": []}
     for src, dst, fmt in items:
+        if not (isinstance(fmt, str) and fmt.isascii() and fmt.isalnum()):
+            results[dst] = "输出格式必须是文件扩展名"
+            continue
         try:
             os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
         except OSError as exc:
@@ -407,6 +406,8 @@ def convert_many(items):
 
 def convert(src, fmt, dst=None, cache_dir=None):
     """单文件转换；cache_dir 提供时按内容哈希缓存。"""
+    if not (isinstance(fmt, str) and fmt.isascii() and fmt.isalnum()):
+        raise DIError("输出格式必须是文件扩展名")
     if dst is None:
         base = os.path.splitext(os.path.basename(src))[0]
         if cache_dir:

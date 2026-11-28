@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 
+from .child_process import child_environment, tesseract_path
+
 # Tesseract confidence is on a 0–100 scale. This flags words for human review.
 WORD_REVIEW_THRESHOLD = 80
 
@@ -172,12 +174,15 @@ def recognize_image(image, options):
     image.convert('L').save(data, format='PPM')
     # The child alone changes working directory. Narrow-path native model I/O
     # therefore uses ASCII even when the installation is under a Chinese path.
-    command = [os.path.abspath(options['executable']), 'stdin', 'stdout', '--tessdata-dir', '.',
+    command = [tesseract_path(options['executable']), 'stdin', 'stdout', '--tessdata-dir', '.',
                '-l', options['language'], '--dpi', str(options.get('dpi', 300)),
                '-c', 'tessedit_create_tsv=1']
-    proc = subprocess.run(command, cwd=options['tessdata'], input=data.getvalue(),
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
-                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    try:
+        proc = subprocess.run(command, cwd=options['tessdata'], input=data.getvalue(),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+                              env=child_environment(ocr=True), creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError('Tesseract 识别超时') from exc
     if proc.returncode:
         detail = proc.stderr.decode('utf-8', 'replace').strip()[-350:]
         raise ValueError('Tesseract (%d) %s' % (proc.returncode, detail))

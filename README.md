@@ -6,11 +6,11 @@
 
 Windows x64、Linux x86_64 和 Linux aarch64 各有独立的运行时套装，均使用同一份技能指令。离线套装包括 Python、PDF 后端和中英文 OCR；旧版 Word/Excel 文档转换与 PDF 导出使用目标机已有的办公软件。
 
-**当前交付版本为 1.1.2，完整包供本地验收。** 已用本机 Claude Code 和配置的 DeepSeek 实际填写记录、按批注摘抄和处理批量任务。报告分别记录了准确率、漏填、工具调用和判分依据。官方扫描仍有未解决项，公开仓库仅发布源代码。[内网使用手册](tools/offline/README.md) · [第二轮验收与跨平台结果](qa/reports/second-review/README.md) · [官方安全扫描](qa/reports/second-review/official-security.md)
+**当前交付版本为 1.2.0，完整包供本地验收。** 已用本机 Claude Code 和配置的 DeepSeek 实际填写记录、按批注摘抄和处理批量任务。报告分别记录了准确率、漏填、工具调用和判分依据。官方扫描仍有未解决项，公开仓库仅发布源代码。[内网使用手册](tools/offline/README.md) · [第二轮验收与跨平台结果](qa/reports/second-review/README.md) · [第三轮验收与安全扫描](qa/reports/third-review/README.md)
 
 ## 源码安装与调用
 
-只复制仓库内的 [traced-template-fill](traced-template-fill) 文件夹，保留其中的脚本、规则、排版配置和离线依赖。在项目内选择对应宿主的技能目录；已配置两个入口指向同一目录时，只需维护一份内容。
+维护者可直接运行仓库内的 [traced-template-fill](traced-template-fill)。部署到其他电脑时将构建好的技能 ZIP 解压至宿主技能目录；需要内置解释器、PDF 和 OCR 的电脑还需解压与该技能版本配对的平台运行时。在项目内选择对应宿主的技能目录；已配置两个入口指向同一目录时，只需维护一份内容。
 
 | 使用环境 | 项目内位置 | 调用示例 |
 |---|---|---|
@@ -55,7 +55,8 @@ Claude Code 也可将文件夹放入用户目录下的 `.claude/skills/`，供�
 | 产物 | 内容 | 使用位置 |
 |---|---|---|
 | source ZIP | 可独立安装的技能，不含 wheel 或解释器 | 用于技能本体复核 |
-| lite ZIP | 技能与两个纯 Python wheel | 已有 Python 3.10+，需 PDF 文本提取 |
+| 精简依赖 ZIP | 两个纯 Python wheel、固定版本、哈希与许可证 | 与技能 ZIP 搭配；已有 Python 3.10+，仅需 PDF 文本层 |
+| 平台运行时 | 此架构的 Python、PDF 原生库、中文和英文 OCR、校验清单与许可 | 与同一构建的技能 ZIP 解压到同一个 skills 父目录 |
 | 完整离线套装 | 技能、对应架构 Python、PDF 原生组件、中英文 OCR 模型及许可证 | 本地验收；项目许可与发布审批待定 |
 
 以下命令从仓库根目录运行，输出到仓库外的 `../release/`。依赖下载仅在构建机进行。校验、构建阶段可以从 `--vendor-dir` 或 `--from-dir` 指定的本地目录取原件。
@@ -70,13 +71,15 @@ foreach ($platform in 'win_amd64','manylinux_x86_64','manylinux_aarch64') {
     & ./.build/zig/Scripts/python.exe tools/build_ocr_runtime.py --zig $zig --platform $platform
     if ($LASTEXITCODE) { throw "OCR 构建失败 ($platform)" }
 }
+python tools/build_win64_agent_kit.py --runtime-only --out ../release/traced-template-fill-runtime-win64.zip
 python tools/build_win64_agent_kit.py --out ../release/traced-template-fill-offline-win64.zip
 python tools/build_linux_agent_kit.py --arch all --fetch-inputs --from-dir ../build-inputs --out ../release
+python tools/build_linux_agent_kit.py --arch all --runtime-only --from-dir ../build-inputs --out ../release
 ```
 
-以上是 Windows 构建机的三平台交叉编译示例。部署到内网只需相应架构的完整包。维护者也可预置与清单匹配的 Tesseract 程序和原始依赖，再离线组装。[构建输入、原件摘要与工具链](traced-template-fill/vendor/README.md)
+以上是 Windows 构建机的三平台交叉编译示例。正式配对部署时，将技能 ZIP 与相应架构的运行时解压至同一个宿主技能父目录。完整套装用于本地验收。已备齐原件、Tesseract 和 wheel 后，可离线执行 `python -B tools/build_offline_bundle.py --platform release --tag 1.2.0 --from-dir ../build-inputs --out ../release`，一次生成八件和总哈希清单。[构建输入、原件摘要与工具链](traced-template-fill/vendor/README.md)
 
-同一份 Markdown 手册随完整包交付。对每个 ZIP 分别运行 Tier 1；本体通过的项目不能直接计入运行时的安全结论。SHA-256 用于核对收到的字节；部署方通过可信渠道取得摘要或签名后再核验。[第三方组件和许可](traced-template-fill/THIRD_PARTY_NOTICES.md) · [评审入口与证据](qa/README.md)
+同一份 Markdown 手册随完整包交付。对独立技能 ZIP 运行官方 Tier 1。依赖和运行时另外核对原件、许可、SBOM、漏洞记录及解包后的病毒扫描。完整套装供本地验收。SHA-256 用于核对收到的字节；部署方通过可信渠道取得摘要或签名后再核验。[第三方组件和许可](traced-template-fill/THIRD_PARTY_NOTICES.md) · [评审入口与证据](qa/README.md)
 
 ## 数据流
 

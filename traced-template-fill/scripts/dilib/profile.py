@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 import os
 import re
 
@@ -41,7 +42,7 @@ def load(name_or_path=None, skill_dir=None, project=None):
         return prof
     path = name_or_path
     if not os.path.exists(path) and skill_dir:
-        for folder in (project or preferences.project_dir(), preferences.user_dir(), skill_dir):
+        for folder in (project or preferences.project_dir(), preferences.user_dir(), Path(skill_dir) / "config", skill_dir):
             cand = os.path.join(folder, "profiles", preferences.profile_name(name_or_path))
             if os.path.isfile(cand):
                 path = cand

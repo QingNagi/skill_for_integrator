@@ -776,13 +776,20 @@ class DocxWriter:
             for o in struct:
                 self.add_rows(o)
             self.reload_after_structure(os.path.join(tmp_dir, "_struct.docx"))
-        order = {"set_cell": 1, "append_runs": 1, "fill_blanks": 1, "set_text": 1, "format_heading": 2,
-                 "insert_section": 3, "comment": 4}
-        for o in sorted([o for o in ops if o["op"] != "add_rows"], key=lambda o: order.get(o["op"], 5)):
-            fn = getattr(self, o["op"] if o["op"] != "comment" else "comment_op", None)
-            if fn is None:
+        edits = {"set_cell": (1, self.set_cell), "append_runs": (1, self.append_runs),
+                 "fill_blanks": (1, self.fill_blanks), "set_text": (1, self.set_text),
+                 "format_heading": (2, self.format_heading), "insert_section": (3, self.insert_section),
+                 "comment": (4, self.comment_op)}
+        pending = []
+        for o in ops:
+            if o["op"] == "add_rows":
+                continue
+            edit = edits.get(o["op"])
+            if edit is None:
                 self.warnings.append("未知操作 %s" % o["op"])
                 continue
+            pending.append((*edit, o))
+        for _, fn, o in sorted(pending, key=lambda item: item[0]):
             try:
                 fn(o)
             except Exception as e:  # 单个操作失败不影响整体

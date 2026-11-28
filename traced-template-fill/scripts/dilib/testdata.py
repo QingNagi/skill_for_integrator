@@ -31,7 +31,7 @@ DEFAULT_RULES = {
     "pass_text": "合格", "fail_text": "不合格",
     "decimals": 2, "min_sig": 3, "precision": "source", "symbol_formats": {},
 }
-with (Path(__file__).resolve().parents[2] / "rules" / "test-data.json").open(encoding="utf-8") as stream:
+with (Path(__file__).resolve().parents[2] / "config" / "rules" / "test-data.json").open(encoding="utf-8") as stream:
     DEFAULT_RULES.update(json.load(stream))
 
 
@@ -292,7 +292,7 @@ def display_measurement(value, rules, lo, hi, *, preserve_limit=True):
         if "." in rounded:
             rounded = rounded.rstrip("0").rstrip(".")
     elif mode == "source" and source_scale < decimals:
-        # Extra digits introduced solely by the display rule do not express source precision.
+        # 保留原值的小数位数，包括末尾的零。
         rounded = format(Decimal(rounded), ".%df" % max(0, source_scale))
     return "0" if rounded == "-0" else rounded
 

@@ -13,7 +13,7 @@ import zipfile
 
 from . import office
 from .common import TOOL_AUTHOR, DIError, ReviewBlocked, ensure_dir, lock_file_of, short
-from .decisions import record_decision, require_quote
+from .decisions import answer_binding, record_decision, require_quote, verify_receipts
 from .ooxml import NS, W_P, W_R, W_T, Package, validate_package_limits, w
 from .safe_xml import parse_xml
 
@@ -103,7 +103,7 @@ def import_word_answers(job, pkg, infos, version_name, input_fp):
                 raise ReviewBlocked("Word 核对 %s 与当前确认答案冲突，请核对并重新生成草稿。" % q["id"])
         else:
             changes[q["key"]] = {"choice": [idx], "label": option["label"], "effect": option["effect"],
-                                 "fp": input_fp, "confirmed_by": reply["author"], "user_quote": reply["text"],
+                                 "fp": input_fp, "confirmed_by": reply["author"], "user_quote": reply["text"], "receipt_version": 2,
                                  "answered_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
                                  "word_draft": version_name, "word_parent": root["id"], "word_reply": reply["id"]}
         # A positive source or sample mapping can release previously withheld
@@ -114,7 +114,7 @@ def import_word_answers(job, pkg, infos, version_name, input_fp):
         for key, rec in changes.items():
             record_decision(job, "Word 核对", rec["user_quote"], draft=version_name, key=key,
                             option=rec["label"], fp=input_fp, author=rec["confirmed_by"],
-                            comment=rec["word_parent"], reply=rec["word_reply"])
+                            comment=rec["word_parent"], reply=rec["word_reply"], binding=answer_binding(rec))
         job.write("answers.json", dict(answers, **changes))
     if redraw:
         raise ReviewBlocked("Word 核对 %s 已登记，测量计划须重新生成草稿后再定稿。" % "、".join(redraw))
@@ -448,6 +448,7 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
     pkg = Package(draft)
     infos = comments_info(pkg)
     import_word_answers(job, pkg, infos, version_name, draft_fp)
+    verify_receipts(job, version_name, draft_fp)
     tmpl = {(a, t) for a, t in job.data.get("template_comments", [])}
     tool = {c["id"] for c in infos if c["author"] == TOOL_AUTHOR}
     template = {c["id"] for c in infos if (c["author"], c["text"]) in tmpl}

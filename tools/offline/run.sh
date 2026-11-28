@@ -34,6 +34,7 @@ read_checksum() {
 }
 read_checksum "$kit/payload.sha256" || fail '无法读取有效的 payload.sha256'
 digest=$checksum
+[ "$digest" = '@PAYLOAD_SHA256@' ] || fail '载荷摘要与启动器不匹配'
 case "$digest" in ''|*[!0123456789abcdef]*) fail 'payload.sha256 格式无效' ;; esac
 [ "${#digest}" = 64 ] || fail 'payload.sha256 长度无效'
 
@@ -41,7 +42,7 @@ ready() {
     read_checksum "$1/.offline-payload.sha256" && [ "$checksum" = "$digest" ] &&
         [ -x "$1/runtime/python/bin/python3" ] && [ -s "$1/runtime/python/lib/libpython@PYMINOR@.so.1.0" ] &&
         [ -s "$1/runtime/python/lib/python@PYMINOR@/encodings/__init__.py" ] && [ -s "$1/vendor/wheels.lock.json" ] &&
-        [ -s "$1/rules/test-data.json" ] && [ -s "$1/assets/offline-ocr.png" ] && [ -s "$1/runtime/tessdata/chi_sim.traineddata" ] && [ -s "$1/runtime/tessdata/eng.traineddata" ] &&
+        [ -s "$1/config/rules/test-data.json" ] && [ -s "$1/assets/offline-ocr.png" ] && [ -s "$1/runtime/tessdata/chi_sim.traineddata" ] && [ -s "$1/runtime/tessdata/eng.traineddata" ] &&
         [ -x "$1/runtime/ocr/tesseract" ] && [ -s "$1/vendor/ocr.lock.json" ] || return 1
     for script in @REQUIRED_FILES@; do
         [ -s "$1/$script" ] || return 1
@@ -80,6 +81,10 @@ else
                 fail '本地载荷 SHA256 校验失败'
             mkdir -- "$stage/skill"
             tar --extract --gzip --no-same-owner --file="$stage/payload.tar.gz" --directory="$stage/skill"
+            if [ -f "$stage/skill/runtime/stage_skill.py" ]; then
+                "$stage/skill/runtime/python/bin/python3" -I -B "$stage/skill/runtime/stage_skill.py" "$kit/.." "$stage/skill" ||
+                    fail '技能文件与运行时的配对清单不符'
+            fi
             cp -- "$kit/run.sh" "$kit/payload.sha256" "$stage/skill/"
             chmod 755 "$stage/skill/run.sh"
             # The acceptance test exercises the bundled configuration independent of
@@ -91,8 +96,8 @@ else
             if [ -e "$installed" ]; then
                 backup=$(mktemp -d -- "$cache/.previous.XXXXXXXX")
                 # Keep custom rules and retain the prior version if local files were damaged.
-                cp -- "$stage/skill/rules/test-data.json" "$stage/default-rules.json"
-                for custom in profiles rules; do
+                cp -- "$stage/skill/config/rules/test-data.json" "$stage/default-rules.json"
+                for custom in config/profiles config/rules; do
                     if [ -d "$installed/$custom" ]; then
                         mkdir -p -- "$stage/skill/$custom"
                         cp -a -- "$installed/$custom/." "$stage/skill/$custom/"
@@ -100,8 +105,8 @@ else
                 done
                 if ! "$stage/skill/runtime/python/bin/python3" -I -B -c \
                     'import json, sys; sys.exit(not isinstance(json.load(open(sys.argv[1], encoding="utf-8")), dict))' \
-                    "$stage/skill/rules/test-data.json"; then
-                    cp -- "$stage/default-rules.json" "$stage/skill/rules/test-data.json"
+                    "$stage/skill/config/rules/test-data.json"; then
+                    cp -- "$stage/default-rules.json" "$stage/skill/config/rules/test-data.json"
                 fi
                 mv -- "$installed" "$backup/skill"
                 if ! mv -- "$stage/skill" "$installed"; then

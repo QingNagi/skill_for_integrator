@@ -160,10 +160,10 @@ test ! -e "$input/整合输出"
 test ! -e "$input/目标.pdf"
 
 # Missing code must trigger recovery before Python starts, while keeping user rules and profiles.
-printf '{"custom":true}\n' > "$installed/rules/qa-local.json"
-printf '{"profile":"local"}\n' > "$installed/profiles/qa-local.json"
+printf '{"custom":true}\n' > "$installed/config/rules/qa-local.json"
+printf '{"profile":"local"}\n' > "$installed/config/profiles/qa-local.json"
 mv "$installed/scripts/dilib/office.py" "$test_dir/removed-office.py"
-: > "$installed/rules/test-data.json"
+: > "$installed/config/rules/test-data.json"
 if bash "$entry" --help > absent.log 2>&1; then exit 1; fi
 grep -Fq '本地 payload.tar.gz' absent.log
 mv "$test_dir/隔离载荷" "$kit/payload.tar.gz"
@@ -173,9 +173,9 @@ wait "$first" || { cat repair1.log; exit 1; }
 wait "$second" || { cat repair2.log; exit 1; }
 test "$(grep -h '离线自检通过' repair1.log repair2.log | wc -l)" -eq 1
 cmp "$test_dir/removed-office.py" "$installed/scripts/dilib/office.py"
-test -s "$installed/rules/test-data.json"
-grep -Fq '"custom":true' "$installed/rules/qa-local.json"
-grep -Fq '"profile":"local"' "$installed/profiles/qa-local.json"
+test -s "$installed/config/rules/test-data.json"
+grep -Fq '"custom":true' "$installed/config/rules/qa-local.json"
+grep -Fq '"profile":"local"' "$installed/config/profiles/qa-local.json"
 
 # A fresh user must reject altered bytes and must not publish an installation marker.
 bad="$test_dir/损坏套装"

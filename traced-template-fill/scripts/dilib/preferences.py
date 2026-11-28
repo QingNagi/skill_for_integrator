@@ -34,7 +34,9 @@ def migrate_installed_rules(skill_dir):
     legacy = []
     for install in current.parent.iterdir():
         marker = install / ".offline-payload.sha256"
-        learned = install / "rules" / "learned.json"
+        learned = install / "config" / "rules" / "learned.json"
+        if not learned.is_file():
+            learned = install / "rules" / "learned.json"
         if (install.resolve() != install or not re.fullmatch(r"[0-9a-f]{24}|[0-9a-f]{64}", install.name)
                 or not marker.is_file() or not learned.is_file() or learned.resolve() != learned):
             continue
@@ -55,7 +57,7 @@ def migrate_installed_rules(skill_dir):
 def mappings(skill_dir, job):
     migrate_installed_rules(skill_dir)
     answers = {}
-    for folder in (Path(skill_dir) / "rules", user_dir(), project_dir(job)):
+    for folder in (Path(skill_dir) / "config" / "rules", Path(skill_dir) / "rules", user_dir(), project_dir(job)):
         answers.update((read_json(folder / "learned.json", {}) or {}).get("answers", {}))
     return answers
 

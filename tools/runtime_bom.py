@@ -7,7 +7,7 @@ import zipfile
 
 import fetch_vendor as vendor_tools
 from build_offline_bundle import wheel_specs
-from prepare_win64_runtime import MODELS, MODEL_REV, MODEL_URL
+from prepare_win64_runtime import MODELS, MODEL_REV, MODEL_URL, PYTHON_EVIDENCE, PYTHON_URL
 
 
 def component(kind, name, version, digest, size, installed, license_path, url=None, license_name=None):
@@ -43,6 +43,11 @@ def ocr_binary(platform, vendor):
 def runtime_bom(platform, python_version, url, size, sha, python_license, vendor):
     parts = [component("platform", "CPython", python_version, sha, size, "runtime/python",
                        python_license, url, "Python distribution licenses")]
+    if platform == "win_amd64" and url == PYTHON_URL:
+        for suffix, (_, document_sha) in PYTHON_EVIDENCE.items():
+            parts[0]["externalReferences"].append({
+                "type": "bom" if suffix == ".spdx.json" else "digital-signature",
+                "url": url + suffix, "hashes": [{"alg": "SHA-256", "content": document_sha}]})
     for rel, package, (filename, size, digest, path) in wheel_specs(platform):
         with zipfile.ZipFile(Path(vendor) / rel) as archive:
             meta, = (n for n in archive.namelist() if n.endswith(".dist-info/METADATA"))

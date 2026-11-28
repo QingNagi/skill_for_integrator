@@ -1,0 +1,5 @@
+# Active baseline for the source release. See reports/third-review/security.md.
+version: 2
+scanner_version: "2.13.7"
+rules: []
+fingerprints: []

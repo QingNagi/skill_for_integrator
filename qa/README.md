@@ -1,4 +1,18 @@
-# Windows 离线技能的完整 Tier 1 复核
+# 源码技能的 Tier 1 门禁
+
+从仓库根目录构建源码 ZIP，在 PowerShell 7.2 以上运行官方静态检查。CI 在每次 push 和 pull request 上运行相同入口，保存 ZIP、SHA-256、无基线 SkillSpector JSON 和带基线的 SkillEvaluator JSON、HTML、Markdown。各次运行使用独立目录。[CI 工作流](../.github/workflows/skill-source-tier1.yml)
+
+```powershell
+python -B tools/build_offline_bundle.py --platform source --tag 1.2.0 --out ../release
+./qa/run-tier1.ps1 -SourceGate -PreviousVersion 1.1.2 -Package ../release/traced-template-fill-1.2.0-source.zip
+$LASTEXITCODE
+```
+
+工具安装在专用环境时，传入 `-Evaluator`、`-SkillSpector`、`-Gitleaks` 的绝对路径。内部接收条件为 13 项全部通过、无未完成扫描、直接扫描 complete、无活动 HIGH/CRITICAL、质量 A，且 6 个 harness 均可加载。这里使用 SkillEvaluator 1.2.1、SkillSpector 2.13.7 和 Gitleaks 8.30.1。Tier 1 的发布资格字段单独保留。NVIDIA 目录发布还需相应的 Tier 2 和 Tier 3 证据。[报告定义](https://docs.nvidia.com/skills/skillevaluator/reports)
+
+独立诊断始终保留全部发现。正式 Tier 1 接收仓库 qa 下有摘要固定的外部基线，`skillspector_baseline` 记录加载及抑制情况。第三轮基线是空集，因此入口核对抑制数为零。将来同意接受某条发现时，需登记两位复核人、证据、重审条件、负责人及到期日，再逐项更新基线、固定摘要和核对条件。路径适用性由上游分类器单独计算，原始分与适用分见 `skillspector_applicability`。依赖、Windows 运行时分别走供应链审核。[第三轮逐项记录](reports/third-review/security.md) · [上游基线语义](https://docs.nvidia.com/skills/skillevaluator/tier1-reference)
+
+## 1.1.2 及更早发布包的历史复核
 
 [最新 1.1.2 现场验收、Claude 过程与交付件摘要](reports/second-review/README.md) · [历史数据盲测和全流程验收](2026-11-28-数据核对与全流程复验.md) · [上一轮 PDF 后端迁移验收](2026-11-28-离线验收.md)
 

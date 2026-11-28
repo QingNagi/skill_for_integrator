@@ -7,10 +7,11 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import zipfile
 
 sys.dont_write_bytecode = True
-from fetch_vendor import mirror_opener
+from fetch_vendor import is_good, mirror_opener
 
 
 DOWNLOAD_TIMEOUT_SECONDS = 90
@@ -20,6 +21,11 @@ PYTHON_RELEASE = "https://www.python.org/downloads/release/python-31410/"
 PYTHON_URL = "https://www.python.org/ftp/python/3.14.10/" + PYTHON_ZIP
 PYTHON_SIZE = 12619664
 PYTHON_SHA256 = "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159"
+
+PYTHON_EVIDENCE = {
+    ".spdx.json": (15254, "d448c78f5fae170303d3b022d61507155e4d30e541c32bff3a4edd2b1e8dbf47"),
+    ".sigstore": (7275, "6025bde4c3672b62e4d19e16cbe9e3e6c921594ffc6014b0b6f30a970f6bf43f"),
+}
 
 MODEL_REPOSITORY = "https://github.com/tesseract-ocr/tessdata_fast"
 MODEL_REV = "87416418657359cb625c412a48b6e1d6d41c29bd"
@@ -47,6 +53,22 @@ def read_verified(source_dir, name, url, size, digest):
     return data
 
 
+def cache_inputs(source_dir):
+    source_dir.mkdir(parents=True, exist_ok=True)
+    assets = [(PYTHON_ZIP, PYTHON_URL, PYTHON_SIZE, PYTHON_SHA256)]
+    assets.extend((PYTHON_ZIP + suffix, PYTHON_URL + suffix, size, sha)
+                  for suffix, (size, sha) in PYTHON_EVIDENCE.items())
+    assets.extend((name, MODEL_URL + name, size, sha) for name, (size, sha, _) in MODELS.items())
+    for name, url, size, sha in assets:
+        dest = source_dir / name
+        if is_good(dest, size, sha):
+            continue
+        with tempfile.TemporaryDirectory(dir=source_dir) as tmp:
+            part = Path(tmp) / name
+            part.write_bytes(read_verified(None, name, url, size, sha))
+            os.replace(part, dest)
+
+
 def stage_runtime(out, source_dir):
     if out.exists():
         raise FileExistsError("Choose a fresh runtime destination: " + str(out))
@@ -58,8 +80,11 @@ def stage_runtime(out, source_dir):
         data = read_verified(source_dir, PYTHON_ZIP, PYTHON_URL, PYTHON_SIZE, PYTHON_SHA256)
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             archive.extractall(python_dir)
+        for suffix, (length, digest) in PYTHON_EVIDENCE.items():
+            evidence = read_verified(source_dir, PYTHON_ZIP + suffix, PYTHON_URL + suffix, length, digest)
+            (python_dir / (PYTHON_ZIP + suffix)).write_bytes(evidence)
         # Isolated embedded runtime: these entries resolve against this ._pth file.
-        (python_dir / "python314._pth").write_text("python314.zip\n.\n../../scripts\n", encoding="ascii")
+        (python_dir / "python314._pth").write_text("python314.zip\n.\n../../scripts\n", encoding="ascii", newline="\r\n")
         (python_dir / "SOURCE.md").write_text(
             "# Embedded CPython " + PYTHON_VERSION + " for Windows x64\n\n"
             "The Python Software Foundation distributes the [original ZIP](" + PYTHON_URL + "). "
@@ -67,7 +92,7 @@ def stage_runtime(out, source_dir):
             "The bundle preserves the original executable, DLLs, standard library and LICENSE.txt. "
             "The local python314._pth adds the skill's scripts directory. The embedded interpreter "
             "uses its private standard library and leaves global site packages disabled.\n",
-            encoding="utf-8",
+            encoding="utf-8", newline="\r\n",
         )
         data_dir = stage / "tessdata"
         data_dir.mkdir()
@@ -80,16 +105,29 @@ def stage_runtime(out, source_dir):
         for name, (size, sha, blob) in MODELS.items():
             (data_dir / name).write_bytes(read_verified(source_dir, name, MODEL_URL + name, size, sha))
             rows.append("| `%s` | %d | `%s` | `%s` |" % (name, size, sha, blob))
-        (data_dir / "SOURCE.md").write_text("\n".join(rows) + "\n", encoding="utf-8")
-        os.rename(stage, out)
+        (data_dir / "SOURCE.md").write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\r\n")
+        # Endpoint scanners may briefly hold files just extracted into this private directory.
+        for attempt in range(8):
+            try:
+                os.rename(stage, out)
+                break
+            except OSError as exc:
+                if out.exists() or getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 7:
+                    raise
+                time.sleep(0.1 * (attempt + 1))
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", required=True, type=Path, help="New runtime directory to create")
     parser.add_argument("--from-dir", type=Path, help="Use already downloaded original files, offline")
+    parser.add_argument("--fetch-inputs", action="store_true", help="Fetch pinned Windows originals into --from-dir")
     args = parser.parse_args(argv)
+    if args.fetch_inputs and not args.from_dir:
+        parser.error("--fetch-inputs requires --from-dir")
     try:
+        if args.fetch_inputs:
+            cache_inputs(args.from_dir)
         stage_runtime(args.out.resolve(), args.from_dir)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         parser.exit(1, "Runtime preparation failed: %s\n" % exc)

@@ -38,6 +38,34 @@ class WordWorkfileTests(unittest.TestCase):
             self.assertEqual(dst.read_bytes(), b"fresh")
             self.assertIn("di_lo_", error.getvalue())
 
+    def test_office_child_keeps_desktop_and_locale_but_omits_unrelated_settings(self):
+        from dilib import environment
+        with tempfile.TemporaryDirectory() as root:
+            def version(command, **kwargs):
+                env = kwargs.get("env") or os.environ
+                self.assertNotIn("EXAMPLE_API_KEY", env)
+                self.assertNotIn("DI_PRIVATE_NOTE", env)
+                self.assertEqual(env["LANG"], "zh_CN.UTF-8")
+                self.assertEqual(env["XDG_RUNTIME_DIR"], root)
+                return office.subprocess.CompletedProcess(command, 0, stdout=b"LibreOffice 24.8")
+            with patch.dict(os.environ, EXAMPLE_API_KEY="test", DI_PRIVATE_NOTE="test", LANG="zh_CN.UTF-8",
+                            XDG_RUNTIME_DIR=root), patch.object(office.subprocess, "run", side_effect=version):
+                self.assertEqual(environment._lo_version("soffice"), "LibreOffice 24.8")
+
+    def test_convert_rejects_format_options_before_launch(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(office, "_engines") as engines:
+            dst = Path(root) / "result.pdf"
+            result = office.convert_many([("sample.docx", dst, "pdf:arbitrary-filter")])
+            self.assertIn("格式", result[dst])
+            engines.assert_not_called()
+
+    def test_path_search_accepts_only_known_office_programs(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, PATH=tmp):
+            other = Path(tmp, "another-tool" + (".exe" if os.name == "nt" else ""))
+            other.touch()
+            other.chmod(0o755)
+            self.assertIsNone(office._program_on_path("another-tool"))
+
     def test_creates_missing_content_word_under_existing_user_cache(self):
         with tempfile.TemporaryDirectory() as cache:
             with patch.object(office, "_user_internet_cache", return_value=cache):

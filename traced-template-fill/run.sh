@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 skill=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+if [ -d "$skill/offline-runtime" ]; then
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) exec "$skill/offline-runtime/run.cmd" "$@" ;;
+        *) exec sh "$skill/offline-runtime/run.sh" "$@" ;;
+    esac
+fi
 if [ -x "$skill/runtime/python/bin/python3" ]; then
     exec "$skill/runtime/python/bin/python3" -E -s -B -X utf8 "$skill/scripts/di.py" "$@"
 fi

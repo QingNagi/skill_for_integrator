@@ -8,7 +8,7 @@ from pathlib import Path
 from .common import DIError, read_json, write_json
 from .preferences import locked_preferences, project_dir
 
-RULES = Path(__file__).resolve().parents[2] / "rules"
+RULES = Path(__file__).resolve().parents[2] / "config" / "rules"
 TYPES = {
     "src:verify": "批次身份", "src:spec": "规范适用", "td:source": "批次身份", "td:sheet": "批次身份",
     "td:samplemap": "样品对应", "td:duplicate": "样品对应", "td:no_suffix": "测试条件", "td:cond": "测试条件",
@@ -121,7 +121,8 @@ def save_plan_facts(job, plan, answers):
             if skey and published.get(skey) != by_key[key]:
                 folder = project_dir(job) / "facts"
                 with locked_preferences(folder):
-                    write_json(folder / (skey + ".json"), {"scope": skey, "origin_job": Path(job.dir).resolve().as_posix(), "answer": answer})
+                    write_json(folder / (skey + ".json"), {"scope": skey, "origin_job": Path(job.dir).resolve().as_posix(),
+                                                          "question": key, "answer": answer})
                     published[skey] = by_key[key]
 
     for entry in report.get("fills", []):

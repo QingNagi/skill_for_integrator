@@ -16,6 +16,8 @@ import time
 import zipfile
 from pathlib import Path
 
+from .child_process import tesseract_path
+
 _ROOT = Path(__file__).resolve().parents[2]
 _VENDOR = _ROOT / "vendor"
 _notes = []
@@ -33,8 +35,14 @@ def notes():
     return list(_notes)
 
 
+def _pin_file(name):
+    # A standalone skill carries the trusted pins alongside its configuration.
+    path = _ROOT / "config" / name
+    return path if path.is_file() else _ROOT / "vendor" / name
+
+
 def wheel_manifest():
-    return json.loads((_ROOT / "vendor/wheels.lock.json").read_text(encoding="utf-8"))
+    return json.loads(_pin_file("wheels.lock.json").read_text(encoding="utf-8"))
 
 
 def _digest(stream):
@@ -171,7 +179,7 @@ def delivery_mode():
         return "system"
     if (_ROOT / "runtime/python").is_dir():
         return "full"
-    marker = _ROOT / "vendor/pdf-mode.txt"
+    marker = _vendor_root() / "pdf-mode.txt"
     if marker.is_file():
         mode = marker.read_text(encoding="ascii").strip()
         if mode not in ("full", "lite"):
@@ -214,7 +222,8 @@ def activate_vendor():
 def use_pypdf():
     activate_vendor()
     try:
-        return importlib.import_module("pypdf")
+        import pypdf
+        return pypdf
     except ImportError as exc:
         _note("没有可用的 pypdf：" + str(exc))
         return None
@@ -256,6 +265,29 @@ def parsed_signature(options, backend):
     return options['signature']
 
 
+def _probe_ocr(options):
+    from PIL import Image, ImageDraw
+    from .pdf_ocr import recognize_image
+
+    def sample_text(image):
+        return "".join("".join(line["text"].split()) for line in recognize_image(image, options)).upper()
+
+    path = _ROOT / "assets/offline-ocr.png"
+    if path.is_file() or (_ROOT / "runtime/python").is_dir():
+        with Image.open(path) as image:
+            sample = sample_text(image)
+        if "中文离线识别" not in sample or "OFFLINEDOCUMENT2026" not in sample:
+            raise ValueError("中英文样张识别失败")
+        return "中英文样张自测通过。"
+    # A source install has no sample artwork or guaranteed local Chinese font.
+    with Image.new("L", (280, 55), 255) as image:
+        ImageDraw.Draw(image).text((8, 8), "OFFLINE DOCUMENT 2026", fill=0)
+        with image.resize((840, 165)) as scan:
+            if "OFFLINEDOCUMENT2026" not in sample_text(scan):
+                raise ValueError("英文样张识别失败")
+    return "中英文模型摘要已核对，英文样张自测通过。"
+
+
 def ocr_hint(probe=False):
     tag = platform_tag()
     override = os.environ.get("DI_TESSERACT")
@@ -268,8 +300,9 @@ def ocr_hint(probe=False):
         signature, res["hint"] = "off", "DI_OCR=off 已关闭扫描页识别。"
     else:
         try:
-            manifest = json.loads((_ROOT / "vendor/ocr.lock.json").read_text(encoding="utf-8"))
+            manifest = json.loads(_pin_file("ocr.lock.json").read_text(encoding="utf-8"))
             if override:
+                tesseract_path(override)
                 engine = sha256_of(executable)
             else:
                 pin = manifest["binaries"][tag]
@@ -287,14 +320,7 @@ def ocr_hint(probe=False):
             res.update(available=True, engine="Tesseract", hint="本地 Tesseract 简体中文和英文识别。")
             if probe:
                 activate_vendor()
-                from PIL import Image
-                from .pdf_ocr import recognize_image
-                with Image.open(_ROOT / "assets/offline-ocr.png") as image:
-                    lines = recognize_image(image, res)
-                sample = "".join("".join(line["text"].split()) for line in lines)
-                if "中文离线识别" not in sample or "OFFLINEDOCUMENT2026" not in sample.upper():
-                    raise ValueError("中英文样张识别失败")
-                res["hint"] += "中英文样张自测通过。"
+                res["hint"] += _probe_ocr(res)
         except (OSError, ValueError, KeyError, ImportError, RuntimeError) as exc:
             res.update(available=False, engine=None, hint=str(exc))
     parser = _parser_signature()

@@ -1,10 +1,10 @@
 ---
 name: traced-template-fill
-description: "把规范、任务书、测试数据（Word、Excel、PDF，含扫描件）中的内容按模板批注、章节或表格行填进已有的 Word 模板：先出带来源批注的草稿和审核报告，用户确认后再出终稿。用户说填验证记录、试验记录、检验记录（单份或批量），按批注摘入或摘抄规范章节，从测试表或 Excel 取值填到 Word，或者给出 .docx 模板加来源文件要求填写时使用，即使没提“整合”或“溯源”。对 整合输出/ 里已有任务的后续操作（回答待确认问题、按批注修改、确认定稿）也用本技能。需要逐项溯源的模板填写优先用本技能，而不是通用的 docx 技能。不用于从零起草新文档、单纯总结或翻译、只调排版、生成或修改 Excel 成品。原名 doc-integrator（文档整合助手）。Use when filling or reviewing an existing Word template with traceable source comments."
-compatibility: "面向 Claude Code 和 Codex。完整离线包自带运行环境和中英文 OCR；源码核心需要 Python 3.10+。读取 PDF 需 Python 3.10+ 和兼容后端。lite 包自带 pypdf 文本后端；完整包自带匹配的 Python、pdfplumber、PDFium、Tesseract 和中英文模型。旧版 .doc/.xls 转换和 DOC/PDF 导出需要本机的 Word、WPS 或 LibreOffice。Windows 支持 run.cmd 或 PowerShell；Linux 使用 run.sh。"
+description: "Use when filling or reviewing an existing Word template from specs, spreadsheets or scans with source comments. 用于填验证记录、批量填表、按批注摘抄规范、修改草稿和确认定稿。"
+compatibility: "Claude Code、Codex 及能调用本地命令的 Agent。源码需要 Python 3.10+。完整离线运行时提供 Python、PDF 解析、Tesseract 和中英文模型。旧格式转换和 PDF 导出需要本机 Office、WPS 或 LibreOffice。"
 metadata:
   author: QingNagi
-  version: "1.1.2"
+  version: "1.2.0"
   tags: "word, docx, template-filling, source-tracing, verification-records, ocr"
 ---
 
@@ -14,7 +14,9 @@ metadata:
 
 把规范、任务书和测试数据里的内容填进用户已有的 Word 模板。定位、取值、写入和校验都由 `scripts/di.py` 完成；你负责把用户的要求原样交给脚本，把脚本拿不准的问题交给用户决定，再把结果和风险如实转告。
 
-这样分工，是因为记录里的每个值都要能追到原文。脚本会加来源批注、保留源文件快照、在审核报告里逐项登记；凭记忆或推测写进去的内容既没有出处，也躲过了核对。
+执行权限限于读取用户指定的项目、调用本技能的本地入口，以及在输出目录写入草稿和审核材料。离线运行无需网络。
+
+记录里的每个值都要能追到原文。脚本会加来源批注、保留源文件快照、在审核报告里逐项登记；凭记忆或推测写进去的内容既没有出处，也躲过了核对。
 
 ## 红线
 
@@ -23,7 +25,7 @@ metadata:
 1. 不修改、移动或覆盖用户的原始文件。产物都写在 `整合输出/` 下。
 2. 不直接编辑草稿或终稿的 docx/xml，要改内容就用 `set`、`add-section`、`add-op`。绕过脚本的改动不会进入审核报告，下一版生成时还可能被当成审核人的修改合并进去。
 3. 不替用户回答待确认问题，尤其是“来源核对”和“样品对应”：替用户选“已核对”，就等于替他签字。
-4. 下面四个参数会跳过终稿拦截、丢弃人工修改或改变以后的默认行为，只在用户本轮明确提出时使用，并用 `--user-quote "用户原话"` 原样登记在任务的 `decisions.jsonl`：`draft --defaults`（按推荐出草稿）、`final --accept-unverified`（带遗留项定稿）、`draft --discard-edits`（舍弃上一版人工修改）、`answer --remember`（记住规则以后沿用）。
+4. 下面四个参数会跳过终稿拦截、丢弃人工修改或改变以后的默认行为，只在用户本轮明确提出时使用，并用 `--user-quote "用户原话"` 原样登记在本次任务生成的决定日志中：`draft --defaults`（按推荐出草稿）、`final --accept-unverified`（带遗留项定稿）、`draft --discard-edits`（舍弃上一版人工修改）、`answer --remember`（记住规则以后沿用）。
 5. OCR 识别出的数字、单位、型号只作线索：注明原页，提醒用户对照原页核实，不据此判定合格（0.05 mA 和 0.5 mA 只差一个零）。
 6. 如实报告。结构检查通过只说明文件结构没坏，不代表内容核对过；“未读取”的页不等于源文件里没有这项内容。
 
@@ -33,21 +35,26 @@ metadata:
 
 “技能目录”是本文件所在的目录，用户指定了项目内的副本时用那一份。用户已经给出输入路径与入口时，第一次调用直接运行任务；只给文件名时一次 find 即可列出候选，无需预先列目录或比较文件哈希。入口还没确定时，先查看一次技能目录（可以和第一条命令放在同一次 shell 调用里），按下表从上往下取第一个符合的写法。下文记作 `DI`，整段会话复用。
 
-| 技能目录里有 | 当前 shell | `DI` 的写法 |
-|---|---|---|
-| `run.cmd` | Windows 命令提示符或 PowerShell | 调用 "<技能目录>/run.cmd"（PowerShell 使用 `&`） |
-| `run.cmd` | Windows Git Bash | `"<技能目录>/run.cmd"`。完整包里的 `run.sh` 也可用，它会转调 PowerShell。 |
-| `run.ps1` | PowerShell | `& "<技能目录>/run.ps1"` |
-| `run.sh` | Bash | `bash "<技能目录>/run.sh"` |
-| 只有 `run.ps1` | Windows 上的 Git Bash | `powershell.exe -NoProfile -File "<技能目录>/run.ps1"` |
-| `runtime/python/`，没有启动脚本 | 任意 | 用其中的 `python.exe`（Windows）或 `bin/python3`（Linux）运行 `<技能目录>/scripts/di.py` |
-| 只有 `scripts/` | 任意 | 用本机 Python 3.10+ 运行 `<技能目录>/scripts/di.py`（Windows 上可能是 `py -3`） |
+Windows PowerShell 用 `& "<技能目录>/run.cmd"`，Git Bash 可直接调用同一文件。Linux 用 `bash "<技能目录>/run.sh"`。旧交付物有独立启动脚本时沿用该入口。直接从仓库运行时，也可用本机 Python 3.10+ 调用 `scripts/di.py`。
 
 - 保持用户发起任务时的工作目录不变：文件参数相对它解析，产物写到它下面的 `整合输出/`。不要为了调用脚本切换到技能目录。
 - 离线包第一次运行时会自动部署并自检，之后同一版本直接复用，不必先跑 `doctor`。`doctor` 只在用户要求检查环境或命令报运行故障时用。
 - 只有 Python 工具、没有 shell 的宿主，用 `subprocess.run([...], capture_output=True, text=True)` 调用同一入口，读完标准输出和错误输出再继续。
 
 ## Instructions · 工作流程
+
+宿主提供 Python 工具时，`skill_dir` 取当前已加载 SKILL.md 的父目录，`template`、`source` 和 `request` 取自本轮任务。保留工作目录，读取一次命令结果。
+
+```python
+import os
+from subprocess import run as run_script
+
+entry = [str(skill_dir / "run.cmd")] if os.name == "nt" else ["bash", str(skill_dir / "run.sh")]
+result = run_script(entry + ["run", "--draft", "--json", "-t", template, "-s", source, "--task", request],
+                    capture_output=True, text=True, encoding="utf-8")
+```
+
+退出码 0 表示已执行，3 表示等待回答，4 表示定稿受阻，2 表示错误或只完成部分输出。
 
 ### 1. 确认输入
 
@@ -75,7 +82,7 @@ DI run --draft --json -t "<模板>" -s "<来源1>" -s "<来源2>" --task "<用�
 ### 4. 处理待确认问题
 
 1. 优先展示上一条命令返回的问题、选项编号和推荐项。只有输出中没有题目时才运行 `DI questions <任务目录>`。每批最多 4 题，先问影响面大的：测试条件、多值取值、缺少源文件。
-2. 在 Claude Code 里，可以用 `DI questions <任务目录> --ask-json` 取得选项；使用 `run --draft --json` 时直接使用返回的前四道题。记录时用选项描述里的原编号，不是选项在表单里的位置；选项被截短时，改为展示 `questions.md` 的完整选项。没有表单工具时直接用文字列出。
+2. 在 Claude Code 里，可以用 `DI questions <任务目录> --ask-json` 取得选项；使用 `run --draft --json` 时直接使用返回的前四道题。记录时用选项描述里的原编号，不是选项在表单里的位置；选项被截短时，改为展示本次任务生成的待确认问题清单中的完整选项。没有表单工具时直接用文字列出。
 3. 用 `DI answer <任务目录> Q1=2 Q3=1 --draft --json` 一次记录回答并继续出稿。来源、OCR 页、样品对应等关键问题加 `--user-quote "用户原话"`，批量回答也适用。用户用文字回答时写 `Qn="用户原话"`；“无来源字段”题写成 `字段=值；字段=值`，脚本会自动填入；其他题型的文字回答，按脚本提示用 `set` 或 `add-section` 落实。用户给了测试程序清单时，将需查表的问题编号和 `--evidence 清单.xlsx` 放在同一条 answer 命令里，其他已有原话的选项可一并提交，如 `Q1=2 Q3 --evidence 清单.xlsx`。用 `--draft --json` 继续，按返回结果交付草稿或展示下一批问题。
 4. 超限的实测值照原样保留并带警告，不要用“合格”掩盖；0/1 通过标志不能当测量值填。
 5. 用户说“都按推荐”时用 `DI draft <任务目录> --defaults --user-quote "都按推荐"`。推荐值只用于这一版草稿，批注标“⚠待确认”，终稿会一直拦截到用户正式回答；正式回答和推荐不同时，先重新出草稿再定稿。
@@ -87,7 +94,7 @@ DI run --draft --json -t "<模板>" -s "<来源1>" -s "<来源2>" --task "<用�
 
 ### 6. 定稿
 
-用户明确确认后运行 `DI final <任务目录>`。
+用户明确确认后运行 `DI final <任务目录>`。定稿会核对关键决定的原话记录。记录缺失或与选项不符时，先恢复任务备份或取得新的确认，再继续。
 
 - 有审核人批注时，先问用户保留还是删除，再加 `--reviewer-comments keep` 或 `drop`。有模板批注时也问清保留还是删除，用 `--template-comments keep` 或 `drop`；原参数 `--strip-template-comments` 仍可删除模板批注。
 - 需要其他格式时加 `--format doc,pdf,md`。转换依赖本机办公软件，可能只生成了一部分，以命令输出列出的实际文件为准。
@@ -116,7 +123,7 @@ DI run --draft --json -t "<模板>" -s "<来源1>" -s "<来源2>" --task "<用�
 | `status <任务目录>` | 查看任务状态 |
 | `doctor` | 检查运行环境；`--selfcheck <文件>` 单独检查一个 DOCX/XLSX 的结构 |
 
-批量处理多份模板时，先读命令参考里的“批量清单”一节：合并后的问题只有对所列每份任务都成立时才用 `batch answer`，否则逐个任务回答。用户提出新的排版要求时，用 `profile` 保存为规范，核对识别结果后在 `run` 里加 `--profile <名称>`。
+批量交付按每份任务返回的草稿、报告和快照路径汇总。所有任务已返回可交付时停止调用工具；需要核对异常时，一次列出该任务全部相关引用。批量清单用法见命令参考。合并后的问题只有对所列每份任务都成立时才用 `batch answer`，否则逐个任务回答。用户提出新的排版要求时，用 `profile` 保存为规范，核对识别结果后在 `run` 里加 `--profile <名称>`。
 
 ## Examples · 示例
 

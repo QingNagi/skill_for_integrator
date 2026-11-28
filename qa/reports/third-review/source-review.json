@@ -1,0 +1,795 @@
+{
+  "skill_version": "1.2.0",
+  "package": "traced-template-fill-1.2.0-source.zip",
+  "package_sha256": "eb6238b03ed26faffbbaa8a6c270f94bda224eb0864bf7129f206cc3bb506064",
+  "run_utc": "2026-11-28T06:39:16.0459611Z",
+  "run_directory": "20261128-143916-78a1baea8c",
+  "tool_provenance": {
+    "inspector": {
+      "upstream": "https://github.com/NVIDIA/SkillSpector/commit/c323ad4c43e3c8f2de051572cc25b2711d11e648",
+      "version": "2.13.7",
+      "compared_files": 169,
+      "normalization": "CRLF to LF",
+      "extra_or_different_files": 0
+    },
+    "evaluator": {
+      "upstream": "https://pypi.org/pypi/skillevaluator/1.2.1/json",
+      "version": "1.2.1",
+      "wheel_sha256": "cfdd052adbcab802151017b3a283cbdeda33f80a71472ba193c8c1ffccc9cb9b",
+      "compared_files": 382,
+      "extra_or_different_files": 0
+    },
+    "gitleaks": {
+      "upstream": "https://api.github.com/repos/gitleaks/gitleaks/releases/tags/v8.30.1",
+      "version": "8.30.1",
+      "archive_sha256": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+      "executable_sha256": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c"
+    }
+  },
+  "receipts_sha256": {
+    "skillspector.json": "2ad1939632c211871278ef6a97108b4452395e9537e38fb1f4d4246dc621c523",
+    "skillevaluator-tier1.json": "add04e3931427e6c2968d1e847a86efbc17ab734abb6d377680f8324304db83e",
+    "skillevaluator-tier1.html": "15b92c0ead8c089dbdbf4df64be8a2426e3dc2af55261ca842655528ad95d3ee",
+    "skillevaluator-tier1.md": "0a90f71797b56d255831bbf3df31e655b729be5db90f391aa6263cf74e12ff7a",
+    "evidence.json": "1f2e81cb4e5e67c695123eab26bf6340edd8c6eb84982cb2d0f36c5c19e734e9",
+    "skillspector-baseline.yaml": "c10471d63669511d561c5a912cec0c9b7ac2d4aa7ce0a60ff2ffb5971d952e56"
+  },
+  "source_gate_passed": true,
+  "validators": {
+    "Schema & Repository Governance": "passed",
+    "Semantic Version Validation": "passed",
+    "Security Scan": "passed",
+    "PII Scan": "passed",
+    "License Compliance": "passed",
+    "Code Risk Analysis": "passed",
+    "Secrets Detection": "passed",
+    "Code Integrity & Hygiene": "passed",
+    "Dependency Vulnerability Audit": "passed",
+    "Unicode Smuggling Detection": "passed",
+    "QUALITY": "passed",
+    "SCRIPT_LINT": "passed",
+    "Harness Compatibility": "passed"
+  },
+  "incomplete_scans": [],
+  "quality": {
+    "score": 97.5,
+    "grade": "A"
+  },
+  "harness_profiles": [
+    "claude-code",
+    "codex",
+    "copilot-cli",
+    "hermes",
+    "openclaw",
+    "opencode"
+  ],
+  "harness_findings": [
+    {
+      "harness": "copilot-cli",
+      "effect": "advisory",
+      "check": "CP-RELOAD"
+    },
+    {
+      "harness": "hermes",
+      "effect": "advisory",
+      "check": "HM-LINKED-LAYOUT"
+    },
+    {
+      "harness": "openclaw",
+      "effect": "degraded",
+      "check": "OW-READ-BUDGET"
+    },
+    {
+      "harness": "opencode",
+      "effect": "advisory",
+      "check": "OC-RELOAD"
+    },
+    {
+      "harness": "opencode",
+      "effect": "advisory",
+      "check": "OC-REF-CUT"
+    }
+  ],
+  "publication": {
+    "status": "incomplete",
+    "eligible": false,
+    "reasons": [
+      "Required recognized built-in Tier 2 evidence is missing.",
+      "Tier 3 lacks publication-complete execution evidence."
+    ],
+    "tier3": {
+      "status": "not_run",
+      "evidence_complete": false,
+      "execution_status": "not_run",
+      "verdict": "not_run",
+      "reason": "Tier 3 lacks publication-complete execution evidence."
+    }
+  },
+  "raw_skillspector": {
+    "risk": {
+      "score": 45,
+      "severity": "MEDIUM",
+      "recommendation": "CAUTION",
+      "max_issue_severity": "MEDIUM"
+    },
+    "counts": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "MEDIUM": 14,
+      "LOW": 0,
+      "INFO": 0
+    },
+    "coverage": {
+      "status": "complete",
+      "is_complete": true,
+      "total_components": 62,
+      "fully_inspected_files": 62,
+      "partially_inspected_files": 0,
+      "entirely_uninspected_files": 0,
+      "coverage_percent": 100.0,
+      "ledger_exceptions": [],
+      "limitations": []
+    }
+  },
+  "tier1_applicability": {
+    "artifact_type": "skill",
+    "kept_issues": 14,
+    "suppressed_inapplicable_issues": 0,
+    "suppressed_by_file_role": {},
+    "raw_risk_score": 45,
+    "applicable_risk_score": 45
+  },
+  "tier1_baseline": {
+    "file": "skillspector-baseline.yaml",
+    "digest": "sha256:c10471d63669511d561c5a912cec0c9b7ac2d4aa7ce0a60ff2ffb5971d952e56",
+    "loaded": true,
+    "status": "no_matches",
+    "schema_version": 2,
+    "baseline_scanner_version": "2.13.7",
+    "runtime_scanner_version": "2.13.7",
+    "rule_count": 0,
+    "fingerprint_count": 0,
+    "suppressed_findings": 0,
+    "llm_stage_suppressed_findings": null,
+    "active_findings": 14,
+    "active_blocking_findings": 0,
+    "suppressed_by_severity": {},
+    "suppressed_rule_ids": [],
+    "message": "SkillSpector baseline loaded but matched no findings (rules=0, fingerprints=0, suppressed=0)."
+  },
+  "active_findings": [
+    {
+      "rule": "LP3",
+      "severity": "MEDIUM",
+      "path": "SKILL.md",
+      "scanner_line": 1,
+      "finding_id": "finding-d7e09b5be3dd4f8ebefaf4be117807c4",
+      "file_sha256": "ba6475638ac18c70d8e924b01c44acbe570d1a8f643cea7cbfb5f72def655cde",
+      "baseline_applied": false,
+      "disposition": "active_host_scope_review",
+      "source_observation": "正文规定本地文件与操作范围；未添加宿主预授权。上游检测到的能力标签为 env、file_read、file_write、network、shell，属于静态推断。",
+      "recheck": "Host capability grants, entry points, file/network operations or permissions declaration changes."
+    },
+    {
+      "rule": "AE4",
+      "severity": "MEDIUM",
+      "path": "config/rules/aliases.json",
+      "scanner_line": 1,
+      "finding_id": "finding-f768d6d53e134ae28a61c36f4ce99cd4",
+      "file_sha256": "20b5508eef35ec28fddfa7b61013632cb3c9777d25c7738d598666353e3222c8",
+      "baseline_applied": false,
+      "disposition": "false_positive_candidate_pending_review",
+      "source_observation": "工程量的 Δ 表示差值；该 JSON 将输入参数的历史名称关联到同一规范名。",
+      "tokens": [
+        {
+          "line": 6,
+          "token": "ΔVOC"
+        },
+        {
+          "line": 6,
+          "token": "ΔVOS"
+        }
+      ],
+      "format_control_characters": 0,
+      "candidate_fingerprint": "sha256:09affee93c1ea3b195e6ea4e68f70fc585762f4bec99337e0a86e01f2fe991d9",
+      "approved_by": [],
+      "owner": null,
+      "expires": null,
+      "recheck": "File bytes, matched tokens, meaning, rule or scanner version change."
+    },
+    {
+      "rule": "AE4",
+      "severity": "MEDIUM",
+      "path": "references/rules-and-questions.md",
+      "scanner_line": 1,
+      "finding_id": "finding-4ef4c80006bf4ef0a09c3cd3e17383c4",
+      "file_sha256": "94782e7108c87c8d939335d7840087e920b0669d54d38f482d3c1bc867947af6",
+      "baseline_applied": false,
+      "disposition": "false_positive_candidate_pending_review",
+      "source_observation": "规则说明举例解释 ΔVOD、ΔVOS 两个差值名称及其识别。",
+      "tokens": [
+        {
+          "line": 60,
+          "token": "ΔVOD"
+        },
+        {
+          "line": 60,
+          "token": "ΔVOS"
+        }
+      ],
+      "format_control_characters": 0,
+      "candidate_fingerprint": "sha256:a1539617435db6cefd60f59e14fdb8c99f94f70257b539f837d56c7aa59340b1",
+      "approved_by": [],
+      "owner": null,
+      "expires": null,
+      "recheck": "File bytes, matched tokens, meaning, rule or scanner version change."
+    },
+    {
+      "rule": "AST4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/cli.py",
+      "scanner_line": 848,
+      "finding_id": "finding-79cbfd792dee44d483e688fc0bf62027",
+      "file_sha256": "4106d80c1126278241b0a90da609492b54f73f73b46e6076b2601c77df9931dc",
+      "baseline_applied": false,
+      "disposition": "active_capability",
+      "source_line": "proc = run(command, stdin=DEVNULL, capture_output=True, encoding=\"utf-8\", errors=\"replace\",",
+      "source_observation": "并行草稿任务使用 sys.executable 和固定的 scripts/di.py，任务目录和用户原话为独立实参，环境经 child_environment(worker=True) 过滤，超时 7200 秒。",
+      "recheck": "Executable discovery, command, arguments, input trust, output destination, environment or timeout changes."
+    },
+    {
+      "rule": "AE4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/common.py",
+      "scanner_line": 1,
+      "finding_id": "finding-1dbb7439a78a4169a904dd982887e1cc",
+      "file_sha256": "81d56f4641b8cac088fba7e84d4353a4accf405efa81217988cdea53d018b003",
+      "baseline_applied": false,
+      "disposition": "false_positive_candidate_pending_review",
+      "source_observation": "正则的 δ 与字母和数字同属参数名字符，供别名映射与规范化。",
+      "tokens": [
+        {
+          "line": 166,
+          "token": "a-z0-9δ"
+        },
+        {
+          "line": 168,
+          "token": "a-z0-9δ"
+        }
+      ],
+      "format_control_characters": 0,
+      "candidate_fingerprint": "sha256:c039e9ce1a00e5e19bbd829ed062237d97dba7c222eeaf2126177f5a981cf915",
+      "approved_by": [],
+      "owner": null,
+      "expires": null,
+      "recheck": "File bytes, matched tokens, meaning, rule or scanner version change."
+    },
+    {
+      "rule": "AST4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/environment.py",
+      "scanner_line": 30,
+      "finding_id": "finding-25466d0610074652958c722a1811cb8a",
+      "file_sha256": "f16ebc481c187666ff62ef60b94f3070a6c10f8087841bba12a8e1641656faa5",
+      "baseline_applied": false,
+      "disposition": "active_capability",
+      "source_line": "r = subprocess.run([path, '--version'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,",
+      "source_observation": "向已定位的 LibreOffice 可执行文件传入固定 --version 参数，在过滤的环境中读取版本，超时 20 秒。",
+      "recheck": "Executable discovery, command, arguments, input trust, output destination, environment or timeout changes."
+    },
+    {
+      "rule": "AST4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/office.py",
+      "scanner_line": 153,
+      "finding_id": "finding-b1bde09378ed484c84503831d1de5eff",
+      "file_sha256": "5cc38e822eb32dc38bdee068e4c6504498fc34dc749d7e69d8c009ffdc47641f",
+      "baseline_applied": false,
+      "disposition": "active_capability",
+      "source_line": "run = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,",
+      "source_observation": "探测到的 PowerShell 通过 -File 执行包内转换脚本，参数逐项传入；临时目录与环境独立，默认超时 600 秒。",
+      "recheck": "Executable discovery, command, arguments, input trust, output destination, environment or timeout changes."
+    },
+    {
+      "rule": "AST4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/office.py",
+      "scanner_line": 231,
+      "finding_id": "finding-07e0de5fb3d245659dbceeb1bf268410",
+      "file_sha256": "5cc38e822eb32dc38bdee068e4c6504498fc34dc749d7e69d8c009ffdc47641f",
+      "baseline_applied": false,
+      "disposition": "active_capability",
+      "source_line": "run = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,",
+      "source_observation": "已定位的 LibreOffice 使用独立用户配置和暂存输出目录，输入路径及导出格式各为单独参数，超时 600 秒。",
+      "recheck": "Executable discovery, command, arguments, input trust, output destination, environment or timeout changes."
+    },
+    {
+      "rule": "AE4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/pdf_ocr.py",
+      "scanner_line": 1,
+      "finding_id": "finding-d8384d596f084fdfacafcb9b1ce3703f",
+      "file_sha256": "29ee8270e9ff274f07d526f263f09c30c6b2eb91719414662d9915f211d936cd",
+      "baseline_applied": false,
+      "disposition": "false_positive_candidate_pending_review",
+      "source_observation": "正则支持单位前缀与微符号的两个输入形式，供定位 PDF 识别结果的实际单位。",
+      "tokens": [
+        {
+          "line": 18,
+          "token": "fpnumµμkMGT"
+        },
+        {
+          "line": 19,
+          "token": "fpnumµμkMGT"
+        }
+      ],
+      "format_control_characters": 0,
+      "candidate_fingerprint": "sha256:8e827694a86b40c91c53a00f4329a4ffa95543d5a0afbd12c5368eef3687a7d3",
+      "approved_by": [],
+      "owner": null,
+      "expires": null,
+      "recheck": "File bytes, matched tokens, meaning, rule or scanner version change."
+    },
+    {
+      "rule": "AST4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/pdf_ocr.py",
+      "scanner_line": 181,
+      "finding_id": "finding-322544b4dd39426c9e0c6682b39de908",
+      "file_sha256": "29ee8270e9ff274f07d526f263f09c30c6b2eb91719414662d9915f211d936cd",
+      "baseline_applied": false,
+      "disposition": "active_capability",
+      "source_line": "proc = subprocess.run(command, cwd=options['tessdata'], input=data.getvalue(),",
+      "source_observation": "本机 Tesseract 以固定 stdin/stdout 参数接收图像，使用指定语言和模型目录，过滤环境，超时 120 秒。显式覆盖需符合可执行文件路径校验。",
+      "recheck": "Executable discovery, command, arguments, input trust, output destination, environment or timeout changes."
+    },
+    {
+      "rule": "AE4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/program_manifest.py",
+      "scanner_line": 1,
+      "finding_id": "finding-9aefbe48cf74430abda4aa0742590fde",
+      "file_sha256": "d0d067620d333eda28071d0aa60b821bf954c80490eb957de4c44e309cbdf6e1",
+      "baseline_applied": false,
+      "disposition": "false_positive_candidate_pending_review",
+      "source_observation": "正则读取带 μ/µ 前缀和 Ω 单位的测量值。",
+      "tokens": [
+        {
+          "line": 71,
+          "token": "uµμ"
+        },
+        {
+          "line": 71,
+          "token": "A-Za-zΩ"
+        }
+      ],
+      "format_control_characters": 0,
+      "candidate_fingerprint": "sha256:157c77eaf2df3ab0f7bcdc1f8c3cfbbdb79e56910fbe115728998acda076d831",
+      "approved_by": [],
+      "owner": null,
+      "expires": null,
+      "recheck": "File bytes, matched tokens, meaning, rule or scanner version change."
+    },
+    {
+      "rule": "AE4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/testdata.py",
+      "scanner_line": 1,
+      "finding_id": "finding-50c6bc1b91044da2a0b13ead71b39ee9",
+      "file_sha256": "bdf552e91bc77586673a0b48fb0e5c5d91d633753fcaa83c18150d3b5de80c52",
+      "baseline_applied": false,
+      "disposition": "false_positive_candidate_pending_review",
+      "source_observation": "正则区分含 Δ 的电气参数名称和测量条件。",
+      "tokens": [
+        {
+          "line": 215,
+          "token": "0-9A-ZΔ"
+        },
+        {
+          "line": 221,
+          "token": "ΔA-Za-z"
+        }
+      ],
+      "format_control_characters": 0,
+      "candidate_fingerprint": "sha256:b4608601ef30764a251dfdaf10f73f716a0f57a2f9d9e62f0f87566c4e52c5cd",
+      "approved_by": [],
+      "owner": null,
+      "expires": null,
+      "recheck": "File bytes, matched tokens, meaning, rule or scanner version change."
+    },
+    {
+      "rule": "AST4",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/word_converter.py",
+      "scanner_line": 176,
+      "finding_id": "finding-4808b6bd451443f0bdfbeeb101aa3e7d",
+      "file_sha256": "eda1dbba65895e312563ff0822e411754a8908723d21d89db52c9776c84daf12",
+      "baseline_applied": false,
+      "disposition": "active_capability",
+      "source_line": "finished = subprocess.run([converter, \"-oice\", \"-nme\", str(source), str(staged)], cwd=work, env=env,",
+      "source_observation": "仅按 HKLM 中已安装 Word 的位置找相邻 Wordconv.exe；先验证输入，传入独立源、目标参数，在临时目录执行，超时 60 秒，验证输出文档后才替换目标。",
+      "recheck": "Executable discovery, command, arguments, input trust, output destination, environment or timeout changes."
+    },
+    {
+      "rule": "TT2",
+      "severity": "MEDIUM",
+      "path": "scripts/dilib/word_converter.py",
+      "scanner_line": 176,
+      "finding_id": "finding-c1b052dac8e6457a95659c6f0429a248",
+      "file_sha256": "eda1dbba65895e312563ff0822e411754a8908723d21d89db52c9776c84daf12",
+      "baseline_applied": false,
+      "disposition": "active_environment_flow",
+      "source_line": "finished = subprocess.run([converter, \"-oice\", \"-nme\", str(source), str(staged)], cwd=work, env=env,",
+      "source_observation": "Wordconv 环境选择 12 个列举的系统/用户目录相关变量；TEMP/TMP 指向临时目录，PATH 在有 SystemRoot 时固定为其 System32。",
+      "recheck": "Variable selection, process identity, PATH or temp directory changes."
+    }
+  ],
+  "previous_package_sha256": "359d121e897c5ade85ad8e2e6de884e153cc81214ec1ead7cb5ea91f66fa7a29",
+  "previous_partial_components": [
+    {
+      "path": "vendor/licenses/LLVM-libcxx-LICENSE.txt",
+      "phase": "static",
+      "reason_code": "static_parse_limit",
+      "parser_diagnostic": {
+        "cause": "boundary_unresolved",
+        "check": "command_word_boundary",
+        "source_start_offset": 10669,
+        "source_end_offset": 16703,
+        "start_line": 186,
+        "end_line": 311,
+        "unchecked_scope": "command_word",
+        "observed_is_lower_bound": false,
+        "full_input_checked": true,
+        "location_precision": "source_span"
+      }
+    },
+    {
+      "path": "vendor/licenses/LLVM-libcxxabi-LICENSE.txt",
+      "phase": "static",
+      "reason_code": "static_parse_limit",
+      "parser_diagnostic": {
+        "cause": "boundary_unresolved",
+        "check": "command_word_boundary",
+        "source_start_offset": 10669,
+        "source_end_offset": 16706,
+        "start_line": 186,
+        "end_line": 311,
+        "unchecked_scope": "command_word",
+        "observed_is_lower_bound": false,
+        "full_input_checked": true,
+        "location_precision": "source_span"
+      }
+    },
+    {
+      "path": "vendor/licenses/LLVM-libunwind-LICENSE.txt",
+      "phase": "static",
+      "reason_code": "static_parse_limit",
+      "parser_diagnostic": {
+        "cause": "boundary_unresolved",
+        "check": "command_word_boundary",
+        "source_start_offset": 10669,
+        "source_end_offset": 16706,
+        "start_line": 186,
+        "end_line": 311,
+        "unchecked_scope": "command_word",
+        "observed_is_lower_bound": false,
+        "full_input_checked": true,
+        "location_precision": "source_span"
+      }
+    }
+  ],
+  "previous_false_positives": [
+    {
+      "rule": "P6",
+      "path": "scripts/dilib/testdata.py",
+      "line": 295,
+      "finding_id": "finding-1a0cc2a44ec441158382b76c01608fe6",
+      "status": "absent_from_current_source_scan",
+      "resolution": "decimal precision comment clarified"
+    },
+    {
+      "rule": "AST3",
+      "path": "scripts/dilib/environment.py",
+      "line": 94,
+      "finding_id": "finding-02ea2e1769234ce89c2a7029df70d8cd",
+      "status": "absent_from_current_source_scan",
+      "resolution": "optional xlrd availability checked by direct import"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxx-LICENSE.txt",
+      "line": 31,
+      "finding_id": "finding-338e382f6c464c909ea02adfb931148b",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxx-LICENSE.txt",
+      "line": 36,
+      "finding_id": "finding-c0a98a93d7dc45788ec25a4f17b42b07",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxx-LICENSE.txt",
+      "line": 59,
+      "finding_id": "finding-166be02a399f49ba884ca93c0607760e",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxx-LICENSE.txt",
+      "line": 164,
+      "finding_id": "finding-6fd5e7266c0049ef85f445a365e0e499",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxxabi-LICENSE.txt",
+      "line": 31,
+      "finding_id": "finding-70b85d666cdf494084427e4ee1a6e456",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxxabi-LICENSE.txt",
+      "line": 36,
+      "finding_id": "finding-6ba4f3d0b8e04f66b9737d050c66671d",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxxabi-LICENSE.txt",
+      "line": 59,
+      "finding_id": "finding-4ee60a61bb0d4f848710e6fd186eac1c",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxxabi-LICENSE.txt",
+      "line": 164,
+      "finding_id": "finding-39d954f3539c41b68e3a75d5d438c9db",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libunwind-LICENSE.txt",
+      "line": 31,
+      "finding_id": "finding-9c3477ec4350448eaa633f2d217aed75",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libunwind-LICENSE.txt",
+      "line": 36,
+      "finding_id": "finding-71f58ead471d4815aae84262d891cc3c",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libunwind-LICENSE.txt",
+      "line": 59,
+      "finding_id": "finding-d4a3f18b9ad84877a8802aa87173c0b0",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libunwind-LICENSE.txt",
+      "line": 164,
+      "finding_id": "finding-992278d8bce0474095da884c14aaa688",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/OpenSSL-LICENSE.txt",
+      "line": 28,
+      "finding_id": "finding-2890991d11af41d2b340c3cf03b57935",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/OpenSSL-LICENSE.txt",
+      "line": 33,
+      "finding_id": "finding-d06ef94135a7465d81a383705b43b7f1",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/OpenSSL-LICENSE.txt",
+      "line": 56,
+      "finding_id": "finding-2798ef95bd834a07916ee27da5a1d0b0",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/OpenSSL-LICENSE.txt",
+      "line": 161,
+      "finding_id": "finding-bc0ba310b91f42d699865f22c5c76d3e",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/Tesseract-LICENSE.txt",
+      "line": 28,
+      "finding_id": "finding-06cb8c5bd4e149d5a53a5b11c48124da",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/Tesseract-LICENSE.txt",
+      "line": 33,
+      "finding_id": "finding-fdbe35eafac64ea185b5bc6eebbfe48a",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/Tesseract-LICENSE.txt",
+      "line": 56,
+      "finding_id": "finding-3bf239b9dd2b46168f4fe83bf740b23a",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/Tesseract-LICENSE.txt",
+      "line": 161,
+      "finding_id": "finding-ba0bd32a8bc24b63bd3bfab6827c7c86",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxx-LICENSE.txt",
+      "line": 284,
+      "finding_id": "finding-a087853c760946309c24d0bc3f04e2e4",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxx-LICENSE.txt",
+      "line": 306,
+      "finding_id": "finding-f4daaf9d814346178fff6650c2eaa9ae",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxxabi-LICENSE.txt",
+      "line": 284,
+      "finding_id": "finding-f355c7669e5e4be88120e41771f6b947",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libcxxabi-LICENSE.txt",
+      "line": 306,
+      "finding_id": "finding-3cdadccca8f34ffb8ace915c8447a569",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libunwind-LICENSE.txt",
+      "line": 284,
+      "finding_id": "finding-6beecbb8f0fc4d1497248cf6f6ca2c17",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/LLVM-libunwind-LICENSE.txt",
+      "line": 306,
+      "finding_id": "finding-1d27cd7c8bcc45548c959a64d8e8f3ff",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/Leptonica-LICENSE.txt",
+      "line": 19,
+      "finding_id": "finding-e3b220bcb5314cc4baeffc6f142b3840",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/MinGW-runtime-additional-notices.txt",
+      "line": 45,
+      "finding_id": "finding-85896111347e49fcabfdfd1b542072aa",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/MinGW-runtime-additional-notices.txt",
+      "line": 68,
+      "finding_id": "finding-7296d403f399436e86acb28201fedef6",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/MinGW-runtime-additional-notices.txt",
+      "line": 91,
+      "finding_id": "finding-b092e8abcaf1483e9a1d5997e735936b",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/MinGW-w64-COPYING.txt",
+      "line": 35,
+      "finding_id": "finding-fe05bd9019ea4d0aae93ae28bbe65219",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/MinGW-w64-COPYING.txt",
+      "line": 38,
+      "finding_id": "finding-d7e23e1782eb49938f2c8cbfe75ac184",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/Zig-LICENSE.txt",
+      "line": 16,
+      "finding_id": "finding-664e5cb4378a42eab0456251f5ddc25b",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/libffi-LICENSE.txt",
+      "line": 16,
+      "finding_id": "finding-bffe886933d046d48a2e66f19760b5a6",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/musl-COPYRIGHT.txt",
+      "line": 18,
+      "finding_id": "finding-c4fd6a0dc8b4474fb35e2f9446fd42a9",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/pypdf-LICENSE.txt",
+      "line": 20,
+      "finding_id": "finding-07a4e0e6a9ca4423b630d8f07a2ec543",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    },
+    {
+      "rule": "EA3",
+      "path": "vendor/licenses/pypdf-LICENSE.txt",
+      "line": 24,
+      "finding_id": "finding-a7988e15da354e79abbd465ae84efb08",
+      "status": "absent_from_current_source_scan",
+      "resolution": "license travels with third-party component"
+    }
+  ]
+}

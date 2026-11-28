@@ -161,6 +161,58 @@ class ReviewDecisionsTests(unittest.TestCase):
         self.assertEqual(len(records), 4)
         self.assertTrue(all(r["user_quote"] == quote for r in records))
 
+    def test_final_requires_matching_receipt_even_with_override(self):
+        self.modern_draft()
+        q = {"id": "Q1", "key": "src:verify:S1", "topic": "来源核对", "question": "来源适用？",
+             "options": [{"label": "确认", "effect": {"ok": True}}], "recommended": 0}
+        self.job.write("questions.json", [dict(q, input_fp=self.job.fingerprint())])
+        self.invoke("answer", self.job.dir, "Q1=1", "--user-quote", "本批适用")
+        path = Path(self.job.p("decisions.jsonl"))
+        original = path.read_text("utf-8")
+        edited = json.loads(original)
+        edited["answers"][0]["binding"] = "0" * 64
+        args = ("final", self.job.dir, "--reviewer-comments", "drop", "--accept-unverified",
+                "--user-quote", "仅接受列出的遗留项", "--json")
+        for changed in ("", "{", json.dumps(edited), original.replace("本批适用", "其他批次"),
+                        original.replace("src:verify:S1", "src:verify:S2")):
+            with self.subTest(receipt=changed):
+                path.write_text(changed, encoding="utf-8")
+                self.assertIn("决定记录", self.invoke(*args, rc=4))
+                self.assertFalse(Path(self.job.p("终稿", "test_终稿.docx")).exists())
+        path.write_text(original, encoding="utf-8")
+        self.invoke(*args)
+
+    def test_draft_exception_needs_its_original_receipt(self):
+        self.invoke("draft", self.job.dir, "--defaults", "--user-quote", "先按推荐生成")
+        Path(self.job.p("decisions.jsonl")).write_text("", encoding="utf-8")
+        self.assertIn("决定记录", self.invoke("final", self.job.dir, "--accept-unverified",
+                      "--user-quote", "接受列出的遗留项", "--json", rc=4))
+
+    def test_reused_confirmation_requires_original_remember_receipt(self):
+        from dilib.decisions import verify_receipts
+        from dilib.common import ReviewBlocked
+        key, original = "src:spec:S2", "src:spec:S1"
+        answer = {"label": "适用", "effect": {"ok": True}, "fp": "source-fingerprint",
+                  "user_quote": "此规范适用", "remember": True}
+        origin = self.root / "origin"
+        origin.mkdir()
+        facts = self.root / "facts"
+        facts.mkdir()
+        shared = "a" * 64
+        (facts / (shared + ".json")).write_text(json.dumps(
+            {"question": original, "origin_job": str(origin), "answer": answer}), encoding="utf-8")
+        self.job.write("facts.json", {"facts": [{"scope": {"question": key, "shared": shared}}]})
+        # A 1.1.x CLI receipt did not store the effect digest.
+        receipt = {"action": "answer --remember", "user_quote": answer["user_quote"], "answers": [
+            {"key": original, "answer": answer["label"], "fp": answer["fp"]}]}
+        ledger = origin / "decisions.jsonl"
+        ledger.write_text(json.dumps(receipt), encoding="utf-8")
+        with patch("dilib.decisions.project_dir", return_value=self.root):
+            verify_receipts(self.job, self.draft.name, "other-job-inputs")
+            ledger.write_text(json.dumps(dict(receipt, action="answer")), encoding="utf-8")
+            with self.assertRaises(ReviewBlocked):
+                verify_receipts(self.job, self.draft.name, "other-job-inputs")
+
     def test_batch_applies_multiple_answers_with_one_replan_per_job(self):
         questions = [{'key': 'selection' + str(i), 'id': 'Q' + str(i), 'topic': '选择', 'question': '位置' + str(i),
                       'options': [{'label': '保留', 'effect': {'keep': True}}],

@@ -21,6 +21,32 @@ class PdfOcrTests(unittest.TestCase):
     def setUpClass(cls):
         _bootstrap.activate_vendor()
 
+    def test_ocr_override_requires_absolute_recognizer_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp, "other.exe" if os.name == "nt" else "other")
+            other.touch()
+            for value in ("tesseract", str(other)):
+                with self.subTest(value=value), patch.dict(os.environ, DI_OCR="on", DI_TESSERACT=value):
+                    info = _bootstrap.ocr_hint()
+                    self.assertFalse(info["available"])
+                    self.assertIn("Tesseract 可执行文件", info["hint"])
+
+    def test_source_only_external_ocr_probes_without_bundled_sample(self):
+        import shutil
+        options = _bootstrap.ocr_hint()
+        if not options["available"]:
+            self.skipTest("External OCR requires an installed Tesseract with both pinned models")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            shutil.copyfile(_bootstrap._pin_file("ocr.lock.json"), root / "config/ocr.lock.json")
+            with patch.dict(os.environ, DI_NO_VENDOR="1", DI_TESSERACT=options["executable"],
+                            TESSDATA_PREFIX=options["tessdata"]), patch.object(_bootstrap, "_ROOT", root):
+                probe = _bootstrap.ocr_hint(probe=True)
+                self.assertTrue(probe["available"], probe["hint"])
+                self.assertIn("英文样张", probe["hint"])
+                self.assertNotIn("中英文样张自测通过", probe["hint"])
+
     def test_low_confidence_words_are_visible_without_altering_measurements(self):
         from dilib.pdf_ocr import parse_tsv
         rows = ['level page_num block_num par_num line_num word_num left top width height conf text',

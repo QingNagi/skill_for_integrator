@@ -16,7 +16,7 @@ from urllib import request
 from urllib.parse import quote, urlsplit
 
 sys.dont_write_bytecode = True
-from build_offline_bundle import TOP, files as skill_files, wheel_specs
+from build_offline_bundle import TOP, source_files, skill_bytes, source_manifest, runtime_support, wheel_specs
 from fetch_vendor import VENDOR, MIRRORS, MirrorRedirect, checked_url
 from prepare_win64_runtime import MODEL_REV, MODEL_URL, MODELS
 from runtime_bom import ocr_binary, runtime_bom
@@ -142,7 +142,7 @@ def fetch_inputs(architectures, sources, vendor):
         cached_asset(vendor / rel, MIRRORS["pypi"] + wheel_path + "/" + name, size, sha)
 
 
-def build_kit(arch, out, sources, vendor):
+def build_kit(arch, out, sources, vendor, runtime_only=False):
     runtime = verified(sources / runtime_name(arch), *PYTHONS[arch])
     platform = "manylinux_" + arch
     py_minor = ".".join(VERSION.split(".")[:2])
@@ -157,13 +157,14 @@ def build_kit(arch, out, sources, vendor):
     if ROOT == out or ROOT in out.parents:
         raise ValueError("Build outside the source tree.")
     out.mkdir(parents=True, exist_ok=True)
-    output = out / (TOP + "-offline-linux-" + arch + ".tar.gz")
+    label = "runtime" if runtime_only else "offline"
+    output = out / (TOP + "-" + label + "-linux-" + arch + ".tar.gz")
     public_docs = ["SKILL.md", "THIRD_PARTY_NOTICES.md", "vendor/README.md"]
     public_docs.extend(p.relative_to(ROOT).as_posix() for p in sorted((ROOT / "references").glob("*.md")))
     if (ROOT / "LICENSE").is_file():
         public_docs.append("LICENSE")
-    files = {rel for _, rel in skill_files("source")}
-    required = [rel for rel in files if rel.startswith("scripts/") and rel.endswith(".py")]
+    files = {rel: path for path, rel in source_files()}
+    required = [rel for rel in files if rel.startswith(("scripts/", "config/"))]
     required.extend(rel for rel, _ in wheel_paths)
     launcher = (REPO / "tools/offline/run.sh").read_text(encoding="utf-8")
     for key, value in (("ARCH", arch), ("PYMINOR", py_minor),
@@ -174,13 +175,16 @@ def build_kit(arch, out, sources, vendor):
         payload = staging / "payload.tar.gz"
         with compressed_tar(payload) as archive:
             put_bytes(archive, "runtime-bom.cdx.json", bom)
-            for rel in sorted(files):
-                if rel.endswith(".py"):
-                    code = (ROOT / rel).read_bytes()
-                    compile(code, rel, "exec")
-                    put_bytes(archive, rel, code)
-                else:
-                    put_file(archive, rel, ROOT / rel)
+            if runtime_only:
+                put_bytes(archive, "runtime/skill-files.json", source_manifest())
+                put_file(archive, "runtime/stage_skill.py", REPO / "tools/offline/stage_skill.py")
+            else:
+                for rel, path in sorted(files.items()):
+                    if rel.endswith(".py"):
+                        compile(path.read_bytes(), rel, "exec")
+                    put_bytes(archive, rel, skill_bytes(path, rel), 0o755 if rel == "run.sh" else 0o644)
+            for path, rel in runtime_support():
+                put_file(archive, rel, path)
             for rel, path in wheel_paths + model_paths:
                 put_file(archive, rel, path)
             put_file(archive, "runtime/ocr/" + engine.name, engine, 0o755)
@@ -189,15 +193,18 @@ def build_kit(arch, out, sources, vendor):
                            "OCR models: https://github.com/tesseract-ocr/tessdata_fast/tree/%s\n" %
                            (VERSION, RELEASE, PYTHONS[arch][1], UPSTREAM, runtime.name, MODEL_REV))
             put_bytes(archive, "runtime/SOURCE.txt", source_note.encode("utf-8"))
+        payload_sha = digest(payload)
+        launcher = launcher.replace("@PAYLOAD_SHA256@", payload_sha)
         kit = staging / output.name
-        top = TOP + "/"
+        top = TOP + ("/offline-runtime/" if runtime_only else "/")
         with compressed_tar(kit, level=1) as archive:
             put_bytes(archive, top + "runtime-bom.cdx.json", bom)
-            for rel in public_docs:
+            for rel in ([] if runtime_only else public_docs):
                 put_file(archive, top + rel, ROOT / rel)
-            put_file(archive, top + "README.md", REPO / "tools/offline/README.md")
+            readme = "runtime.md" if runtime_only else "README.md"
+            put_file(archive, top + "README.md", REPO / "tools/offline" / readme)
             put_bytes(archive, top + "run.sh", launcher.encode("utf-8"), 0o755)
-            put_bytes(archive, top + "payload.sha256", (digest(payload) + "\n").encode("ascii"))
+            put_bytes(archive, top + "payload.sha256", (payload_sha + "\n").encode("ascii"))
             put_file(archive, top + "payload.tar.gz", payload)
         checksum = staging / (output.name + ".sha256")
         checksum.write_bytes(("%s  %s\n" % (digest(kit), output.name)).encode("ascii"))
@@ -214,12 +221,13 @@ def main():
     parser.add_argument("--vendor-dir", type=Path, default=Path(VENDOR), help="Directory with verified py/ and wheels/ trees")
     parser.add_argument("--fetch-inputs", action="store_true",
                         help="Build host only: fetch missing or mismatched pinned assets, then build")
+    parser.add_argument("--runtime-only", action="store_true", help="Build platform companions for a separate source ZIP")
     args = parser.parse_args()
     architectures = list(PYTHONS) if args.arch == "all" else [args.arch]
     if args.fetch_inputs:
         fetch_inputs(architectures, args.from_dir, args.vendor_dir)
     for arch in architectures:
-        print(build_kit(arch, args.out, args.from_dir, args.vendor_dir), flush=True)
+        print(build_kit(arch, args.out, args.from_dir, args.vendor_dir, args.runtime_only), flush=True)
 
 
 if __name__ == "__main__":

@@ -10,9 +10,11 @@ on:
       - 'tools/prepare_win64_runtime.py'
       - 'tools/runtime_bom.py'
       - 'tools/build_ocr_runtime.py'
-      - 'tools/offline/run.sh'
+      - 'tools/offline/**'
+      - 'tools/skill-files.txt'
       - 'tools/build_linux_agent_kit.py'
       - 'qa/check_linux_kit.sh'
+      - 'qa/check_linux_pair.sh'
       - '.github/workflows/linux-offline.yml'
   workflow_dispatch:
 permissions:
@@ -84,6 +86,8 @@ jobs:
           path.write_text(json.dumps(lock, indent=2) + "\n")
           PY
           python3 tools/build_linux_agent_kit.py --arch "$arch" --fetch-inputs --from-dir "$RUNNER_TEMP/inputs" --out "$RUNNER_TEMP/dist"
+          python3 tools/build_offline_bundle.py --platform source --tag ci --out "$RUNNER_TEMP/dist"
+          python3 tools/build_linux_agent_kit.py --runtime-only --arch "$arch" --from-dir "$RUNNER_TEMP/inputs" --out "$RUNNER_TEMP/dist"
       - name: Prepare a host with an existing Office conversion backend
         run: |
           if ! command -v soffice >/dev/null; then
@@ -96,6 +100,7 @@ jobs:
       - name: Validate package on its native CPU without network access
         run: |
           sudo unshare --net -- runuser -u "$(id -un)" -- bash qa/check_linux_kit.sh "$RUNNER_TEMP/linux-offline.json" "$RUNNER_TEMP/dist"
+          sudo unshare --net -- runuser -u "$(id -un)" -- bash qa/check_linux_pair.sh "$RUNNER_TEMP/dist" traced-template-fill-ci-source.zip
           {
             echo "### $(uname -m) offline acceptance"
             echo 'Cold runs use independent application caches. Times are milliseconds.'

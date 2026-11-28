@@ -113,7 +113,8 @@ def record_install(stage, target, digest):
     _direct(target.parent)
     if not stage.is_relative_to(target.parent) or stage == target.parent:
         raise ValueError("暂存目录必须位于离线缓存内")
-    for required in ("SKILL.md", "scripts/di.py", "rules/learned.json"):
+    learned = "config/rules/learned.json" if (stage / "config").is_dir() else "rules/learned.json"
+    for required in ("SKILL.md", "scripts/di.py", learned):
         if not (stage / required).is_file():
             raise ValueError("缺少离线载荷文件 " + required)
     record = {"format": 1, "target": str(target.resolve()), "digest": digest,

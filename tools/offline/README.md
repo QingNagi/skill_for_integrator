@@ -1,10 +1,25 @@
 # traced-template-fill 内网使用手册
 
+本合并套装仅供本地验收。正式部署使用分别核验的技能包和同平台运行时包；SkillSpector 门禁覆盖独立技能包。
+
 **把规范、任务书、测试表或扫描 PDF 的内容填进 Word 模板。** Agent 先生成带来源批注的草稿，供你核对，再根据你的确认生成终稿。Windows x64、GNU/Linux x86_64 和 ARM64 自部署套装均包含 Python、PDF 读取组件和简体中文、英文 OCR 模型。第一次运行实际任务时自动部署，以后同一用户复用已就绪的同版本环境。
 
 ## 选择离线包
 
 旧版 Windows 完整包曾得到 `CRITICAL / DO_NOT_INSTALL`。更换 PDF 引擎后的套装按各自 SHA-256 单独验收，部署方可将技术验收记录与对应包的安全评审一起核对。下列步骤用于功能验收及通过组织审核后的部署。[发布评审说明](https://github.com/QingNagi/skill_for_integrator/blob/main/qa/README.md)
+
+## 1.2.0 分开部署
+
+建议向内网 Agent 提供同一构建的**技能 ZIP、与目标机匹配的运行时和 SHA-256 清单**。让 Agent 核对摘要，并把两个包解压到同一个宿主的 skills 父目录。项目级 Claude Code 使用 `.claude/skills/`，Codex 使用 `.agents/skills/`。得到同一技能目录下的 `SKILL.md`、启动脚本和 `offline-runtime/` 后，在用户发起任务的工作目录调用启动脚本。首次调用会校验并部署；相同版本的后续任务复用用户缓存。来源文件可以留在原位置。
+
+| 机器条件 | 需要交给 Agent 的内容 | 可用功能 |
+|---|---|---|
+| 新电脑，需要扫描件识别 | 技能 ZIP + 对应平台运行时，或本地完整验收包 | Word/Excel 输入、PDF 文字、表格、页面渲染、中英文扫描件 OCR |
+| 已有 Python 3.10+，仅处理 DOCX/XLSX | 技能 ZIP | 新版 Office 文档读写、来源快照及审核 |
+| 已有 Python，只需可选中的 PDF 文字 | 技能 ZIP + 精简依赖 ZIP | 根据依赖包 README 使用离线 wheel；图片和扫描页仍需完整 OCR 运行时 |
+| 需要旧 DOC/XLS 或 PDF 导出 | 以上部署加本机可用的 Office、WPS 或 LibreOffice | 格式转换；Linux 使用本机 LibreOffice |
+
+技能与运行时需来自同一构建，配对校验失败时，重新取得匹配的两个包。Windows、Linux 的 CPU 指令和动态库不同，因此使用不同运行时。业务规则、调用命令和生成的 Word 格式相同。部署单位可分别审查技能 ZIP 和原生依赖。Windows 运行时带 CPython 官方 SPDX 和签名材料；各平台都有 CycloneDX 清单。源码与组织签发的安装批准应分别核验。
 
 三种机器共用同一个 skill 和同一套文档命令。把下载目录交给 Agent，让它识别系统和 CPU 后选择对应文件。
 
@@ -131,8 +146,8 @@ traced-template-fill/
       runtime/tessdata/ 简体中文、英文模型及来源记录
       vendor/           PDF 依赖、版本、哈希及许可证
       scripts/          文档整合、OCR 和离线自检脚本
-      profiles/         排版配置
-      rules/            内置字段别名与规则默认值
+      config/profiles/  排版配置
+      config/rules/     内置字段别名与规则默认值
   references/          命令参考、规则及示例
 ```
 

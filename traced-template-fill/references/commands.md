@@ -42,7 +42,7 @@ DI batch plan "<批量任务.json>"
 
 ## 排版
 
-`DI profile` 查看当前规范。用 `DI profile --text "正文仿宋三号，首行缩进2字符" --save 公文` 保存用户指定的规则，核对识别结果后在 `run` 的完整命令中加 `--profile 公文`。新规范保存在工作区的 `.doc-integrator/profiles/`。内置资源为 `profiles/默认_文档摘抄提示词.json`、`rules/aliases.json`、`rules/learned.json`。
+`DI profile` 查看当前规范。用 `DI profile --text "正文仿宋三号，首行缩进2字符" --save 公文` 保存用户指定的规则，核对识别结果后在 `run` 的完整命令中加 `--profile 公文`。新规范保存在工作区的 `.doc-integrator/profiles/`。内置资源为 `config/profiles/默认_文档摘抄提示词.json`、`config/rules/aliases.json`、`config/rules/learned.json`。
 
 ## 任务目录结构
 ```
@@ -94,3 +94,5 @@ DI batch plan "<批量任务.json>"
 `batch draft 清单.json --jobs 2` 可让两项独立任务同时出草稿。清单有重复任务目录时会暂停。每个子任务产生独立 JSON 结果；若需要人工核对，会给出该任务的题目。
 
 `doctor --prune` 预览同一私有运行时缓存中可回收的版本。按命令提示显式应用。使用中、缺少可核验安装记录、包含本地改动以及当前和最近的一个版本均保留。
+
+任务目录中的 `decisions.jsonl` 在收到带原话的决定时生成，每行记一条操作。`questions.md` 随规划生成，列出完整选项。终稿会对照决定日志检查相应的答复。

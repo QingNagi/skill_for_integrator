@@ -21,7 +21,7 @@ from .cleanup import cmd_clean
 from .common import DIError, TOOL_AUTHOR, ensure_dir, out, read_json, setup_console, short, write_json
 from .content import outline, parse_ref
 from .source_queries import cmd_figure, cmd_outline, cmd_search, cmd_show
-from .decisions import protected_question, record_decision, require_quote
+from .decisions import answer_binding, protected_question, record_decision, require_quote
 from .draft_review import check_with_office, pending, run_selfcheck, write_report
 from .input_paths import cmd_find, expand_pattern, join_paths, split_paths
 from .job import Job
@@ -46,7 +46,7 @@ def nxt(*steps):
 
 
 def load_aliases():
-    a = read_json(os.path.join(SKILL_DIR, "rules", "aliases.json"), {}) or {}
+    a = read_json(os.path.join(SKILL_DIR, "config", "rules", "aliases.json"), {}) or {}
     a = {k: v for k, v in a.items() if not k.startswith("_")}
     return a
 
@@ -361,8 +361,9 @@ def cmd_answer(a):
         answers[q["key"]] = rec
         if quote:
             rec["user_quote"] = quote
+            rec["receipt_version"] = 2
             decisions.append({"id": qid, "key": q["key"], "question": q["question"],
-                              "answer": rec["label"], "fp": rec["fp"]})
+                              "answer": rec["label"], "fp": rec["fp"], "binding": answer_binding(rec)})
         out("%s ← %s" % (qid, short(rec["label"], 80)))
         if a.remember and q["key"].startswith("td:") and isinstance(rec["effect"], dict) and not rec["effect"].get("free"):
             remembered[q["key"]] = {"effect": rec["effect"], "label": rec["label"]}
@@ -490,7 +491,10 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
         raise DIError("目前草稿只能写入 Word 目标（docx/doc/wps/rtf）。Excel 目标暂不支持写入（没有 xlsx-fill 这个命令），Excel 目前只能作源文件。")
     draft, ver = job.next_draft()
     if flags:
-        record_decision(job, "draft " + " ".join(flags), user_quote, draft=os.path.basename(draft),
+        action = "draft " + " ".join(flags)
+        job.data.setdefault("draft_exceptions", {})[os.path.basename(draft)] = {
+            "action": action, "quote_sha256": evidence.digest(user_quote)}
+        record_decision(job, action, user_quote, draft=os.path.basename(draft),
                         defaulted=[q["key"] for q in pend])
     ensure_dir(os.path.dirname(draft))
     prof = load_profile(job.data.get("profile"), SKILL_DIR, preferences.project_dir(job))
@@ -829,7 +833,8 @@ def cmd_batch(a):
         return
     if a.action == "draft" and workers > 1:
         from concurrent.futures import ThreadPoolExecutor
-        from subprocess import run
+        from subprocess import DEVNULL, TimeoutExpired, run
+        from .child_process import child_environment
         paths = [os.path.normcase(os.path.realpath(job.dir)) for job in jobs]
         if len(set(paths)) != len(paths):
             raise DIError("批量清单有重复任务目录，无法并行生成草稿。")
@@ -839,7 +844,13 @@ def cmd_batch(a):
                        "draft", job.dir, "--json"]
             if a.defaults:
                 command.extend(["--defaults", "--user-quote", a.user_quote])
-            proc = run(command, capture_output=True, encoding="utf-8", errors="replace")
+            try:
+                proc = run(command, stdin=DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
+                           timeout=7200, env=child_environment(worker=True))
+            except TimeoutExpired:
+                return job.dir, 2, "此任务生成草稿超过两小时，请单独运行并检查输入。"
+            except OSError as exc:
+                return job.dir, 2, "无法启动草稿任务：%s" % exc
             return job.dir, proc.returncode, proc.stdout.strip() or proc.stderr.strip()
 
         with ThreadPoolExecutor(max_workers=min(workers, len(jobs) or 1)) as pool:

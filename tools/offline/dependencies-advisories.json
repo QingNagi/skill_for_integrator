@@ -1,0 +1,28 @@
+{
+  "checked_utc_date": "2026-11-28",
+  "query_tool": "tools/audit_vendor.py --platform all --check-osv --check-pypi",
+  "osv_query_endpoint": "https://api.osv.dev/v1/querybatch",
+  "packages": [
+    {
+      "package": "pypdf",
+      "version": "6.21.4",
+      "wheel": "pypdf-6.21.4-py3-none-any.whl",
+      "sha256": "33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c",
+      "pypi_url": "https://pypi.org/pypi/pypdf/6.21.4/json",
+      "pypi_nonwithdrawn_advisory_ids": [],
+      "osv_ecosystem": "PyPI",
+      "osv_advisory_ids": []
+    },
+    {
+      "package": "typing_extensions",
+      "version": "4.16.0",
+      "wheel": "typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "pypi_url": "https://pypi.org/pypi/typing_extensions/4.16.0/json",
+      "pypi_nonwithdrawn_advisory_ids": [],
+      "osv_ecosystem": "PyPI",
+      "osv_advisory_ids": []
+    }
+  ],
+  "scope": "Version-specific advisory database results at the time of the checks. Organizational approval is separate."
+}

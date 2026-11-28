@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
+if exist "%~dp0offline-runtime\" goto paired
 set "runner=%~dp0runtime\python\python.exe"
 if exist "%runner%" goto launch
 for %%P in (python.exe) do set "runner=%%~$PATH:P"
@@ -11,3 +12,6 @@ exit /b %errorlevel%
 :missing
 echo Cannot find an installed python.exe on PATH. 1>&2
 exit /b 1
+
+:paired
+"%~dp0offline-runtime\run.cmd" %*

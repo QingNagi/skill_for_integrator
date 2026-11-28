@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-'''生成离线完整包：每个平台一个 zip（技能全部文件 + PDF 读取依赖），另出含 pypdf 的 lite 包。
-只用标准库，兼容 Python 3.8+。
-
-  python tools/build_offline_bundle.py --out D:/dist --tag v1.0
-  python tools/build_offline_bundle.py --pub D:/PUB --tag v1.0     输出到 PUB 同级的 dist/
-  --platform source|lite|all|平台名,...   默认 source，不需要准备 wheel；其他交付从 .build/vendor 取依赖。
-  --no-lite                   不出 lite 包
-先运行 tools/fetch_vendor.py --platform all 下载并校验轮子。打包前请确认本目录是准备公开的干净副本。
-'''
+"""Build a text-only skill, its standalone lite wheel pack, or a legacy platform wheel kit."""
 import argparse
 import hashlib
+import json
 import os
+import re
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -38,54 +33,160 @@ def wheel_specs(plat):
             yield "wheels/%s/%s" % (plat, spec[0]), package, spec
 
 
-def files(plat, vendor=None):
-    """Select only installable source files and wheels for this platform."""
+def source_files():
+    """Map exact runtime locations; ignore other workspace directories and build outputs."""
     root = Path(ROOT)
-    for required in ("SKILL.md", "scripts/di.py", "rules/test-data.json", "vendor/wheels.lock.json"):
-        if not (root / required).is_file() or not (root / required).stat().st_size:
-            raise ValueError("Missing or empty skill file: " + required)
-    for pattern in ("SKILL.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "run.cmd", "run.sh",
-                    "assets/offline-ocr.png", "profiles/*.json", "references/*.md", "rules/*.json",
-                    "scripts/**/*.py", "scripts/**/*.ps1", "vendor/licenses/*.txt", "vendor/README.md", "vendor/SHA256SUMS",
-                    "vendor/*.lock.json"):
+    allowlist = (Path(HERE) / "skill-files.txt").read_text(encoding="utf-8").splitlines()
+    selected = {rel: root / rel for rel in allowlist}
+    if (root / "LICENSE").is_file():
+        selected["LICENSE"] = root / "LICENSE"
+    for name in ("wheels.lock.json", "ocr.lock.json"):
+        selected["config/" + name] = root / "vendor" / name
+    if len(selected) > 500:
+        raise ValueError("Too many skill files")
+    for rel, path in sorted(selected.items()):
+        if not path.resolve().is_relative_to(root.resolve()) or path.is_symlink() or not path.is_file():
+            raise ValueError("Invalid skill source: " + rel)
+        if not 0 < path.stat().st_size <= 512 * 1024:
+            raise ValueError("Invalid skill file size: " + rel)
+        value = path.read_text(encoding="utf-8-sig")
+        if any(ord(c) < 32 and c not in "\t\n\r" for c in value):
+            raise ValueError("Non-text skill file: " + rel)
+        if rel == "SKILL.md":
+            frontmatter = value.split("---", 2)
+            if len(frontmatter) < 3 or not re.search(r"(?m)^name: " + re.escape(TOP) + r"\s*$", frontmatter[1]):
+                raise ValueError("Skill directory and front matter name differ")
+        yield path, rel
+
+
+def skill_bytes(path, rel):
+    data = path.read_bytes()
+    # Windows Git checkouts can convert line endings even for POSIX launch scripts.
+    return data.replace(b"\r\n", b"\n") if rel.endswith(".sh") else data
+
+
+def source_manifest():
+    return (json.dumps({rel: hashlib.sha256(skill_bytes(path, rel)).hexdigest() for path, rel in source_files()},
+                       ensure_ascii=True, sort_keys=True, indent=2) + "\n").encode("ascii")
+
+
+def runtime_support():
+    root = Path(ROOT)
+    for pattern in ("assets/offline-ocr.png", "THIRD_PARTY_NOTICES.md", "vendor/README.md",
+                    "vendor/SHA256SUMS", "vendor/*.lock.json", "vendor/licenses/*.txt"):
         for path in sorted(root.glob(pattern)):
             yield path, path.relative_to(root).as_posix()
-    if plat == "source":
-        return
-    wheel_root = Path(vendor or fv.VENDOR)
+
+
+def wheel_files(plat, vendor):
     for rel, _, spec in wheel_specs(plat):
-        path = wheel_root / rel
+        path = Path(vendor or fv.VENDOR) / rel
         if not fv.is_good(str(path), spec[1], spec[2]):
             raise ValueError("Missing or invalid wheel: " + str(path))
-        yield path, "vendor/" + rel
+        yield path, rel
+
+
+def files(plat, vendor=None):
+    if plat is not None:
+        yield from source_files()
+    if plat == "source":
+        return
+    if plat:
+        yield from runtime_support()
+    for path, rel in wheel_files(plat, vendor):
+        yield path, ("vendor/" if plat else "") + rel
 
 
 def build(out, tag, plat, vendor=None):
-    dest = os.path.join(out, '%s-%s-%s.zip' % (TOP, tag, plat or 'lite'))
+    label = plat or "dependencies"
+    top = TOP if plat else TOP + "-dependencies"
+    dest = os.path.join(out, "%s-%s-%s.zip" % (TOP, tag, label))
     with tempfile.TemporaryDirectory(dir=out) as staging:
-        part = Path(staging) / 'package.zip'
-        expected = {TOP + '/vendor/' + rel: spec[2] for rel, _, spec in wheel_specs(plat)}
-        with zipfile.ZipFile(part, 'w') as archive:
-            if plat != "source":
-                archive.writestr(TOP + "/vendor/pdf-mode.txt", "full" if plat else "lite")
-            for path, rel in files(plat, vendor):
-                method = zipfile.ZIP_STORED if rel.endswith('.whl') else zipfile.ZIP_DEFLATED
-                archive.write(path, TOP + '/' + rel, compress_type=method)
+        clean = Path(staging) / top
+        clean.mkdir()
+        for path, rel in files(plat, vendor):
+            target = clean / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if rel.endswith(".sh"):
+                target.write_bytes(skill_bytes(path, rel))
+            else:
+                shutil.copyfile(path, target)
+        if plat is None:
+            requirements, sums, lock = [], [], {}
+            snapshot = Path(HERE) / "offline/dependencies-advisories.json"
+            checked = {p["wheel"]: p["sha256"] for p in json.loads(snapshot.read_text("utf-8"))["packages"]}
+            if checked != {spec[0]: spec[2] for _, _, spec in wheel_specs(None)}:
+                raise ValueError("Refresh the dependency advisory snapshot for the changed wheels")
+            shutil.copyfile(snapshot, clean / "advisories.json")
+            for rel, package, spec in wheel_specs(None):
+                requirements.append("%s==%s --hash=sha256:%s" % (package, spec[0].split("-")[1], spec[2]))
+                sums.append("%s  %s" % (spec[2], rel))
+                lock[package] = spec
+                name = package + "-LICENSE.txt"
+                shutil.copyfile(Path(ROOT) / "vendor/licenses" / name, clean / name)
+            (clean / "requirements.txt").write_text("\n".join(requirements) + "\n", encoding="ascii")
+            (clean / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="ascii")
+            (clean / "wheels.lock.json").write_text(json.dumps({"pure": lock}, indent=2) + "\n", encoding="ascii")
+            (clean / "pdf-mode.txt").write_text("lite\n", encoding="ascii")
+            shutil.copyfile(Path(HERE) / "offline/dependencies.md", clean / "README.md")
+        elif plat != "source":
+            (clean / "vendor/pdf-mode.txt").write_text("full", encoding="ascii")
+        part = Path(staging) / "package.zip"
+        paths = sorted(p for p in clean.rglob("*") if p.is_file())
+        with zipfile.ZipFile(part, "w") as archive:
+            for path in paths:
+                info = zipfile.ZipInfo(top + "/" + path.relative_to(clean).as_posix())
+                info.create_system = 3
+                info.external_attr = (0o100755 if path.name == "run.sh" else 0o100644) << 16
+                info.compress_type = zipfile.ZIP_STORED if path.suffix == ".whl" else zipfile.ZIP_DEFLATED
+                archive.writestr(info, path.read_bytes())
         with zipfile.ZipFile(part) as archive:
             names = archive.namelist()
-            actual = {name for name in names if name.endswith('.whl')}
-            bad = archive.testzip()
-            if bad or actual != set(expected):
-                raise ValueError('Archive validation failed: %s (%s)' % (dest, bad or 'wheel set'))
-            for member, digest in expected.items():
-                with archive.open(member) as stream:
-                    check = hashlib.sha256()
-                    for block in iter(lambda: stream.read(fv.MEBIBYTE), b''):
-                        check.update(block)
-                    if check.hexdigest() != digest:
-                        raise ValueError('Invalid archived wheel: ' + member)
+            if archive.testzip() or set(names) != {top + "/" + p.relative_to(clean).as_posix() for p in paths}:
+                raise ValueError("Archive validation failed: " + dest)
+            for rel, _, spec in wheel_specs(plat):
+                member = top + ("/vendor/" if plat else "/") + rel
+                if hashlib.sha256(archive.read(member)).hexdigest() != spec[2]:
+                    raise ValueError("Invalid archived wheel: " + member)
+            if plat == "source":
+                for name in names:
+                    archive.read(name).decode("utf-8")
         os.replace(part, dest)
     return dest, len(names)
+
+
+def build_release(output, tag, sources, vendor):
+    """Build and verify every artifact privately before publishing the checksum inventory."""
+    from build_linux_agent_kit import PYTHONS, build_kit as linux_kit
+    from build_win64_agent_kit import build_kit as windows_kit
+
+    output, sources, vendor = Path(output).resolve(), Path(sources).resolve(), Path(vendor).resolve()
+    if output.is_relative_to(Path(ROOT).resolve()):
+        raise ValueError("Build outside the skill tree")
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output) as tmp:
+        stage = Path(tmp)
+        packages = [Path(build(stage, tag, plat, vendor)[0]) for plat in ("source", None)]
+        for paired in (False, True):
+            label = "runtime" if paired else "offline"
+            win = stage / (TOP + "-" + label + "-win64.zip")
+            windows_kit(win, sources, vendor, paired)
+            packages.append(win)
+            for arch in PYTHONS:
+                packages.append(linux_kit(arch, stage, sources, vendor, paired))
+        lines = []
+        for package in sorted(packages):
+            line = fv.sha256_of(package) + "  " + package.name + "\n"
+            lines.append(line)
+            package.with_name(package.name + ".sha256").write_bytes(line.encode("ascii"))
+        manifest = stage / ("SHA256SUMS-" + tag + ".txt")
+        manifest.write_bytes("".join(lines).encode("ascii"))
+        for package in packages:
+            for item in (package, package.with_name(package.name + ".sha256")):
+                os.replace(item, output / item.name)
+        os.replace(manifest, output / manifest.name)
+    print(output / manifest.name)
+    return 0
 
 
 def main(argv=None):
@@ -95,6 +196,7 @@ def main(argv=None):
     ap.add_argument('--tag', default='dev', help='版本标记，写进文件名')
     ap.add_argument('--platform', default='source')
     ap.add_argument('--vendor-dir', default=fv.VENDOR, help='轮子目录，默认 .build/vendor')
+    ap.add_argument('--from-dir', type=Path, help='Verified original interpreter archives, Python release evidence and OCR models for --platform release')
     ap.add_argument('--no-lite', action='store_true')
     a = ap.parse_args(argv)
     if (not a.tag or a.tag in ('.', '..') or not all(c.isalnum() or c in '.-_' for c in a.tag)):
@@ -107,11 +209,16 @@ def main(argv=None):
         print('请用 --out 指定输出目录，或用 --pub 指定 PUB 目录（输出到其同级 dist/）')
         return 2
     requested = [item.strip() for item in a.platform.split(',') if item.strip()]
+    if requested == ['release']:
+        if not a.from_dir or a.no_lite:
+            ap.error('release builds all eight artifacts and requires --from-dir')
+        return build_release(out, a.tag, a.from_dir, a.vendor_dir)
     if requested == ['all']:
         requested = ['source'] + sorted(fv.WHEELS)
-    unknown = [item for item in requested if item not in ('source', 'lite') and item not in fv.WHEELS]
+    unknown = [item for item in requested if item not in ('source', 'lite', 'dependencies') and item not in fv.WHEELS]
     if not requested or unknown:
-        ap.error('可选交付：source、lite、all 或 ' + ', '.join(sorted(fv.WHEELS)))
+        ap.error('可选交付：source、dependencies（原 lite）、all 或 ' + ', '.join(sorted(fv.WHEELS)))
+    requested = ['lite' if item == 'dependencies' else item for item in requested]
     if 'lite' in requested and a.no_lite:
         ap.error('--no-lite 与显式选择 lite 冲突')
     plats = list(dict.fromkeys(item for item in requested if item in fv.WHEELS))

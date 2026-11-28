@@ -8,7 +8,9 @@ param(
     [string]$Evaluator = 'skillevaluator',
     [string]$SkillSpector = $env:SKILLEVALUATOR_SKILLSPECTOR_PATH,
     [string]$Gitleaks = 'gitleaks',
-    [switch]$ScannerDiagnostics
+    [switch]$ScannerDiagnostics,
+    [Parameter(ParameterSetName='Package')][switch]$SourceGate,
+    [string]$PreviousVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -175,7 +177,24 @@ try {
     $active = $today -ge [datetime]'2026-11-27' -and $today -le [datetime]'2027-05-27'
     $useWaivers = $evidence.waiver_sha256_lf -eq $expectedWaiver -and $evidence.license_sha256 -eq $expectedLicense -and $active
     $evidence.waivers_enabled = $useWaivers
-    $arguments = @('tier1',$skill,'--no-llm','-r','json','-r','markdown','-o',$review)
+    $evidence.source_gate = [bool]$SourceGate
+    $arguments = @('tier1',$skill,'--no-llm','-r','json','-r','markdown','-r','html','-o',$review)
+    if ($PreviousVersion) { $arguments += @('--previous-version',$PreviousVersion) }
+    if ($SourceGate) {
+        if ($evidence.scope -ne 'skill_source' -or !$PreviousVersion) {
+            throw 'SourceGate requires the standalone source package and its previous version.'
+        }
+        $baseline = Join-Path $review 'skillspector-baseline.yaml'
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'skillspector-baseline.yaml') -Destination $baseline
+        $normalized = [IO.File]::ReadAllText($baseline).Replace("`r`n","`n")
+        $pin = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($normalized)))
+        if ($pin -ne 'C10471D63669511D561C5A912CEC0C9B7AC2D4AA7CE0A60FF2FFB5971D952E56') {
+            throw 'Source baseline differs from the reviewed record.'
+        }
+        $evidence.baseline_sha256 = Digest $baseline
+        $evidence.previous_version = $PreviousVersion
+        $arguments += @('--skillspector-baseline',$baseline)
+    }
     if ($useWaivers) { $arguments += @('--pii-waivers',$waiver) }
     elseif ($needsWaivers) { Write-Warning 'Waiver evidence or validity date mismatch. Running full Tier 1 with no PII waivers.' }
 
@@ -185,6 +204,10 @@ try {
     $exitCode = if ($tierExit) { $tierExit } else { 2 }
     $report = Get-Content -Raw -LiteralPath (Join-Path $review 'skillevaluator-tier1.json') | ConvertFrom-Json
     $evidence.overall_status = $report.overall_status
+    $evidence.publication_status = $report.publication_status
+    $security = $report.results | Where-Object validator -eq 'Security Scan'
+    $evidence.skillspector_applicability = $security.skillspector_applicability
+    $evidence.skillspector_baseline = $security.skillspector_baseline
     $evidence.incomplete_scans = @($report.incomplete_scans)
     $pii = @($report.results | Where-Object validator -eq 'PII Scan')
     $applied = @($pii.findings | Where-Object check_name -eq 'applied-pii-waiver' | ForEach-Object { $_.metadata.waiver_id } | Sort-Object)
@@ -198,17 +221,46 @@ try {
         Write-Warning 'The three reviewed license waivers were not all verified. See the PII findings.'
     }
 
-    if ($ScannerDiagnostics) {
+    if ($ScannerDiagnostics -or $SourceGate) {
         try {
             & $SkillSpector scan $skill --format json --no-llm > (Join-Path $review 'skillspector.json') 2> (Join-Path $review 'skillspector.stderr.txt')
             $evidence.skillspector_exit = $LASTEXITCODE
             $raw = Get-Content -Raw -LiteralPath (Join-Path $review 'skillspector.json') | ConvertFrom-Json -ErrorAction Stop
             $evidence.skillspector_risk = $raw.risk_assessment
             $evidence.skillspector_coverage = $raw.analysis_completeness.coverage_percent
+            $evidence.raw_completeness = $raw.analysis_completeness.status
+            $evidence.raw_counts = [ordered]@{}
+            foreach ($severity in @('CRITICAL','HIGH','MEDIUM','LOW','INFO')) {
+                $evidence.raw_counts[$severity] = @($raw.issues | Where-Object severity -eq $severity).Count
+            }
         } catch {
             $evidence.diagnostics_error = $_.Exception.Message
             Write-Warning "Direct scanner diagnostics failed: $($_.Exception.Message)"
         }
+    }
+    if ($SourceGate) {
+        $receipt = $security.skillspector_baseline
+        $harness = $report.results | Where-Object validator -eq 'Harness Compatibility'
+        $profiles = $harness.success_details | Where-Object check -eq 'harness_profile_evaluation'
+        $evidence.quality_grade = $report.quality_summary.grade
+        $evidence.harness_profiles = @($profiles.metadata.harnesses)
+        $evidence.harness_not_loaded = @($harness.findings | Where-Object { $_.metadata.effect -eq 'not_loaded' })
+        $evidence.source_gate_passed = (
+            $exitCode -eq 0 -and $report.results.Count -eq 13 -and
+            @($report.results | Where-Object status -ne 'passed').Count -eq 0 -and
+            @($report.incomplete_scans).Count -eq 0 -and
+            $evidence.quality_grade -eq 'A' -and $profiles.metadata.profiles_evaluated -eq 6 -and
+            $evidence.harness_not_loaded.Count -eq 0 -and
+            $receipt.loaded -eq $true -and $receipt.status -eq 'no_matches' -and
+            $receipt.digest -eq "sha256:$($evidence.baseline_sha256)" -and
+            $receipt.suppressed_findings -eq 0 -and
+            $security.skillspector_version -eq '2.13.7' -and $null -ne $security.skillspector_applicability -and
+            $evidence.skillspector_exit -in 0,1 -and $raw.execution_successful -eq $true -and
+            $raw.metadata.skillspector_version -eq '2.13.7' -and $raw.analysis_completeness.is_complete -eq $true -and
+            $raw.analysis_completeness.status -eq 'complete' -and
+            $raw.suppressed_count -eq 0 -and $evidence.raw_counts.HIGH -eq 0 -and $evidence.raw_counts.CRITICAL -eq 0
+        )
+        if (!$evidence.source_gate_passed -and !$exitCode) { $exitCode = 2 }
     }
     Write-Host "Tier 1: $($report.overall_status). PII: $($pii.status). Applied waivers: $($applied.Count). Exit: $exitCode"
 } catch {
@@ -235,11 +287,15 @@ try {
                 "| 评审时间 UTC | $($evidence.started_utc) |"
                 "| Tier 1 | $($report.overall_status) · $($statuses -join ' / ') |"
                 "| Security Scan | $($security.status) |"
-                "| 安全 HIGH 原始计数 | $($security.summary.high_count) |"
+                "| 独立无基线扫描 HIGH | $($evidence.raw_counts.HIGH) |"
+                "| Tier 1 安全 HIGH | $($security.summary.high_count) |"
+                "| Tier 1 路径适用性处理前 / 后的风险分 | $($security.skillspector_applicability.raw_risk_score) / $($security.skillspector_applicability.applicable_risk_score) |"
+                "| 路径适用性保留 / 过滤 | $($security.skillspector_applicability.kept_issues) / $($security.skillspector_applicability.suppressed_inapplicable_issues) |"
+                "| 基线命中 | $($security.skillspector_baseline.suppressed_findings) |"
                 "| PII | $($evidence.pii_status) |"
                 "| 发布资格 | $($report.publication_status) |"
                 ''
-                '[完整检查明细](skillevaluator-tier1.md) · [工具、输入与退出码](evidence.json)'
+                '[HTML](skillevaluator-tier1.html) · [完整检查明细](skillevaluator-tier1.md) · [工具、输入与退出码](evidence.json)'
             ) | Set-Content -LiteralPath (Join-Path $review 'release-review.md') -Encoding utf8
         }
     }

@@ -1,0 +1,49 @@
+name: Skill source Tier 1
+on: [pull_request, push, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  source-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install official static scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/evaluator"
+          python -m venv "$RUNNER_TEMP/inspector"
+          python -m pip download --only-binary=:all: --no-deps -d "$RUNNER_TEMP" skillevaluator==1.2.1
+          cd "$RUNNER_TEMP"
+          echo 'cfdd052adbcab802151017b3a283cbdeda33f80a71472ba193c8c1ffccc9cb9b  skillevaluator-1.2.1-py3-none-any.whl' | sha256sum -c -
+          evaluator/bin/pip install ./skillevaluator-1.2.1-py3-none-any.whl
+          inspector/bin/pip install git+https://github.com/NVIDIA/SkillSpector.git@c323ad4c43e3c8f2de051572cc25b2711d11e648
+          curl --fail --location --retry 3 -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz' | sha256sum -c -
+          mkdir gitleaks-bin
+          tar -xzf gitleaks.tar.gz -C gitleaks-bin gitleaks
+      - name: Build the source release
+        run: python -B tools/build_offline_bundle.py --platform source --tag 1.2.0 --out "$RUNNER_TEMP/release"
+      - name: Run source gate
+        shell: pwsh
+        run: |
+          ./qa/run-tier1.ps1 -SourceGate -PreviousVersion 1.1.2 `
+            -Package "$env:RUNNER_TEMP/release/traced-template-fill-1.2.0-source.zip" `
+            -Evaluator "$env:RUNNER_TEMP/evaluator/bin/skillevaluator" `
+            -SkillSpector "$env:RUNNER_TEMP/inspector/bin/skillspector" `
+            -Gitleaks "$env:RUNNER_TEMP/gitleaks-bin/gitleaks" `
+            -OutputDirectory "$env:RUNNER_TEMP/source-review"
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: skill-source-tier1
+          path: |
+            ${{ runner.temp }}/release/
+            ${{ runner.temp }}/source-review/*/*.*

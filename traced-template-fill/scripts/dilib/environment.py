@@ -3,6 +3,8 @@ import os
 import re
 import sys
 
+from .child_process import child_environment
+
 
 # ---- 环境汇总（doctor 用）：每一项探测失败都降级成文字，不抛异常
 WORD_VER = {12: '2007', 14: '2010', 15: '2013', 16: '2016/2019/2021/365'}
@@ -25,7 +27,8 @@ def _progid_ver(progid):
 def _lo_version(path):
     import subprocess
     try:
-        r = subprocess.run([path, '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20,
+        r = subprocess.run([path, '--version'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=20, env=child_environment(),
                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         s = r.stdout.decode('utf-8', 'replace').strip()
         return s.splitlines()[0].strip() if s else None
@@ -71,18 +74,25 @@ def environment_lines():
         bs = None
         lines.append('PDF/OCR/vendor：没能加载 _bootstrap（%s: %s），已跳过' % (type(e).__name__, e))
     if bs is not None:
-        import importlib
         try:
             active = bs.activate_vendor()
             lines.append('vendor（离线依赖）：' + ('已加载' if active else '未加载，检查当前 Python 已安装的包'))
             lines.append('PDF 库：')
-            for name, purpose in (('pdfplumber', '文本和表格'), ('pypdfium2', '渲染和裁图'), ('pypdf', '文本降级')):
-                try:
-                    mod = importlib.import_module(name)
-                    version = getattr(mod, '__version__', '') or str(getattr(mod, 'PYPDFIUM_INFO', ''))
-                    lines.append('  [有] %s %s（%s）' % (name, version, purpose))
-                except ImportError as exc:
-                    lines.append('  [无] %s（%s）：%s' % (name, purpose, exc))
+            try:
+                import pdfplumber
+                lines.append('  [有] pdfplumber %s（文本和表格）' % pdfplumber.__version__)
+            except (ImportError, OSError) as exc:
+                lines.append('  [无] pdfplumber（文本和表格）：%s' % exc)
+            try:
+                import pypdfium2
+                lines.append('  [有] pypdfium2 %s（渲染和裁图）' % getattr(pypdfium2, 'PYPDFIUM_INFO', ''))
+            except (ImportError, OSError) as exc:
+                lines.append('  [无] pypdfium2（渲染和裁图）：%s' % exc)
+            try:
+                import pypdf
+                lines.append('  [有] pypdf %s（文本降级）' % pypdf.__version__)
+            except (ImportError, OSError) as exc:
+                lines.append('  [无] pypdf（文本降级）：%s' % exc)
             for note in bs.notes()[:4]:
                 lines.append('  [降级原因] ' + note)
             oc = bs.ocr_hint(probe=True)
@@ -90,9 +100,10 @@ def environment_lines():
         except Exception as exc:
             lines.append('PDF/OCR 探测失败：%s' % exc)
     try:
-        import importlib.util
-        lines.append('xlrd（.xls 读取，可选）：%s' % ('有' if importlib.util.find_spec('xlrd') else '无，.xls 会改用办公软件转换'))
-    except Exception:
-        pass
+        import xlrd
+    except (ImportError, OSError) as exc:
+        lines.append('xlrd（.xls 读取，可选）：无，.xls 会改用办公软件转换（%s）' % exc)
+    else:
+        lines.append('xlrd（.xls 读取，可选）：有')
     lines.append('核心功能（docx/xlsx/csv/md/txt 读写、批注、链接、结构自检）只需 Python 3.10+ 标准库。')
     return lines

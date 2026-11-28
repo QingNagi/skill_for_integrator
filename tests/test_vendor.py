@@ -1,4 +1,5 @@
 """Offline bundle and dependency integrity regressions."""
+import shutil
 import sys
 import tempfile
 import unittest
@@ -20,9 +21,39 @@ class VendorIntegrityTests(unittest.TestCase):
             output, _ = bundle.build(tmp, "test", "source", Path(tmp) / "no-vendor-directory")
             with zipfile.ZipFile(output) as archive:
                 paths = [item[len(bundle.TOP) + 1:] for item in archive.namelist()]
+                for name in archive.namelist():
+                    archive.read(name).decode("utf-8")
         self.assertIn("SKILL.md", paths)
-        self.assertIn("vendor/wheels.lock.json", paths)
+        self.assertIn("config/wheels.lock.json", paths)
+        self.assertFalse(any(p.startswith(("assets/", "vendor/")) for p in paths))
         self.assertFalse(any(p.endswith(".whl") or p.startswith(("runtime/", "tools/", "tests/", "qa/")) for p in paths))
+
+    def test_unlisted_files_and_nontext_are_excluded_or_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / bundle.TOP
+            shutil.copytree(bundle.ROOT, skill)
+            (skill / "scripts/dilib/local_helper.py").write_text("print(1)", encoding="utf-8")
+            with patch.object(bundle, "ROOT", str(skill)):
+                self.assertNotIn("scripts/dilib/local_helper.py", {rel for _, rel in bundle.source_files()})
+                (skill / "scripts/di.py").write_bytes(b"hidden\x00binary")
+                with self.assertRaisesRegex(ValueError, "Non-text"):
+                    list(bundle.source_files())
+
+    def test_lite_delivery_is_independent_of_skill_code(self):
+        if not (Path(fetch.VENDOR) / "py").is_dir():
+            self.skipTest("Requires verified wheels")
+        with tempfile.TemporaryDirectory() as tmp:
+            output, _ = bundle.build(tmp, "test", None)
+            with zipfile.ZipFile(output) as archive:
+                names = archive.namelist()
+                top = bundle.TOP + "-dependencies/"
+                self.assertTrue(all(p.startswith(top) for p in names))
+                self.assertEqual(sum(p.endswith(".whl") for p in names), 2)
+                self.assertIn(top + "SHA256SUMS", names)
+                self.assertIn(top + "requirements.txt", names)
+                self.assertIn(top + "advisories.json", names)
+                self.assertEqual(sum(p.endswith("LICENSE.txt") for p in names), 2)
+                self.assertFalse(any(p.endswith(("SKILL.md", ".py")) for p in names))
 
     def test_pinned_native_wheel_layout_for_each_platform(self):
         self.assertEqual(set(fetch.WHEELS), {"win_amd64", "manylinux_x86_64", "manylinux_aarch64"})

@@ -1,0 +1,188 @@
+{
+  "version": "1.2.0",
+  "date": "2026-11-28",
+  "defender": {
+    "exit": 0,
+    "endUtc": "2026-11-28T06:50:24.1110747Z",
+    "remediation": false,
+    "status": {
+      "AMServiceEnabled": true,
+      "AntivirusEnabled": true,
+      "AntivirusSignatureVersion": "1.463.499.0",
+      "AMEngineVersion": "1.1.26100.4",
+      "AntivirusSignatureLastUpdated": "2026-11-27T22:09:59+08:00"
+    },
+    "startUtc": "2026-11-28T06:49:29.4651932Z",
+    "tool": "Microsoft Defender Antivirus",
+    "inputs_sha256": {
+      "traced-template-fill-1.2.0-dependencies.zip": "00442878df94b017cd5ea04821ee6b2f3e6f93701b18b018ef5b564f9ece5f0c",
+      "traced-template-fill-1.2.0-source.zip": "eb6238b03ed26faffbbaa8a6c270f94bda224eb0864bf7129f206cc3bb506064",
+      "traced-template-fill-offline-linux-aarch64.tar.gz": "b5b8b19ce1c7bc1ddd5ba2debc3d2743a8b9ffb49316f1ebd276c745ebb7687a",
+      "traced-template-fill-offline-linux-x86_64.tar.gz": "cb1aff68c5d29b17e7f38be93c5e35dba355a4c297e5d2c005b2712992a1ce81",
+      "traced-template-fill-offline-win64.zip": "7d6bf5f6cdf73bb28474d27ad88f96db2a8617bdec0a1751e175c193bdc98bb0",
+      "traced-template-fill-runtime-linux-aarch64.tar.gz": "3e41894a1f473cb81ce9522ded2b1b7a2cf3b020f9ec002120cc11a88a60d8bd",
+      "traced-template-fill-runtime-linux-x86_64.tar.gz": "41981748ce2f012540dd0380b1e40bfdae3d336507b854622da74adeac00d8a0",
+      "traced-template-fill-runtime-win64.zip": "f0241b10194de02566d018dcdd75c15becf6c2e537d48834b2e2794a0256770b"
+    },
+    "distinct_containers_expanded": 183,
+    "regular_members_staged": 17344,
+    "ocr_engine_sha256": [
+      "05289d05288e6d16f6f67314baa5ddd0ac9a2f8a5ddc4a4dbb5665a7c406975a",
+      "1445b04b92a27fd9c4cd529307846dcea4ed475ff5b2a42137ade7c0700bb8fe",
+      "604aef84cab43b697cf5dc8129314ca306602c9017dfda17246f3de98d433018"
+    ],
+    "no_threats_reported": true
+  },
+  "windows_formal_pair": {
+    "artifacts": {
+      "traced-template-fill-1.2.0-source.zip": "eb6238b03ed26faffbbaa8a6c270f94bda224eb0864bf7129f206cc3bb506064",
+      "traced-template-fill-runtime-win64.zip": "f0241b10194de02566d018dcdd75c15becf6c2e537d48834b2e2794a0256770b",
+      "traced-template-fill-1.2.0-dependencies.zip": "00442878df94b017cd5ea04821ee6b2f3e6f93701b18b018ef5b564f9ece5f0c"
+    },
+    "mismatched_skill_rejected": true,
+    "failed_install_not_published": true,
+    "cold_seconds": 7.688,
+    "cold_bilingual_ocr": true,
+    "warm_seconds": 0.269,
+    "warm_no_payload": true,
+    "payload_sha256": "6af179f989032b5866bb9c5cabfc5de712ccab615274c2400c37245db7317f2e",
+    "pip_no_index_require_hashes_pdf_roundtrip": "6.21.4",
+    "source_DI_VENDOR_DIR_verified": true
+  },
+  "linux": {
+    "x86_64": {
+      "archives": {
+        "traced-template-fill-offline-linux-x86_64.tar.gz": "cb1aff68c5d29b17e7f38be93c5e35dba355a4c297e5d2c005b2712992a1ce81",
+        "traced-template-fill-runtime-linux-x86_64.tar.gz": "41981748ce2f012540dd0380b1e40bfdae3d336507b854622da74adeac00d8a0",
+        "traced-template-fill-1.2.0-source.zip": "eb6238b03ed26faffbbaa8a6c270f94bda224eb0864bf7129f206cc3bb506064"
+      },
+      "glibc": [
+        "glibc",
+        "2.36"
+      ],
+      "kernel": "6.1.0-50-amd64",
+      "libreoffice": "unavailable",
+      "timings_ms": {
+        "cold_run": {
+          "samples": [
+            52186.376,
+            76396.416,
+            48135.68
+          ],
+          "median": 52186.376
+        },
+        "warm_run": {
+          "samples": [
+            6564.079,
+            6439.375,
+            6413.703,
+            6663.606,
+            6505.476
+          ],
+          "median": 6505.476
+        },
+        "warm_search": {
+          "samples": [
+            5231.906,
+            4187.826,
+            4173.006,
+            4125.003,
+            4147.844
+          ],
+          "median": 4173.006
+        },
+        "direct_search": {
+          "samples": [
+            4073.095,
+            4137.824,
+            4339.962,
+            4137.436,
+            4128.072
+          ],
+          "median": 4137.436
+        }
+      },
+      "formal_pair_passed": true,
+      "offline_guest": true
+    },
+    "aarch64": {
+      "archives": {
+        "traced-template-fill-offline-linux-aarch64.tar.gz": "b5b8b19ce1c7bc1ddd5ba2debc3d2743a8b9ffb49316f1ebd276c745ebb7687a",
+        "traced-template-fill-runtime-linux-aarch64.tar.gz": "3e41894a1f473cb81ce9522ded2b1b7a2cf3b020f9ec002120cc11a88a60d8bd",
+        "traced-template-fill-1.2.0-source.zip": "eb6238b03ed26faffbbaa8a6c270f94bda224eb0864bf7129f206cc3bb506064"
+      },
+      "glibc": [
+        "glibc",
+        "2.36"
+      ],
+      "kernel": "6.1.0-50-arm64",
+      "libreoffice": "unavailable",
+      "timings_ms": {
+        "cold_run": {
+          "samples": [
+            48598.812,
+            79967.649,
+            51553.104
+          ],
+          "median": 51553.104
+        },
+        "warm_run": {
+          "samples": [
+            6115.19,
+            6575.115,
+            6137.621,
+            6546.341,
+            6047.42
+          ],
+          "median": 6137.621
+        },
+        "warm_search": {
+          "samples": [
+            4317.94,
+            4105.44,
+            4064.682,
+            4234.158,
+            4068.566
+          ],
+          "median": 4105.44
+        },
+        "direct_search": {
+          "samples": [
+            4887.195,
+            4058.208,
+            4048.329,
+            4118.337,
+            4111.717
+          ],
+          "median": 4111.717
+        }
+      },
+      "formal_pair_passed": true,
+      "offline_guest": true
+    }
+  },
+  "windows_office": {
+    "word": {
+      "backend": "word",
+      "docx_producer": "Microsoft Office Word",
+      "pdf_producer": "Microsoft® Word 2010 Microsoft® Word 2010"
+    },
+    "libreoffice": {
+      "backend": "libreoffice",
+      "docx_producer": "LibreOffice/26.8.3.1$Windows_X86_64 LibreOffice_project/861effc5289d539f15c4c18d1ba8579ffd78728b",
+      "pdf_producer": "Writer LibreOffice 26.8.3.1 (X86_64)"
+    }
+  },
+  "upstream_checks": {
+    "osv_query_rows": 13,
+    "all_osv_rows_zero": true,
+    "windows_cpython_signature": "hugo@python.org",
+    "oidc_issuer": "https://github.com/login/oauth",
+    "signature_verify_ok": true,
+    "spdx_sha256": "d448c78f5fae170303d3b022d61507155e4d30e541c32bff3a4edd2b1e8dbf47"
+  },
+  "reproducible_windows": {
+    "traced-template-fill-offline-win64.zip": "7d6bf5f6cdf73bb28474d27ad88f96db2a8617bdec0a1751e175c193bdc98bb0",
+    "traced-template-fill-runtime-win64.zip": "f0241b10194de02566d018dcdd75c15becf6c2e537d48834b2e2794a0256770b"
+  }
+}

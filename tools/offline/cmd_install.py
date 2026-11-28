@@ -68,9 +68,13 @@ def install(payload, target, digest, required):
                             path.parent.mkdir(parents=True, exist_ok=True)
                             with archive.open(entry) as src, path.open("xb") as dst:
                                 shutil.copyfileobj(src, dst)
+            python = stage / "runtime/python/python.exe"
+            paired = stage / "runtime/stage_skill.py"
+            if paired.is_file():
+                source = Path(__file__).resolve().parent.parent
+                subprocess.run([python, "-I", "-B", paired, source, stage], check=True)
             if missing(stage, required):
                 raise ValueError("Incomplete payload")
-            python = stage / "runtime/python/python.exe"
             env = os.environ.copy()
             for name in ("DI_OCR", "DI_NO_VENDOR"):
                 env.pop(name, None)

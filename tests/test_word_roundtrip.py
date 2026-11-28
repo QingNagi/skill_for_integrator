@@ -33,6 +33,12 @@ class WordRoundtrip(unittest.TestCase):
         self.pristine = self.draft.parent / ".原始" / self.draft.name
         self.pristine.parent.mkdir()
 
+    def test_writer_reports_non_edit_operation_as_unknown(self):
+        from dilib.write_docx import DocxWriter
+        writer = DocxWriter(str(self.src), self.job, {}, str(self.draft))
+        warnings = writer.apply([{"op": "first_para"}], str(self.root))
+        self.assertIn("未知操作 first_para", warnings)
+
     def test_final_accepts_tracked_rows_deleted_cells_and_run_replacements(self):
         body = ('<w:tbl>' + row("已删除", "del") + row("已增加", "ins")
                 + '<w:tr><w:tc><w:tcPr><w:cellDel w:id="3"/></w:tcPr><w:p><w:r><w:t>删列内容</w:t>'
