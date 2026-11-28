@@ -230,6 +230,38 @@ class LauncherTests(unittest.TestCase):
         self.env.pop("PATHEXT", None)
         self.verify_output(self.call())
 
+    def test_cmd_publishes_after_a_short_lived_stage_handle(self):
+        marker = self.base / "stage-file-held"
+        first = self.call_cmd("--help", DI_TEST_STAGE_LOCK=str(marker))
+        self.assertTrue(marker.is_file())
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(self.call_cmd("--help").returncode, 0)
+        self.assertEqual(self.log.read_text().splitlines(), ["smoke"])
+        self.assertFalse(list(self.target.parent.glob(".di-*")))
+
+    def test_cmd_publication_has_a_deadline_and_accepts_a_ready_winner(self):
+        import importlib.util
+        from unittest.mock import Mock
+        spec = importlib.util.spec_from_file_location("cmd_install", SOURCE / "tools/offline/cmd_install.py")
+        install = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(install)
+        stage = Mock()
+        denied = PermissionError("locked")
+        denied.winerror = 5
+        stage.rename.side_effect = denied
+        with patch.object(install.time, "sleep") as sleep:
+            with self.assertRaisesRegex(PermissionError, "Check write permissions"):
+                install.publish_stage(stage, self.target, self.digest, ["required"])
+            self.assertEqual(stage.rename.call_count, 8)
+            self.assertAlmostEqual(sum(c.args[0] for c in sleep.call_args_list), 2.8)
+        self.target.mkdir(parents=True)
+        (self.target / ".offline-payload.sha256").write_text(self.digest)
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            install.publish_stage(stage, self.target, self.digest, ["required"])
+        (self.target / "required").write_bytes(b"winner")
+        install.publish_stage(stage, self.target, self.digest, ["required"])
+        self.assertEqual((self.target / "required").read_bytes(), b"winner")
+
     def test_repair_cleanup_waits_for_transient_file_handle(self):
         self.verify_output(self.call())
         library = self.target / "scripts/dilib/office.py"

@@ -21,6 +21,21 @@ class PdfOcrTests(unittest.TestCase):
     def setUpClass(cls):
         _bootstrap.activate_vendor()
 
+    @unittest.skipUnless(os.name == "nt", "Windows Leptonica uses a native temporary file for stdin")
+    def test_bilingual_engine_remains_available_with_unusable_temp(self):
+        options = _bootstrap.ocr_hint()
+        self.require_ocr_files(options)
+        with tempfile.TemporaryDirectory() as tmp:
+            invalid = Path(tmp, "regular-file")
+            invalid.touch()
+            cache = Path(tmp, "cache")
+            overrides = dict(TEMP=str(invalid), TMP=str(invalid), TMPDIR=str(invalid), DI_CACHE_DIR=str(cache))
+            with patch.dict(os.environ, overrides):
+                result = _bootstrap.ocr_hint(probe=True)
+                self.assertTrue(result["available"], result["hint"])
+                self.assertEqual(os.environ["TMP"], str(invalid))
+            self.assertFalse(list(cache.rglob("di_ocr_*")))
+
     def test_ocr_override_requires_absolute_recognizer_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             other = Path(tmp, "other.exe" if os.name == "nt" else "other")

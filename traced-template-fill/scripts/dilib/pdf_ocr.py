@@ -6,6 +6,8 @@ import json
 import os
 import re
 import subprocess
+import tempfile
+from pathlib import Path
 
 from .engineering import MEASUREMENT_UNIT
 from .child_process import run_child, tesseract_path
@@ -119,7 +121,6 @@ def parse_tsv(tsv):
 
 def save_png(image, path):
     """Publish a complete PNG even if two drafts use the same raster region."""
-    import tempfile
     staging = None
     try:
         with tempfile.NamedTemporaryFile(dir=os.path.dirname(path), suffix=".tmp", delete=False) as stream:
@@ -134,7 +135,6 @@ def save_png(image, path):
 
 def snapshot_evidence(job, sources):
     """Copy each recognized line's original, unmasked pixels into the draft's evidence snapshots."""
-    from pathlib import Path
     from .common import safe_name
     lines = []
     destination = Path(job.p("草稿", "源文件快照", "OCR"))
@@ -167,6 +167,27 @@ def snapshot_evidence(job, sources):
     return ["", "## OCR 原页裁切图", ""] + lines if lines else []
 
 
+def _temp_error(proc):
+    return proc.returncode and (b"GetTempFileName failed" in proc.stderr or b"tmpfile stream not opened" in proc.stderr)
+
+
+def _recognize_with_scratch(command, args, options):
+    # Leptonica for Windows opens an intermediate file even when reading stdin.
+    default = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "traced-template-fill"
+    roots = (options.get("ocr_cache_dir"), os.environ.get("DI_CACHE_DIR"), os.environ.get("DI_RUNTIME_DIR"), default)
+    for root in dict.fromkeys(Path(p) for p in roots if p):
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            scratch = tempfile.TemporaryDirectory(prefix="di_ocr_", dir=root)
+        except OSError:
+            continue
+        with scratch as folder:
+            result = run_child(command, scratch=folder, **args)
+        if not _temp_error(result):
+            return result
+    raise ValueError("Tesseract 无法在本机创建临时文件。请将 DI_CACHE_DIR 指向当前用户可写的短路径。")
+
+
 def recognize_image(image, options):
     """Pipe grayscale PNM to the bundled CLI and read its UTF-8 TSV from stdout."""
     data = io.BytesIO()
@@ -176,8 +197,15 @@ def recognize_image(image, options):
     command = [tesseract_path(options['executable']), 'stdin', 'stdout', '--tessdata-dir', '.',
                '-l', options['language'], '--dpi', str(options.get('dpi', 300)),
                '-c', 'tessedit_create_tsv=1']
+    args = dict(cwd=options["tessdata"], input_bytes=data.getvalue(), timeout=120, ocr=True)
     try:
-        proc = run_child(command, cwd=options['tessdata'], input_bytes=data.getvalue(), timeout=120, ocr=True)
+        if options.get("_private_ocr_temp"):
+            proc = _recognize_with_scratch(command, args, options)
+        else:
+            proc = run_child(command, **args)
+            if os.name == "nt" and _temp_error(proc):
+                proc = _recognize_with_scratch(command, args, options)
+                options["_private_ocr_temp"] = proc.returncode == 0
     except subprocess.TimeoutExpired as exc:
         raise ValueError('Tesseract 识别超时') from exc
     if proc.returncode:

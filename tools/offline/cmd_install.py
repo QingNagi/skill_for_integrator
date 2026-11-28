@@ -34,6 +34,26 @@ def missing(root, files):
     return [name for name in files if not (root / name).is_file() or not (root / name).stat().st_size]
 
 
+def publish_stage(stage, target, digest, required):
+    # A just-exited scanner or subprocess can temporarily hold a file below stage.
+    for attempt in range(8):
+        try:
+            stage.rename(target)
+            return
+        except OSError as exc:
+            if target.exists():
+                marker = target / ".offline-payload.sha256"
+                if marker.is_file() and marker.read_text("ascii").strip() == digest and not missing(target, required):
+                    return
+                raise ValueError("A different or incomplete runtime was found at " + str(target)) from exc
+            if getattr(exc, "winerror", None) not in (5, 32, 33):
+                raise
+            if attempt == 7:
+                raise PermissionError("Cannot publish the verified runtime to %s. Check write permissions "
+                                      "and close programs holding the staging directory." % target) from exc
+            time.sleep(0.1 * (attempt + 1))
+
+
 def install(payload, target, digest, required):
     parent = target.parent
     parent.mkdir(exist_ok=True, parents=True)
@@ -89,7 +109,7 @@ def install(payload, target, digest, required):
                 subprocess.run([python, "-I", "-B", stage / "scripts/dilib/runtime_maintenance.py",
                                 stage, target, digest], check=True)
                 (stage / marker).write_text(digest + "\n", encoding="ascii")
-                stage.rename(target)
+                publish_stage(stage, target, digest, required)
             else:
                 for name in repair:
                     path = target / name

@@ -139,7 +139,7 @@ $di = (Resolve-Path '.\.agents\skills\traced-template-fill\run.cmd').Path
 |---|---|
 | 查看环境、转换后端和 OCR 能力 | `& $di doctor` |
 | 查找原文并读回一条引用 | `& $di search '任务目录' '电压'`，再执行 `& $di show '任务目录' 'S1:P3' --full` |
-| 查看待确认项、记录你的选择 | `& $di questions '任务目录'`；收到你的选择后执行 `& $di answer '任务目录' Q1=2` |
+| 查看待确认项、记录你的选择 | `& $di questions '任务目录'`。若你实际回答“Q1=2”，可执行 `& $di answer '任务目录' Q1=2 --user-quote 'Q1=2'`。其他回答沿用各自原话与选择。 |
 | 生成草稿并读取审核意见 | `& $di draft '任务目录'`、`& $di review '任务目录'` |
 | 你确认后生成终稿 | `& $di final '任务目录'`。有本地转换后端时可按需加 `--format pdf` |
 | 检查一个已有的 DOCX/XLSX 文件 | `& $di doctor --selfcheck '成品.docx'` |
