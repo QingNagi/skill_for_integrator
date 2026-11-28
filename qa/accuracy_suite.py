@@ -4,6 +4,7 @@ Developer dependencies for fixture creation only: python-docx and openpyxl.
 generate and score are separate so an independent reviewer can replace and seal their own key.
 """
 import argparse
+import csv
 import hashlib
 import json
 from collections import Counter
@@ -45,6 +46,7 @@ def generate(root):
     from openpyxl import Workbook
     root.mkdir(parents=True, exist_ok=False)
     key = {}
+    acquisition = []
     for index in range(5):
         name = "示例" + str(index + 1)
         incoming = root / name
@@ -80,6 +82,9 @@ def generate(root):
         book = Workbook()
         sheet = book.active
         sheet.title = model + "_" + batch
+        for number, symbol, unit in [("M01", "VREF", "V"), ("M02", "RIN", "Ω"), ("M03", "FCLK", "MHz")]:
+            acquisition.append([model, batch, "S2:" + sheet.title, number, symbol + "_Vnorm",
+                                symbol, unit, "中间电压"])
         positions = list(reversed(cols))
         sheet.append(["测试项"] + positions)
         for label, values in READINGS:
@@ -89,6 +94,10 @@ def generate(root):
     data = json.dumps(key, ensure_ascii=False, indent=2).encode("utf-8")
     (root / "expected.json").write_bytes(data)
     (root / "expected.sha256").write_text(hashlib.sha256(data).hexdigest() + "\n", encoding="ascii")
+    with (root / "本批采集说明.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["型号", "批号", "来源", "测试号", "标签", "参数", "单位", "条件"])
+        writer.writerows(acquisition)
     (root / "任务.md").write_text(TASK + "\n", encoding="utf-8")
 
 

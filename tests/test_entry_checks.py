@@ -52,6 +52,49 @@ class EntryChecks(unittest.TestCase):
             self.assertIn(json.loads(dest.read_text(encoding="utf-8"))["value"], ("甲", "乙"))
             self.assertEqual(list(Path(tmp).iterdir()), [dest])
 
+    @unittest.skipUnless(os.name == "nt", "Windows reader sharing modes")
+    def test_windows_reader_can_release_job_file_before_atomic_replace(self):
+        with tempfile.TemporaryDirectory() as folder:
+            dest = Path(folder) / "job.json"
+            write_json(dest, {"revision": 1})
+            replace = os.replace
+            denials = []
+            with dest.open("rb") as reader:
+                def publish(src, dst):
+                    try:
+                        replace(src, dst)
+                    except PermissionError as denied:
+                        denials.append(denied.winerror)
+                        self.assertEqual(json.load(reader), {"revision": 1})
+                        reader.close()
+                        raise
+
+                with patch("dilib.common.os.replace", side_effect=publish):
+                    write_json(dest, {"revision": 2})
+            self.assertIn(denials, ([5], [32]))
+            self.assertEqual(json.loads(dest.read_text()), {"revision": 2})
+            self.assertEqual(list(Path(folder).iterdir()), [dest])
+
+    def test_persistent_or_unrelated_json_replace_errors_keep_previous_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            dest = Path(folder) / "job.json"
+            write_json(dest, {"revision": 1})
+            for winerror in (5, 32, 33, 112):
+                error = OSError("cannot replace")
+                error.winerror = winerror
+                with self.subTest(winerror=winerror), patch("dilib.common.os.replace", side_effect=error) as publish, \
+                        patch("dilib.common.time.sleep") as wait:
+                    with self.assertRaises(OSError) as caught:
+                        write_json(dest, {"revision": 2})
+                    self.assertIs(caught.exception, error)
+                    if winerror == 112:
+                        self.assertEqual(publish.call_count, 1)
+                    else:
+                        self.assertGreater(publish.call_count, 1)
+                        self.assertLessEqual(sum(call.args[0] for call in wait.call_args_list), 2)
+                    self.assertEqual(json.loads(dest.read_text()), {"revision": 1})
+                    self.assertEqual(list(Path(folder).iterdir()), [dest])
+
     def test_failed_source_parse_allows_retry_and_preserves_existing_job(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

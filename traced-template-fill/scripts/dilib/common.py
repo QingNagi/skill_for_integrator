@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 import unicodedata
 import uuid
 
@@ -61,9 +62,20 @@ def write_json(path, data, compact=False):
                 json.dump(data, stream, ensure_ascii=False, separators=(",", ":"))
             else:
                 json.dump(data, stream, ensure_ascii=False, indent=1)
-        os.replace(tmp, path)
-    except BaseException:
-        os.unlink(tmp)
+        # Windows readers may briefly hold the old file without delete sharing.
+        for delay in (0.025, 0.05, 0.1, 0.2, 0.4, 0.8, None):
+            try:
+                os.replace(tmp, path)
+                break
+            except OSError as exc:
+                if delay is None or getattr(exc, "winerror", None) not in (5, 32, 33):
+                    raise
+                time.sleep(delay)
+    except BaseException as original:
+        try:
+            os.unlink(tmp)
+        except OSError as cleanup_error:
+            raise original from cleanup_error
         raise
 
 

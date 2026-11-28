@@ -4,7 +4,7 @@ description: "把规范、任务书、测试数据（Word、Excel、PDF，含扫
 compatibility: "面向 Claude Code 和 Codex。完整离线包自带运行环境和中英文 OCR；源码核心需要 Python 3.10+。读取 PDF 需 Python 3.10+ 和兼容后端。lite 包自带 pypdf 文本后端；完整包自带匹配的 Python、pdfplumber、PDFium、Tesseract 和中英文模型。旧版 .doc/.xls 转换和 DOC/PDF 导出需要本机的 Word、WPS 或 LibreOffice。Windows 支持 run.cmd 或 PowerShell；Linux 使用 run.sh。"
 metadata:
   author: QingNagi
-  version: "1.1.1"
+  version: "1.1.2"
   tags: "word, docx, template-filling, source-tracing, verification-records, ocr"
 ---
 
@@ -60,7 +60,7 @@ DI run --draft --json -t "<模板>" -s "<来源1>" -s "<来源2>" --task "<用�
 ```
 
 - `--task` 传用户的原话，不改写、不概括。脚本从原话里识别取值规则（只取中间电压、填范围、保留几位小数等），改写会丢掉这些信息。要求分散在几条消息里时，把相关原话原样拼起来。
-- 有几个来源就写几个 `-s`。用户只想先看方案时去掉 `--draft`。
+- 把模板用作 `-t`，规范和实测工作簿分别用 `-s`。用户指定用来确认单位或段序的程序清单、采集说明在回答时引用；文件格式符合命令参考时用 `answer --evidence`。用户只想先看方案时去掉 `--draft`。
 - JSON 的 `job` 是任务目录，`questions` 是当前批次待答题；直接展示这一批。
 - 找不到要填的位置时，请用户指出，再在同一任务里用 `set` 或 `add-section` 继续，不要另建任务。
 
