@@ -208,12 +208,21 @@ class Planner(TablePlanningMixin):
                     data_codes.update(identity.sheet_identity(book, sheet, identity.document_identity(self.T))["model"])
         if measurements and not self.spec_evidence(data_codes):
             q = next(q for q in self.questions if q["key"].startswith("src:spec:"))
+            # Batch identity can be reviewed in the same turn as the specification.
+            if len(books) == 1:
+                alias, book = next(iter(books.items()))
+                sheets = [sheet for sheet in book.m.get("sheets", []) if sheet.get("rows")]
+                if len(sheets) == 1:
+                    self.verify_data_source(alias, book, sheets[0])
             for t, rg in measurements:
                 samples = {tablemap.role_of(c["path"])[1]: c["c"] for c in rg["cols"]
                            if tablemap.role_of(c["path"])[0] == "sample"}
                 rows = self.affected_spec_rows(t, rg)
                 if rows:
                     self.add_spec_impact(q, t, rows, samples)
+                    for batch_q in self.questions:
+                        if batch_q["key"].startswith("src:verify:"):
+                            self.add_impact(batch_q, self.measurement_cells(t, rows, samples))
                 self.mark_stale(t, rows, samples, set())
             self.report["unfilled"].append("规范型号适用性待确认，已暂停按规范和测试记录填写。")
         else:
@@ -316,7 +325,12 @@ class Planner(TablePlanningMixin):
                     cid = '%s.R%d.C%d' % (b['id'], cs[i + 1]['r'], cs[i + 1]['c'])
                     bad = bool(re.search('产品名称|规格型号|产品型号', lab)) and len(codes) == 1 and not same_model
                     self.stale.append({'kind': 'stale', 'cell': cid, 'text': cs[i + 1]['text'], 'sample': '', 'param': lab, 'why': ('型号与源文件不一致（源文件为 %s）' % codes[0]) if bad else ''})
-                    if bad:
+                    verified = getattr(self, "verified_spec", None)
+                    if (bad and verified and codes[0] in verified[2] and identity.model_codes(val)
+                            and identity.model_codes(val) <= verified[1]):
+                        self.stale[-1]["spec_question"] = verified[0]
+                        msg = "【型号核对】模板保留“%s”，本次使用 %s 规范，适用性已确认。" % (short(val, 20), codes[0])
+                    elif bad:
                         msg = '⚠【型号不一致】记录里原有型号“%s”，源文件的型号是 %s；没有覆盖，请确认是否填错' % (short(val, 20), codes[0])
                     else:
                         msg = '⚠【原有值，本批未核】“%s”是模板/上一批留下的值，本批没有重新核对；没有覆盖，请核对是否仍适用' % short(val, 24)
@@ -846,6 +860,8 @@ class Planner(TablePlanningMixin):
                         return prefix + str(int(row[0]) + count) + ref[len(prefix) + len(row[0]):]
             return ref
 
+        # A cell's numeric range cannot identify a compound test's parameter or its segment.
+        withheld = set()
         for op in self.manual:
             op = dict(op)
             op.pop("target_guard", None)
@@ -875,6 +891,16 @@ class Planner(TablePlanningMixin):
                                                                      "追加" if op.get("mode", "append") == "append" else "替换"))
                 continue
             tgt = op.get("cell") or op.get("anchor") or op.get("block")
+            checks = getattr(self, "measurement_write_checks", {})
+            if tgt in checks and op["op"] in ("set_cell", "set_text", "append_runs", "fill_blanks"):
+                proposed = op.get("text") or "".join(r[0] for r in op.get("runs", [])) or op.get("values")
+                if proposed and (proposed != checks[tgt] or op["op"] in ("append_runs", "fill_blanks")):
+                    self.block_source("verify:manual:" + tgt, "实测数据对应",
+                                      "%s 的手工填写与已核实的来源、段序及读数不符，未采用。请核对本批证据或更新该操作。" % tgt)
+                    withheld.add(tgt)
+                    continue
+            if op["op"] == "comment" and tgt in withheld and op.get("text", "").startswith("【人工指定】"):
+                continue
             if op.get("replace", True) and op["op"] in ("set_cell", "set_text"):
                 self.ops = [o for o in self.ops if not (o.get("cell") == tgt and o["op"] in ("set_cell", "set_text", "fill_blanks"))]
             self.ops.append(op)

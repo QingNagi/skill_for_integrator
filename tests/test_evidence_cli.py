@@ -15,6 +15,49 @@ from dilib.job import Job
 
 
 class EvidenceCLI(unittest.TestCase):
+    def test_manifest_before_questions_converts_and_replays_each_original_range(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            target, readings, declarations = (root / name for name in ("记录.docx", "读数.csv", "单位清单.csv"))
+            rows = [["符号", "最大值", "单位", "1#"], ["A", "8", "V", ""], ["B", "7", "µA", ""],
+                    ["C", "7", "V", ""], ["D", "7", "V", ""]]
+            body = "<w:tbl><w:tblGrid>" + "<w:gridCol/>" * 4 + "</w:tblGrid>" + "".join(
+                "<w:tr>" + "".join("<w:tc><w:p><w:r><w:t>%s</w:t></w:r></w:p></w:tc>" % v for v in row)
+                + "</w:tr>" for row in rows) + "</w:tbl>"
+            make_docx(target, {"word/document.xml": doc_xml(body)})
+            readings.write_text("label,unit,1\nA,mV,2523\nB,,2891\nC,V,3\nD,V,4\n", "utf8")
+            declarations.write_text("来源,测试号,标签,参数,单位\nS1:Sheet1,12,B,B,nA\n", "utf8")
+            job = Job.create(target, [str(readings)], task="将读数表填进记录，多值填范围", out_root=str(root), name="job")
+            questions = cli.do_plan(job, quiet=True)["questions"]
+            batch = next(q["id"] for q in questions if q["key"] == "src:verify:S1")
+            rejected = io.StringIO()
+            with contextlib.redirect_stdout(rejected):
+                rc = cli.main(["answer", job.dir, batch + "=2", "--user-quote", "将读数表填进记录", "--draft", "--json"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(rejected.getvalue())["next_action"], "ask_user")
+            self.assertFalse(job.read("answers.json", {}))
+            self.assertFalse(job.drafts())
+            reply = io.StringIO()
+            with contextlib.redirect_stdout(reply):
+                rc = cli.main(["answer", job.dir, batch + "=2", "--user-quote", "已核对本批", "--evidence",
+                               str(declarations), "--json"])
+            self.assertEqual(rc, 0, reply.getvalue())
+            self.assertEqual(json.loads(reply.getvalue())["status"], "planned", reply.getvalue())
+            plan = job.read("plan.json")
+            fills = {f["symbol"]: f for f in plan["report"]["fills"] if "unit_conversion" in f}
+            self.assertEqual({k: f["value"] for k, f in fills.items()}, {"A":"2.52", "B":"2.89"})
+            from dilib import verify
+            self.assertFalse(verify.verify_draft(job, plan)["items"])
+            # Alter the recorded source unit without changing the spreadsheet.
+            fills["A"]["unit_conversion"]["sources"][0][0] = "V"
+            self.assertTrue(verify.verify_draft(job, plan)["items"])
+            self.assertTrue(any(r["type"] == "程序清单声明" for r in job.read("facts.json")["facts"]))
+            # This job's first snapshot applies only to its original measurement file and rules.
+            readings.write_text(readings.read_text("utf8").replace("2523", "2530"), "utf8")
+            plan = cli.do_plan(Job(job.dir), quiet=True)
+            self.assertIn("_program_manifest", plan["stale_answers"])
+            self.assertFalse(any(r["type"] == "程序清单声明" for r in plan["report"]["facts"]))
+
     def test_batch_cannot_be_reused_and_changed_shared_dictionary_invalidates_draft(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
@@ -70,6 +113,13 @@ class EvidenceCLI(unittest.TestCase):
                 batch(first)
                 q = next(q for q in first.read("questions.json") if q["key"].startswith("td:map:"))
                 self.assertEqual(q["impact_count"], 3)
+                target_cell = next(c["target"] for c in q["affected_cells"] if c["symbol"] == "A")
+                invoke("set", first.dir, target_cell, "999", "--src", "S1:Sheet1!B2:B2")
+                invoke("plan", first.dir)
+                self.assertFalse(any(op.get("text") == "999" for op in first.read("plan.json")["ops"]))
+                invoke("answer", first.dir, q["id"] + "=2")
+                current = next(item for item in first.read("questions.json") if item["key"] == q["key"])
+                self.assertFalse(current["answered"], "承诺提供清单时应保留问题")
                 invoke("answer", first.dir, q["id"], "--evidence", manifest, "--remember",
                        "--reviewer", "甲", "--user-quote", "此版本程序的段序已核")
                 second = new("第二批")
@@ -97,7 +147,7 @@ class EvidenceCLI(unittest.TestCase):
                 invoke("plan", first.dir)
                 self.assertEqual(current, evidence.decision_digest(second), "阅读早期批次不能把共享段序改回旧版")
                 with contextlib.redirect_stdout(io.StringIO()) as output:
-                    rc = cli.main(["final", second.dir, "--json"])
+                    rc = cli.main(["final", second.dir, "--json", "--strict-exit"])
                 self.assertNotEqual(rc, 0)
                 self.assertIn("决定或填写规则已变化", output.getvalue())
                 book.write_text(book.read_text(encoding="utf-8").replace("12", "14"), encoding="utf-8")

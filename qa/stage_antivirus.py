@@ -32,7 +32,8 @@ def stage(release, output):
         copy = output / artifact.name
         shutil.copyfile(artifact, copy)
         archives[copy.name] = declared
-        pending.append(copy)
+        if copy.name.lower().endswith((".tar.gz", ".tgz", ".gz", ".whl", ".zip")):
+            pending.append(copy)
     if not archives:
         raise ValueError("No release archives with SHA-256 sidecars")
     file_count = 0

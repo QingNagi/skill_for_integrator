@@ -1,5 +1,6 @@
 """Environment needed by local Office, OCR and draft workers."""
 import os
+import subprocess
 from pathlib import Path
 
 
@@ -32,14 +33,19 @@ def program_directories():
             yield path
 
 
-def child_environment(*, scratch=None, worker=False, ocr=False):
+def child_environment(*, scratch=None, worker=False, ocr=False, word_converter=False):
     keys = _PLATFORM
+    if word_converter:
+        keys = ("SystemRoot", "WINDIR", "SystemDrive", "OS", "ComSpec", "ProgramFiles", "ProgramFiles(x86)",
+                "CommonProgramFiles", "CommonProgramFiles(x86)", "USERPROFILE", "APPDATA", "LOCALAPPDATA")
     if worker or ocr:
         keys += _OCR
     if worker:
         keys += _WORKER
     env = {key: os.environ[key] for key in keys if key in os.environ}
     env["PATH"] = os.pathsep.join(program_directories())
+    if word_converter:
+        env["PATH"] = str(Path(env["SystemRoot"]) / "System32") if env.get("SystemRoot") else ""
     if scratch is not None:
         env.update(TEMP=scratch, TMP=scratch, TMPDIR=scratch)
     return env
@@ -52,3 +58,15 @@ def tesseract_path(value):
             or not path.is_file() or not os.access(path, os.X_OK)):
         raise ValueError("请指定本地 Tesseract 可执行文件的绝对路径（%s）" % name)
     return str(path)
+
+
+def run_child(command, *, timeout, cwd=None, scratch=None, worker=False, ocr=False,
+              word_converter=False, input_bytes=None):
+    """Run an argument vector through the restricted environment appropriate to its role."""
+    return subprocess.run(command, timeout=timeout, cwd=cwd,
+                          env=child_environment(scratch=scratch, worker=worker, ocr=ocr,
+                                                word_converter=word_converter),
+                          stdin=subprocess.DEVNULL if input_bytes is None else None, input=input_bytes,
+                          stdout=subprocess.DEVNULL if word_converter else subprocess.PIPE,
+                          stderr=subprocess.DEVNULL if word_converter else subprocess.PIPE,
+                          creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)

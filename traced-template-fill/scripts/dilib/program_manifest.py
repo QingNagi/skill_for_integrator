@@ -3,14 +3,14 @@ import hashlib
 import io
 from pathlib import Path
 import re
-import unicodedata
+from .engineering import unit_key
 import zipfile
 from xml.etree.ElementTree import ParseError
 
 from .common import DIError, norm_text
 from .ooxml import validate_package_limits
 from .read_other import _read_xlsx
-from .testdata import norm_sym
+from .testdata import norm_sym, unit_exponent
 
 
 LABEL_HEADER = re.compile(r"测试名[（(]([^()（）/\\]+?\.xlsx)\s+([A-Z]+)\s*列标签[）)]", re.I)
@@ -55,20 +55,15 @@ def workbook_rows(path, job):
             if len(sheets) != 1:
                 raise DIError("源工作簿有多个工作表，请在清单“来源”列明确指定。")
             inferred = alias + ":" + sheets[0]["name"]
-        binding = {"inferred": inferred, "aliases": aliases, "column": match[2].upper()}
+        binding = {"inferred": inferred, "aliases": sorted(aliases), "column": match[2].upper()}
     if len(set(headers)) != len(headers) or not all(headers):
         raise DIError("程序清单表头为空或重名。")
-    rows = [{key: "" if cell is None else str(cell).strip() for key, cell in zip(headers, row)}
-            for row in values[1:]]
+    rows = [{key: "" if i >= len(row) or row[i] is None else str(row[i]).strip()
+             for i, key in enumerate(headers)} for row in values[1:]]
     if binding and binding["inferred"]:
         for row in rows:
             row["来源"] = binding["inferred"]
     return rows, hashlib.sha256(raw).hexdigest(), binding
-
-
-def unit_key(unit):
-    value = unicodedata.normalize("NFKC", unit.strip())
-    return re.sub(r"^[uµμ](?=[A-Za-zΩ])", "μ", value)
 
 
 def same_symbol(value, candidates):
@@ -108,7 +103,7 @@ def segment_map(q, rows, base_names=True):
     for row in ordered:
         sym = same_symbol(row["参数"], q["parameter_candidates"])
         unit = q.get("parameter_units", {}).get(sym)
-        if unit and unit_key(unit) != unit_key(row["单位"]):
+        if unit and unit_exponent(row["单位"], unit) is None:
             raise DIError("参数 %s 的清单单位与规范不符。" % sym)
         symbols.append(sym)
         span = declared_span(row)
@@ -135,12 +130,15 @@ def actual_values(q, rows, kind):
         labels = q.get("labels_by_symbol", {}).get(sym)
         matching = [r for r in rows if norm_sym(r["参数"]) == norm_sym(sym) and
                     (labels is None or r.get("标签") in labels)]
-        if not matching or any(not r[col] for r in matching):
+        if (not matching or any(not r[col] for r in matching)
+                or labels and set(labels) != {r.get("标签") for r in matching}):
             raise DIError("缺少参数 %s 的%s。" % (sym, col))
         if kind == "units":
-            if any(unit_key(r[col]) != unit_key(target) for r in matching):
-                raise DIError("参数 %s 的声明单位与要求不一致。" % sym)
-            verified[sym] = target
+            choices = {unit_key(r[col]) for r in matching}
+            if len(choices) != 1 or unit_exponent(next(iter(choices)), target) is None:
+                raise DIError("参数 %s 的声明单位不唯一或与要求量纲不符。" % sym)
+            source = matching[0][col]
+            verified[sym] = target if unit_exponent(source, target) == 0 else source
         else:
             choices = {r[col] for r in matching}
             if len(choices) != 1 or choices & {"—", "-", "未知"}:

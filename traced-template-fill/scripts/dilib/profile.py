@@ -40,13 +40,25 @@ def load(name_or_path=None, skill_dir=None, project=None):
     prof = copy.deepcopy(DEFAULT)
     if not name_or_path or name_or_path in ("default", "默认"):
         return prof
-    path = name_or_path
-    if not os.path.exists(path) and skill_dir:
+    path = os.fspath(name_or_path)
+    name_or_path = path
+    legacy = "默认_文档摘抄提示词"
+    if skill_dir and not os.path.exists(path):
+        builtin = Path(skill_dir) / "config" / "profiles"
+        requested = Path(name_or_path)
+        if (requested.stem == legacy and requested.parent != Path(".")
+                and requested.parent.resolve() == builtin.resolve()):
+            path = builtin / "default-excerpt.json"
+    if not os.path.exists(path) and skill_dir and Path(name_or_path).name == name_or_path:
         for folder in (project or preferences.project_dir(), preferences.user_dir(), Path(skill_dir) / "config", skill_dir):
             cand = os.path.join(folder, "profiles", preferences.profile_name(name_or_path))
             if os.path.isfile(cand):
                 path = cand
                 break
+        else:
+            if Path(name_or_path).stem in (legacy, DEFAULT["name"], DEFAULT["name"] +
+                                            "——复制本文件改名后修改，即可作为新规范（--profile 文件名）"):
+                path = Path(skill_dir) / "config" / "profiles" / "default-excerpt.json"
     if not os.path.exists(path):
         raise DIError("找不到排版规范：%s" % name_or_path)
     user = read_json(path)

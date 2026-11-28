@@ -11,6 +11,7 @@ from collections import Counter
 from xml.etree import ElementTree as ET
 
 from .common import TOOL_AUTHOR, TOOL_INITIALS, ensure_dir, norm_text, read_json, short, write_json
+from .decisions import protected_question
 from .ooxml import (CT_COMMENTS, IMAGE_CT, NS, PPR_ORDER, RPR_ORDER, RT_COMMENTS, RT_HYPERLINK, RT_IMAGE, TBLPR_ORDER,
                     TCPR_ORDER, TRPR_ORDER, W_P, W_PPR, W_R, W_RPR, W_T, W_TBL, W_TC, W_TR, W_VAL, XML_NS, Package,
                     get_ppr, make_par, make_ppr, make_rpr, make_run, parse_xml_fragment, qn, remove_child, set_child, w)
@@ -188,6 +189,9 @@ class DocxWriter:
     def __init__(self, target_docx, job, profile, draft_path):
         self.job, self.prof, self.draft_path = job, profile, draft_path
         self._load(target_docx)
+        from .finalize import comments_info, remove_comments
+        previous = comments_info(self.pkg)
+        remove_comments(self.pkg, {c["id"] for c in previous if c["author"] == TOOL_AUTHOR}, previous)
         self.snap = Snapshots(job, os.path.dirname(draft_path))
         self.captions = {}           # 段落元素 -> (类型, 标题)
         self.n_img = 0
@@ -713,10 +717,17 @@ class DocxWriter:
     def prepare_word_questions(self, questions):
         """Register the actual choices for this draft in the job, outside the editable document."""
         self.word_questions = []
+        answers = self.job.read("answers.json", {}) or {}
         for q in questions:
-            if not q.get("defaulted") or q.get("multi") or not q["key"].startswith(("src:verify:", "src:spec:", "td:samplemap")):
+            if not protected_question(q["key"]) or q.get("multi") or not (q.get("defaulted") or q.get("answered")):
                 continue
-            options = q["options"]
+            answer = answers.get(q["key"], {})
+            if answer.get("word_draft") or answer.get("source") == "confirm_cli":
+                continue
+            options = list(q["options"])
+            applied = answer.get("effect", options[q.get("recommended", 0)]["effect"])
+            if answer and not any(o["effect"] == applied and o["label"] == answer["label"] for o in options):
+                options.append({"effect": applied, "label": answer["label"] + "（已登记：" + str(applied) + "）"})
             positive = [i for i, option in enumerate(options) if option["effect"].get("ok") or
                         (q["key"].startswith("td:samplemap") and i and option["effect"].get("samplemap"))]
             bare = positive[0] if len(positive) == 1 else None
@@ -727,7 +738,8 @@ class DocxWriter:
                 lines.append("单独回复“确认”表示选择第 %d 项。" % (bare + 1))
             self.word_questions.append({"id": q["id"], "key": q["key"], "text": "\n".join(lines),
                                         "options": options, "bare": bare, "input_fp": q["input_fp"],
-                                        "applied": options[q.get("recommended", 0)]["effect"]})
+                                        "applied": applied, "reaffirm": bool(q.get("answered")),
+                                        "rule_sha256": q.get("rule_sha256")})
 
     def comment_op(self, op):
         anc = op["anchor"]
@@ -809,5 +821,7 @@ class DocxWriter:
         reordered = self.pkg.normalize_cell_properties()
         if reordered:
             self.warnings.append("草稿副本已校正 %d 个单元格的格式属性顺序。" % reordered)
+        from .provenance import mark
+        mark(self.pkg, self.job, self.draft_path, "draft")
         self.pkg.save(self.draft_path)
         return self.warnings

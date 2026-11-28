@@ -60,8 +60,7 @@ class ProgramManifestTests(unittest.TestCase):
         answers, meta = program_answers([self.q], ["Q2=2", "Q3"], self.path, job=self.job)
         self.assertEqual(answers, ["Q2=2", "Q3=测试程序清单"])
         self.assertEqual(set(meta["effects"]), {"Q3"})
-        with self.assertRaises(DIError):
-            program_answers([self.q], ["Q2=2"], self.path, job=self.job)
+        self.assertEqual(program_answers([self.q], ["Q2=2"], self.path, job=self.job)[0], ["Q2=2"])
 
     def test_label_header_and_explicit_source_must_agree(self):
         self.rows[0].append("来源")
@@ -81,8 +80,8 @@ class ProgramManifestTests(unittest.TestCase):
         with self.assertRaises(DIError):
             self.answer(q)
 
-    def test_milli_and_mega_are_different_units(self):
-        self.rows[1][5] = "MV"
+    def test_different_dimensions_are_rejected(self):
+        self.rows[1][5] = "MA"
         with self.assertRaises(DIError):
             self.answer()
 
@@ -107,3 +106,21 @@ class ProgramManifestTests(unittest.TestCase):
         self.q["source_scope"]="S1:Absent"
         with self.assertRaises(DIError):
             self.answer()
+
+    def test_units_require_every_contributing_label(self):
+        q = dict(self.q, key="td:units:a", labels_by_symbol={"A": ["A_B_Vnorm", "other"]},
+                 options=[{"effect": {"units": {"A": "μA"}}}])
+        with self.assertRaises(DIError):
+            self.answer(q)
+
+    def test_partial_unit_declarations_release_only_fully_supported_parameters(self):
+        from dilib import evidence
+        self.save()
+        _, manifest = program_answers([self.q], [], self.path, job=self.job)
+        manifest.update(fp="abc", rule_sha256="rules")
+        q = dict(self.q, key="td:units:test:S1:T0.D0:Data",
+                 labels_by_symbol={"A": ["A_B_Vnorm"], "B": ["other"]},
+                 options=[{"effect": {"units": {"A": "μA", "B": "mV"}}}])
+        answers = evidence.manifest_answers(manifest, [q])
+        self.assertEqual([r["effect"] for r in answers.values()], [{"units": {"A": "μA"}}])
+        self.assertNotIn(q["key"], answers)

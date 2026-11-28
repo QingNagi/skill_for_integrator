@@ -14,7 +14,7 @@ import sys
 import tempfile
 
 from .common import DIError, file_sha1
-from .child_process import child_environment, program_directories
+from .child_process import program_directories, run_child
 
 WORD_FMT = {"docx": 16, "doc": 0, "pdf": 17, "rtf": 6, "txt": 7, "html": 10}
 EXCEL_FMT = {"xlsx": 51, "xls": 56, "pdf": 57, "csv": 6}
@@ -150,9 +150,7 @@ def _run_ps(script, args, timeout=600):
         raise DIError("找不到已安装的 PowerShell")
     cmd = [ps, "-NoProfile", "-NonInteractive", "-File", str(script)] + list(args)
     try:
-        run = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             timeout=timeout, cwd=tmpdir, env=child_environment(scratch=tmpdir),
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        run = run_child(cmd, timeout=timeout, cwd=tmpdir, scratch=tmpdir)
         if run.returncode:
             raise DIError("PowerShell 转换脚本未完成（退出码 %d），请检查脚本执行策略或使用 LibreOffice" % run.returncode)
     except subprocess.TimeoutExpired:
@@ -228,9 +226,7 @@ def _lo_convert(soffice, src, dst_fmt, dst):
             profile = profile_dir.as_uri()
             cmd = [soffice, "-env:UserInstallation=" + profile, "--headless", "--norestore",
                    "--convert-to", filt, "--outdir", str(stage), str(source)]
-            run = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 timeout=600, cwd=work, env=child_environment(scratch=work),
-                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            run = run_child(cmd, timeout=600, cwd=work, scratch=work)
             if run.returncode:
                 return "LibreOffice 转换失败（退出码 %d）" % run.returncode
             generated = stage / (source.stem + "." + dst_fmt)

@@ -13,7 +13,7 @@ TYPES = {
     "src:verify": "批次身份", "src:spec": "规范适用", "td:source": "批次身份", "td:sheet": "批次身份",
     "td:samplemap": "样品对应", "td:duplicate": "样品对应", "td:no_suffix": "测试条件", "td:cond": "测试条件",
     "td:conditions": "测试条件", "td:map": "参数归属", "td:alias": "参数归属", "td:merge": "参数归属",
-    "td:val": "值类型与极性", "td:interpret": "值类型与极性", "td:units": "值类型与极性", "td:multi": "值类型与极性",
+    "td:val": "值类型与极性", "td:interpret": "值类型与极性", "td:interpret_if": "值类型与极性", "td:units": "值类型与极性", "td:multi": "值类型与极性",
 }
 FIELDS = ["位置", "参数", "样品", "候选值", "原始单元格", "缺少的证据", "决定", "备注", "问题", "有效选项", "版本"]
 
@@ -44,7 +44,11 @@ def decision_digest(job, effective_defaults=None):
             effects[key] = answer["effect"]
             if answer.get("evidence"):
                 attachments[key] = answer["evidence"].get("sha256")
-    return digest([rule_pack(job), effects, attachments, job.read("manual_ops.json", []), effective])
+    manifest = job.read("answers.json", {}).get("_program_manifest")
+    payload = [rule_pack(job), effects, attachments, job.read("manual_ops.json", []), effective]
+    if manifest:
+        payload.append(digest(manifest))
+    return digest(payload)
 
 
 def prefix(q):
@@ -88,7 +92,7 @@ def reusable_answers(job, questions):
     return reusable
 
 
-def save_plan_facts(job, plan, answers):
+def save_plan_facts(job, plan, answers, manifest=None):
     report = plan["report"]
     pack = rule_pack(job)
     report["rule_pack"] = pack
@@ -105,6 +109,11 @@ def save_plan_facts(job, plan, answers):
         records[fid] = dict(record, id=fid)
         return fid
 
+    if manifest:
+        for row in manifest["rows"]:
+            add({"type": "程序清单声明", "scope": {"source": row.get("来源"), "test": row.get("测试号"),
+                 "input_fp": manifest["fp"], "rule_sha256": manifest["rule_sha256"]},
+                 "value": row, "evidence": {"file": manifest["file"], "sha256": manifest["sha256"]}})
     for key, answer in sorted(answers.items()):
         if not isinstance(answer, dict) or answer.get("default") or "effect" not in answer:
             continue
@@ -186,9 +195,47 @@ def program_answers(qs, items, path, job=None):
             raise DIError("请指定当前待回答的问题编号（例如 Q1）。")
         effects[qid] = program_manifest.effect(by_id[qid], rows, binding)
         answers.append(qid + "=测试程序清单")
-    if not effects:
-        raise DIError("使用 --evidence 时请列出至少一个需要从清单取证的问题编号。")
-    return answers, {"file": Path(path).name, "sha256": sha, "effects": effects}
+    if not {"来源", "测试号"} <= rows[0].keys() or not ({"单位", "条件", "段序"} & rows[0].keys()):
+        raise DIError("程序清单须注明来源、测试号及单位、条件或段序。")
+    return answers, {"file": Path(path).name, "sha256": sha, "effects": effects, "rows": rows, "binding": binding}
+
+
+def manifest_answers(manifest, questions):
+    """Resolve only declarations supported for the current sheet, labels and target."""
+    from . import program_manifest
+
+    resolved = {}
+    for q in questions:
+        if prefix(q) not in {"td:units", "td:conditions", "td:map", "td:no_suffix"}:
+            continue
+        key = q["key"]
+        kind = prefix(q).split(":")[1]
+        if kind in ("units", "conditions"):
+            expected = q["options"][-1]["effect"][kind]
+            supported = {}
+            for symbol, value in expected.items():
+                probe = dict(q, options=[{"effect": {kind: {symbol: value}}}])
+                try:
+                    result = program_manifest.effect(probe, manifest["rows"], manifest["binding"])
+                except DIError:
+                    continue
+                supported.update(result[kind])
+            if not supported:
+                continue
+            result = {kind: supported}
+            if supported.keys() != expected.keys():
+                # Only the declared subset is answered. The next plan asks about the residual.
+                _, _, _, scope = key.split(":", 3)
+                key = "td:%s:manifest-%s:%s" % (kind, digest([key, supported])[:16], scope)
+        else:
+            try:
+                result = program_manifest.effect(q, manifest["rows"], manifest["binding"])
+            except DIError:
+                continue
+        resolved[key] = {"effect": result, "label": "测试程序清单",
+                              "fp": manifest["fp"], "rule_sha256": manifest["rule_sha256"],
+                              "evidence": {"file": manifest["file"], "sha256": manifest["sha256"]}}
+    return resolved
 
 
 def csv_safe(value):

@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import time
-import unicodedata
+from .engineering import bigrams, norm_text
 import uuid
 
 TOOL_AUTHOR = "文档整合助手"      # 草稿批注作者名（定稿时据此删除）
@@ -145,35 +145,6 @@ def parse_size(v):
 
 
 # ---------------------------------------------------------------- 文本
-_FW = {ord(c): ord(c) - 0xFEE0 for c in "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ"}
-
-
-def norm_text(s):
-    """匹配用归一化：全角转半角、去空白、统一括号与符号、小写。"""
-    if not s:
-        return ""
-    s = unicodedata.normalize("NFKC", s)
-    s = s.translate(_FW)
-    s = s.replace("（", "(").replace("）", ")").replace("△", "Δ").replace("∆", "Δ")
-    s = re.sub(r"\s+", "", s)
-    return s.lower()
-
-
-def bigrams(s):
-    s = norm_text(s)
-    toks = set()
-    # ASCII 单词整体作为 token
-    for w in re.findall(r"[a-z0-9δ+\-#.]+", s):
-        toks.add(w)
-    han = re.sub(r"[a-z0-9δ+\-#.()（）:：,，;；、。/\\\[\]【】]", " ", s)
-    for seg in han.split():
-        if len(seg) == 1:
-            toks.add(seg)
-        for i in range(len(seg) - 1):
-            toks.add(seg[i:i + 2])
-    return toks
-
-
 def token_scores(query, candidate):
     """Return query coverage and similarity using one intersection."""
     shared = len(query & candidate)

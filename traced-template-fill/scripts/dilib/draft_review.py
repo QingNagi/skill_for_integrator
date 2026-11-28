@@ -43,6 +43,8 @@ def check_with_office(path):
 
 
 def write_report(job, plan, draft, ver, warns, used_defaults=False):
+    from pathlib import Path
+    from .decisions import HEAD_LABEL, ledger
     rep = plan["report"]
     answers = job.read("answers.json", {}) or {}
     L = ["# 审核报告：%s（草稿 v%d）" % (os.path.basename(job.data["target"]["path"]), ver), "",
@@ -54,7 +56,8 @@ def write_report(job, plan, draft, ver, warns, used_defaults=False):
          "3. 可直接修改草稿内容，或在草稿中添加批注写修改意见；保存并关闭后告诉助手“确认定稿”或“按批注修改”。", "",
          "## 规划摘要"] + ["- " + s for s in plan["summary"]] + [""]
     from . import __version__
-    runtime = ["- 生成草稿的技能版本：" + __version__]
+    runtime = ["- 生成草稿的技能版本：" + __version__,
+               HEAD_LABEL + ledger(Path(job.p("decisions.jsonl")), optional=True)[1]]
     provenance = plan["report"].get("rule_pack", {}).get("sha256")
     if provenance:
         runtime.append("- 本次规则 SHA-256：" + provenance)
@@ -89,7 +92,11 @@ def write_report(job, plan, draft, ver, warns, used_defaults=False):
     if citations:
         L += ["", "## 实测依据", "", "事实原文及适用范围见同目录的 facts.json。", ""]
         L.extend("- %s：%s" % (target, "、".join(ids)) for target, ids in citations)
-    stale = rep.get("stale", [])
+    stale = [item for item in rep.get("stale", []) if not item.get("spec_question")]
+    reviewed_models = [item for item in rep.get("stale", []) if item.get("spec_question")]
+    if reviewed_models:
+        L += ["", "## 已确认规范适用的型号差异", ""]
+        L.extend("- %s 保留“%s”。%s。" % (item["cell"], item["text"], item["why"]) for item in reviewed_models)
     unv_src = rep.get("unverified_sources", [])
     if stale or unv_src:
         L += ["", "## ⚠ 本批未核项（定稿前必须处理）", ""]

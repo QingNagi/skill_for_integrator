@@ -16,6 +16,8 @@ def main():
     parser.add_argument("receipts", type=Path)
     parser.add_argument("prompt", type=Path, help="UTF-8 text provided by the test operator")
     parser.add_argument("--timeout", type=int, default=420)
+    parser.add_argument("--model", help="Use the model configured for this evaluation")
+    parser.add_argument("--blind-project", action="store_true", help="Limit preapproved tools to project reads and the skill launcher")
     args = parser.parse_args()
     project, receipts = args.project.resolve(), args.receipts.resolve()
     if receipts.is_relative_to(project) or args.prompt.resolve().is_relative_to(project):
@@ -34,11 +36,19 @@ def main():
     cli = shutil.which("claude.cmd" if os.name == "nt" else "claude")
     if not cli:
         parser.error("Claude Code is missing.")
+    settings = {"disableAllHooks": True}
+    allowed = "Read(./**),Glob,Bash,Skill(traced-template-fill)"
+    if args.blind_project:
+        settings["permissions"] = {"deny": ["Read(../**)", "Bash(*../*)", "Bash(*operator*)", "Bash(*.sha256*)"]}
+        allowed = ("Read(./**),Glob,Bash(pwd),Bash(ls),Bash(ls *),Bash(*traced-template-fill*run.cmd*),"
+                   "Bash(*traced-template-fill*run.sh*),Bash(*traced-template-fill*run.ps1*),Skill(traced-template-fill)")
     command = [cli, "-p", "--output-format", "stream-json", "--verbose",
                "--permission-mode", "dontAsk", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-               "--settings", '{"disableAllHooks":true}', "--tools", "Read,Glob,Bash,Skill",
-               "--allowedTools", "Read(./**),Glob,Bash,Skill(traced-template-fill)",
+               "--settings", json.dumps(settings, separators=(",", ":")), "--tools", "Read,Glob,Bash,Skill",
+               "--allowedTools", allowed,
                "--session-id" if start else "--resume", meta["id"]]
+    if args.model:
+        command.extend(["--model", args.model])
     before = time.monotonic()
     try:
         run = subprocess.run(command, cwd=project, input=prompt.encode("utf-8"),

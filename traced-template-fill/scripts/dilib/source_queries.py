@@ -62,7 +62,7 @@ def cmd_show(a):
 
         out("<<<SOURCE %s:%s · 原文数据>>>" % (alias, ref))
         if md.m["type"] == "xlsx":
-            emit(render_sheet(md, ref if ref != "*" else None, max_rows=a.rows_max))
+            emit(render_sheet(md, ref if ref != "*" else None, max_rows=a.rows_max, cell_chars=None if a.full else 20))
         elif page_ref:
             page = int(page_ref[1])
             blocks = [b for b in md.m["blocks"] if b.get("page") == page]

@@ -297,6 +297,7 @@ class TablePlanningMixin:
             sheet = chosen
         if self.verify_data_source(alias, md, sheet) is False:
             cells = self.measurement_cells(t, rows, sid_col)
+            self.__dict__.setdefault("measurement_write_checks", {}).update((c["target"], "") for c in cells)
             for q in self.questions:
                 if q["key"].startswith("src:spec:") or q["key"] == "src:verify:" + alias:
                     self.add_impact(q, cells)
@@ -369,6 +370,12 @@ class TablePlanningMixin:
             if effect is not None:
                 ans_map[key] = effect
         res = testdata.build(parsed, targets, rules, self.aliases, ans_map)
+        checks = self.__dict__.setdefault("measurement_write_checks", {})
+        for row in rows:
+            if row.get("sym") in res["program_symbols"]:
+                for sid, col in sid_col.items():
+                    cid = "%s.R%d.C%d" % (t["id"], row["row"], col)
+                    checks[cid] = res["fills"].get(row["row"], {}).get(sid, {}).get("value", "")
         cells = self.measurement_cells(t, rows, sid_col)
         template_identity = identity.document_identity(self.T) if hasattr(self.T, "m") else identity.identity_fields([])
         book_fields = identity.sheet_identity(md, sheet, template_identity)
@@ -379,6 +386,8 @@ class TablePlanningMixin:
             key = question_key(q["key"])
             question = next((existing for existing in self.questions if existing["key"] == key), None)
             if question is None:
+                if q.get("conditional_on"):
+                    q = dict(q, conditional_on=question_key(q["conditional_on"]))
                 question = self.ask(dict(q, key=key, source_scope=alias + ":" + sheet["name"], source_label_col=parsed["label_col"],
                                          source_models=sorted(book_fields["model"] | template_identity["model"])))
             affected = [dict(c) for c in cells if c["symbol"] in q["symbols"] and c["sample"] in parsed["sample_cols"]]
@@ -400,9 +409,9 @@ class TablePlanningMixin:
                                for sym, (actual, wanted) in sorted(res["condition_gaps"].items()))
             self.block_source("verify:conditions" + scope, "实测工况适用范围",
                               "以下仅反映清单工况，规范要求未经完整核实，不能据此认定全部符合：" + detail)
-        review = [s for s in res["review"] if "修约前后限值判定翻转" not in s]
+        review = [s for s in res["review"] if "按常用修约会显示为" not in s]
         for detail in res["review"]:
-            if "修约前后限值判定翻转" in detail:
+            if "按常用修约会显示为" in detail:
                 self.block_source("verify:rounding:" + detail, "修约前后限值判定", detail)
         if review:
             self.review_measurements("td:review" + scope, "；".join(review))
@@ -444,9 +453,9 @@ class TablePlanningMixin:
                                      "group": "data:%d" % row})
                 links.extend({"label": "%s# %s" % (sid, ref), "alias": alias, "ref": ref} for ref in cell["ranges"])
                 notes.add(cell["how"])
-                if cell["check"] != "ok" or cell["conf"] < 0.9:
+                if (cid == first_cell and cell["check"] != "ok") or cell["conf"] < 0.9:
                     warn = True
-                if cell["value"] and cell["check"] == "out" and cid != first_cell:
+                if cid != first_cell and ((cell["value"] and cell["check"] == "out") or "按常用修约" in cell["check_msg"]):
                     self.ops.append({"id": self.oid(), "op":"comment", "anchor":cid, "warn":True,
                                      "text":"⚠【超限】%s：%s" % (sym_of[row], cell["check_msg"]),
                                      "links":[{"label":"打开实测原始读数","alias":alias,"ref":ref} for ref in cell["ranges"]]})
@@ -474,7 +483,7 @@ class TablePlanningMixin:
                                              "source_sample": source_sample[sid], "target_sample": sid,
                                              "target_header": rg.get("header"),
                                              "header_row": parsed["header_row"], "label_col": parsed["label_col"],
-                                             "label_rows": cell["label_rows"], **{k:cell[k] for k in ("value_kind","sign") if k in cell},
+                                             "label_rows": cell["label_rows"], **{k:cell[k] for k in ("value_kind","sign","unit_conversion") if k in cell},
                                              "range_labels": cell["range_labels"], **({"pass_code": cell["pass_code"]} if "pass_code" in cell else {})})
             if first_cell:
                 c0 = next(iter(fill.values()))
@@ -485,7 +494,7 @@ class TablePlanningMixin:
                 txt = "%s【实测】%s 标签 %s（%s）；%s%s" % (
                     "⚠" if warn else "", md.m["name"], "、".join(c0["labels"][:4]) + ("…" if len(c0["labels"]) > 4 else ""),
                     "/".join(c0["hows"]), "；".join(sorted(notes)),
-                    ("；" + "；".join(sorted({c["check_msg"] for c in fill.values() if c["check_msg"]}))) if warn else "")
+                    ("；" + c0["check_msg"]) if c0["check_msg"] else "")
                 self.ops.append({"id": self.oid(), "op": "comment", "anchor": first_cell, "text": txt, "links": links,
                                  "group": "data:%d" % row, "warn": warn})
         if merged_lab:
@@ -722,6 +731,8 @@ class TablePlanningMixin:
             return True
         effect = self.answer_effect(key) or {}
         if effect.get("applicable") is True and not effect.get("_default"):
+            if self.answers[key].get("user_quote"):
+                self.verified_spec = (key, target_codes, spec_codes)
             return True
         detail = "模板型号 %s，规范型号 %s，测试记录型号 %s。请核对所供规范是否适用于本任务。" % (
             "、".join(sorted(target_codes)) or "未标明", "、".join(sorted(spec_codes)) or "未标明",

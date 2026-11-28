@@ -41,16 +41,18 @@ class WordWorkfileTests(unittest.TestCase):
     def test_office_child_keeps_desktop_and_locale_but_omits_unrelated_settings(self):
         from dilib import environment
         with tempfile.TemporaryDirectory() as root:
-            def version(command, **kwargs):
-                env = kwargs.get("env") or os.environ
+            registry = Path(root) / "share/registry/main.xcd"
+            registry.parent.mkdir(parents=True)
+            registry.write_text('<prop oor:name="ooSetupVersionAboutBox"><value>24.8.1.1</value></prop>', encoding="ascii")
+            from dilib.child_process import child_environment
+            with patch.dict(os.environ, EXAMPLE_API_KEY="test", DI_PRIVATE_NOTE="test", LANG="zh_CN.UTF-8",
+                            XDG_RUNTIME_DIR=root), patch.object(office.subprocess, "run") as launch:
+                self.assertEqual(environment._lo_version(Path(root) / "program/soffice"), "LibreOffice 24.8.1.1")
+                launch.assert_not_called()
+                env = child_environment()
                 self.assertNotIn("EXAMPLE_API_KEY", env)
                 self.assertNotIn("DI_PRIVATE_NOTE", env)
-                self.assertEqual(env["LANG"], "zh_CN.UTF-8")
-                self.assertEqual(env["XDG_RUNTIME_DIR"], root)
-                return office.subprocess.CompletedProcess(command, 0, stdout=b"LibreOffice 24.8")
-            with patch.dict(os.environ, EXAMPLE_API_KEY="test", DI_PRIVATE_NOTE="test", LANG="zh_CN.UTF-8",
-                            XDG_RUNTIME_DIR=root), patch.object(office.subprocess, "run", side_effect=version):
-                self.assertEqual(environment._lo_version("soffice"), "LibreOffice 24.8")
+                self.assertEqual((env["LANG"], env["XDG_RUNTIME_DIR"]), ("zh_CN.UTF-8", root))
 
     def test_convert_rejects_format_options_before_launch(self):
         with tempfile.TemporaryDirectory() as root, patch.object(office, "_engines") as engines:

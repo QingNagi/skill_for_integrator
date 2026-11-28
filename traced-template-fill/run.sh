@@ -7,6 +7,17 @@ if [ -d "$skill/offline-runtime" ]; then
         *) exec sh "$skill/offline-runtime/run.sh" "$@" ;;
     esac
 fi
+case "$skill" in
+    */.agents/skills/traced-template-fill|*/.claude/skills/traced-template-fill)
+        registry="$skill/../../../.traced-template-fill"
+        case "$(uname -s)" in
+            Linux) binding="$registry/linux-$(uname -m)"
+                if [ -L "$binding" ]; then
+                    exec "$binding/runtime/python/bin/python3" -E -s -B -X utf8 "$binding/scripts/di.py" "$@"
+                fi ;;
+            MINGW*|MSYS*|CYGWIN*) exec "$skill/run.cmd" "$@" ;;
+        esac ;;
+esac
 if [ -x "$skill/runtime/python/bin/python3" ]; then
     exec "$skill/runtime/python/bin/python3" -E -s -B -X utf8 "$skill/scripts/di.py" "$@"
 fi

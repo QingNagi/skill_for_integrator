@@ -155,6 +155,16 @@ def build(out, tag, plat, vendor=None):
     return dest, len(names)
 
 
+def installers(stage, tag):
+    for template, filename in (("deploy-install.sh", "install.sh"), ("deploy-install.ps1", "install.ps1"), ("deploy.py", "deploy.py")):
+        script = stage / filename
+        content = (Path(HERE) / "offline" / template).read_text("utf-8").replace("@TAG@", tag)
+        script.write_bytes(content.encode("utf-8"))
+        if filename.endswith(".sh"):
+            script.chmod(0o755)
+        yield script
+
+
 def build_release(output, tag, sources, vendor):
     """Build and verify every artifact privately before publishing the checksum inventory."""
     from build_linux_agent_kit import PYTHONS, build_kit as linux_kit
@@ -174,6 +184,7 @@ def build_release(output, tag, sources, vendor):
             packages.append(win)
             for arch in PYTHONS:
                 packages.append(linux_kit(arch, stage, sources, vendor, paired))
+        packages.extend(installers(stage, tag))
         lines = []
         for package in sorted(packages):
             line = fv.sha256_of(package) + "  " + package.name + "\n"

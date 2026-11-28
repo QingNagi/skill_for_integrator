@@ -10,10 +10,11 @@ import os
 import re
 import shutil
 import zipfile
+from pathlib import Path
 
 from . import office
 from .common import TOOL_AUTHOR, DIError, ReviewBlocked, ensure_dir, lock_file_of, short
-from .decisions import answer_binding, record_decision, require_quote, verify_receipts
+from .decisions import SOURCES, answer_binding, ledger, record_decision, require_quote, signed_preference, verify_receipts
 from .ooxml import NS, W_P, W_R, W_T, Package, validate_package_limits, w
 from .safe_xml import parse_xml
 
@@ -98,21 +99,32 @@ def import_word_answers(job, pkg, infos, version_name, input_fp):
         idx, reply = selected[-1]
         option = q["options"][idx]
         previous = answers.get(q["key"], {})
-        if previous.get("fp") == input_fp and not previous.get("default"):
+        current = previous.get("fp") == input_fp and not previous.get("default")
+        if current:
             if previous.get("effect") != option["effect"]:
                 raise ReviewBlocked("Word 核对 %s 与当前确认答案冲突，请核对并重新生成草稿。" % q["id"])
-        else:
-            changes[q["key"]] = {"choice": [idx], "label": option["label"], "effect": option["effect"],
-                                 "fp": input_fp, "confirmed_by": reply["author"], "user_quote": reply["text"], "receipt_version": 2,
-                                 "answered_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
-                                 "word_draft": version_name, "word_parent": root["id"], "word_reply": reply["id"]}
+        same_receipt = (current and previous.get("word_draft") == version_name and previous.get("word_parent") == root["id"]
+                        and previous.get("word_reply") == reply["id"] and previous.get("confirmed_by") == reply["author"]
+                        and previous.get("user_quote") == reply["text"])
+        if not same_receipt:
+            rec = dict(previous) if current else {}
+            rec.update(choice=[idx], label=option["label"], effect=option["effect"], fp=input_fp, source="word_reply",
+                       confirmed_by=reply["author"], user_quote=reply["text"], receipt_version=2,
+                       answered_at=datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+                       word_draft=version_name, word_parent=root["id"], word_reply=reply["id"])
+            if q.get("rule_sha256"):
+                rec["rule_sha256"] = q["rule_sha256"]
+            changes[q["key"]] = rec
         # A positive source or sample mapping can release previously withheld
         # measurements, even if it was presented as a recommended default.
-        if option["effect"] != q["applied"] or idx == q["bare"] or option["effect"].get("ok"):
+        if (option["effect"] != q["applied"] or (q.get("reaffirm") and not current)
+                or (not q.get("reaffirm") and (idx == q["bare"] or option["effect"].get("ok")))):
             redraw.append(q["id"])
     if changes:
+        if any(answers.get(key, {}).get("fp") == input_fp for key in changes):
+            verify_receipts(job, version_name, input_fp)
         for key, rec in changes.items():
-            record_decision(job, "Word 核对", rec["user_quote"], draft=version_name, key=key,
+            record_decision(job, "Word 核对", rec["user_quote"], source="word_reply", draft=version_name, key=key,
                             option=rec["label"], fp=input_fp, author=rec["confirmed_by"],
                             comment=rec["word_parent"], reply=rec["word_reply"], binding=answer_binding(rec))
         job.write("answers.json", dict(answers, **changes))
@@ -424,7 +436,7 @@ def recipient_check(path):
 
 
 def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_template_comments=False, accept_unverified=False,
-             user_quote=None, template_comments="ask"):
+             user_quote=None, template_comments="ask", require_signed=False):
     if accept_unverified:
         require_quote(user_quote, "final --accept-unverified")
     if lock_file_of(draft):
@@ -448,7 +460,7 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
     pkg = Package(draft)
     infos = comments_info(pkg)
     import_word_answers(job, pkg, infos, version_name, draft_fp)
-    verify_receipts(job, version_name, draft_fp)
+    audit = verify_receipts(job, version_name, draft_fp, require_signed or signed_preference(job))
     tmpl = {(a, t) for a, t in job.data.get("template_comments", [])}
     tool = {c["id"] for c in infos if c["author"] == TOOL_AUTHOR}
     template = {c["id"] for c in infos if (c["author"], c["text"]) in tmpl}
@@ -479,9 +491,14 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
     chk_dir = ensure_dir(os.path.join(out_dir, '.待检查'))
     chk_path = os.path.join(chk_dir, os.path.basename(final_docx))
     pkg.normalize_cell_properties()
+    from .provenance import mark
+    mark(pkg, job, version_name, "final")
     pkg.save(chk_path)      # 先存到暂存位置，检查通过才替换正式稿，避免旧的正式稿被未检查的内容覆盖
     # 收件人视角：重新打开刚生成的成品做外发检查，再核对草稿登记的“本批未核”项
     blockers, warns = recipient_check(chk_path)
+    relays = [row["key"] for row in audit if row["source"] == "agent_relay"]
+    if relays:
+        warns.insert(0, "以下受保护决定仅有 agent_relay 转述：" + "、".join(relays))
     try:      # 结构自检：严重项拦截，注意项只提示；自检自己出错按严重项登记，不能当作通过
         from . import selfcheck
         srep = selfcheck.check_file(chk_path)
@@ -514,6 +531,11 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
                 elif it.get('effect') is not None and a.get('effect') != it.get('effect'):
                     blockers.append('回答与草稿采用的默认处理不同，需重新出草稿：%s' % it.get('detail', ''))
             elif cur.get(it.get('cell')) == it.get('text'):
+                verified = answers.get(it.get('spec_question'), {})
+                if verified.get('effect') == {'applicable': True} and verified.get('user_quote') and not verified.get('default'):
+                    warns.append('%s %s：%s；本任务已确认所供规范适用，保留模板型号。' %
+                                 (it['cell'], it.get('text', ''), it.get('why', '')))
+                    continue
                 grp.setdefault((it.get('why') or '原有值本批未核', it.get('param', '')), []).append('%s%s=“%s”' % (it.get('sample', ''), '#' if it.get('sample') else '', short(it.get('text', ''), 12)))
     for (why, param), vals in grp.items():
         blockers.append('%s：%s %s' % (why, param, '、'.join(vals[:6]) + ('…共%d处' % len(vals) if len(vals) > 6 else '')))
@@ -576,6 +598,19 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
         produced.append(md_path)
     pristine = job.p("草稿", ".原始", version_name)
     changes = human_changes(pristine, final_docx)
+    report = Path(out_dir, "终稿审核报告.md")
+    head = ledger(Path(job.p("decisions.jsonl")), optional=True)[1]
+    lines = ["# 终稿审核报告", "", "审核草稿：" + version_name, "决定日志 SHA-256：" + head, "",
+             "## 受保护决定", "", "署名来自 Word 批注或终端登录账户。Agent 转述中的姓名由提交者填写。", ""]
+    for row in audit:
+        source = row["source"]
+        lines.append("- %s → %s；%s（%s），%s，%s；输入指纹 %s" % (
+            row["key"], row["label"], SOURCES.get(source, source), source, row["author"], row["time"], row["fp"]))
+    if not audit:
+        lines.append("本次无受保护决定。")
+    if warns or accepted:
+        lines.extend(["", "## 提示与遗留项", ""] + ["- " + line for line in warns + accepted])
+    report.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {"files": produced, "removed_comments": len(rm), "kept_template_comments": len(template - rm),
             "reviewer_comments": len(reviewer), "revisions": nrev, "changes": changes, "errors": errs,
-            "blockers": accepted, "warnings": warns}
+            "blockers": accepted, "warnings": warns, "report": str(report)}

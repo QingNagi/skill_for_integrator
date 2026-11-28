@@ -15,15 +15,17 @@ on:
       - 'tools/build_linux_agent_kit.py'
       - 'qa/check_linux_kit.sh'
       - 'qa/check_linux_pair.sh'
+      - 'qa/run_tests.py'
       - '.github/workflows/linux-offline.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   source-core:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
+        runner: [ubuntu-24.04, windows-2022]
         python: ['3.10', '3.14']
     steps:
       - uses: actions/checkout@v4
@@ -33,12 +35,16 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Verify the source CLI and record compatibility
+        shell: bash
         run: |
           python -B traced-template-fill/scripts/di.py --help
-          for suite in test_run_draft test_evidence_cli test_evidence_gates test_evidence_io test_program_manifest test_program_measurements test_show test_word_roundtrip test_selfcheck; do
-            python -B -m unittest discover -s tests -p "$suite.py"
-          done
-          echo "Source CLI, evidence decisions, Word review and document checks passed on $(python --version)." >> "$GITHUB_STEP_SUMMARY"
+          python -m pip install --only-binary=:all: 'pdfplumber==0.11.11' 'pypdf==6.21.4' Pillow pypdfium2
+          python -B qa/run_tests.py | tee "$RUNNER_TEMP/source-tests.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-tests-${{ matrix.runner }}-${{ matrix.python }}
+          path: ${{ runner.temp }}/source-tests.log
   offline:
     strategy:
       fail-fast: false
@@ -88,6 +94,31 @@ jobs:
           python3 tools/build_linux_agent_kit.py --arch "$arch" --fetch-inputs --from-dir "$RUNNER_TEMP/inputs" --out "$RUNNER_TEMP/dist"
           python3 tools/build_offline_bundle.py --platform source --tag ci --out "$RUNNER_TEMP/dist"
           python3 tools/build_linux_agent_kit.py --runtime-only --arch "$arch" --from-dir "$RUNNER_TEMP/inputs" --out "$RUNNER_TEMP/dist"
+          python3 - "$RUNNER_TEMP/dist" <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "tools")
+          import build_offline_bundle as bundle
+          dist = Path(sys.argv[1])
+          for script in bundle.installers(dist, "ci"):
+              (dist / (script.name + ".sha256")).write_text(bundle.fv.sha256_of(script) + "  " + script.name + "\n")
+          (dist / "SHA256SUMS-ci.txt").write_text("".join(p.read_text() for p in sorted(dist.glob("*.sha256"))))
+          PY
+      - name: Run the full suite with the required offline PDF and OCR stack
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/source"
+          arch=$(uname -m)
+          mkdir -p "$RUNNER_TEMP/test-python" traced-template-fill/runtime/{ocr,tessdata}
+          tar -xzf "$RUNNER_TEMP/inputs/"*"$arch"-unknown-linux-gnu-install_only_stripped.tar.gz -C "$RUNNER_TEMP/test-python"
+          cp ".build/vendor/ocr/manylinux_$arch/tesseract" traced-template-fill/runtime/ocr/
+          cp "$RUNNER_TEMP/inputs/"*.traineddata traced-template-fill/runtime/tessdata/
+          DI_VENDOR_DIR="$PWD/.build/vendor" "$RUNNER_TEMP/test-python/python/bin/python3" -B qa/run_tests.py --require-ocr | tee "$RUNNER_TEMP/full-tests.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-tests-${{ matrix.runner }}
+          path: ${{ runner.temp }}/full-tests.log
       - name: Prepare a host with an existing Office conversion backend
         run: |
           if ! command -v soffice >/dev/null; then

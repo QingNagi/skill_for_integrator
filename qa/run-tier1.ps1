@@ -229,6 +229,7 @@ try {
             $evidence.skillspector_risk = $raw.risk_assessment
             $evidence.skillspector_coverage = $raw.analysis_completeness.coverage_percent
             $evidence.raw_completeness = $raw.analysis_completeness.status
+            $evidence.applicable_risk_score = $security.skillspector_applicability.applicable_risk_score
             $evidence.raw_counts = [ordered]@{}
             foreach ($severity in @('CRITICAL','HIGH','MEDIUM','LOW','INFO')) {
                 $evidence.raw_counts[$severity] = @($raw.issues | Where-Object severity -eq $severity).Count
@@ -258,6 +259,8 @@ try {
             $evidence.skillspector_exit -in 0,1 -and $raw.execution_successful -eq $true -and
             $raw.metadata.skillspector_version -eq '2.13.7' -and $raw.analysis_completeness.is_complete -eq $true -and
             $raw.analysis_completeness.status -eq 'complete' -and
+            $null -ne $evidence.applicable_risk_score -and $evidence.applicable_risk_score -le 35 -and
+            $evidence.raw_counts.MEDIUM -le 3 -and
             $raw.suppressed_count -eq 0 -and $evidence.raw_counts.HIGH -eq 0 -and $evidence.raw_counts.CRITICAL -eq 0
         )
         if (!$evidence.source_gate_passed -and !$exitCode) { $exitCode = 2 }

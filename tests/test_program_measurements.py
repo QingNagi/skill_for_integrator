@@ -115,3 +115,44 @@ class ProgramMeasurement(unittest.TestCase):
         res=mapping(rows,targets,rules={"cond_keep":["Vnorm"]})
         q=next(q for q in res["questions"] if q["key"]=="td:no_suffix")
         self.assertEqual(q["source_labels"],["R"])
+
+    def test_rounding_warning_names_the_retained_reading_and_bound(self):
+        rows = [["item", 1, 3], ["R", "-4.01", "-3.996"]]
+        res = mapping(rows, [{"sym": "R", "row": 1, "hi": "-4"}], rules={"decimals": 2})
+        self.assertNotIn("修约", res["fills"][1]["1"]["check_msg"])
+        self.assertIn("保留原始值 -3.996", res["fills"][1]["3"]["check_msg"])
+        self.assertIn("上限 -4", res["fills"][1]["3"]["check_msg"])
+        self.assertEqual(value(res, 1, "3"), "-3.996")
+
+    def test_alias_decision_offers_scoped_polarity_and_unit_without_releasing_values(self):
+        rows = [["label", 1], ["LOW_ALIAS_Vnorm", 45]]
+        target = [{"row": 1, "sym": "L", "lo": "-80", "unit": "mV",
+                   "name": "低阈值", "column_type": "measurement"}]
+        options = {"rules": {"cond_keep": ["Vnorm"]}, "aliases": {"LOW_ALIAS": "L", "VTL": "L"}}
+        rows[1][0] = "VTL_Vnorm"
+        res = mapping(rows, target, **options)
+        child = next((q for q in res["questions"] if q.get("conditional_on") == "td:map:VTL"), None)
+        self.assertIsNotNone(child)
+        self.assertIn("mV", child["options"][-1]["label"])
+        signed = {child["key"]: child["options"][-1]["effect"]}
+        self.assertFalse(value(mapping(rows, target, answers=signed, **options)))
+        signed["td:map:VTL"] = {"map": ["L"]}
+        self.assertEqual(value(mapping(rows, target, answers=signed, **options)), "合格")
+        rows[1][0] = "L_Vnorm"
+        self.assertFalse(value(mapping(rows, target, answers=signed, **options)))
+
+    def test_model_warning_needs_the_matching_quoted_applicability_decision(self):
+        p = object.__new__(Planner)
+        p.T = table("target", [["产品型号", "TEST1200E"]])
+        p.src = {"S1": table("TEST1200N", [["说明"]])}
+        p.task, p.rules, p.n = "", {}, 0
+        for key, quote, expected in (("src:spec:TEST1200E,TEST1200N", "适用本规范", True),
+                                     ("src:spec:TEST1200E,TEST1200N", "", False),
+                                     ("src:spec:TEST1200E,TEST9999N", "适用其他规范", False)):
+            p.questions, p.stale, p.ops, p.report = [], [], [], {"warnings": []}
+            p.answers = {key: {"effect": {"applicable": True}, "user_quote": quote}}
+            if hasattr(p, "verified_spec"):
+                del p.verified_spec
+            p.spec_evidence()
+            p.scan_existing_fields()
+            self.assertEqual(bool(p.stale[0].get("spec_question")), expected)

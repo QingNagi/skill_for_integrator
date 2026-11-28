@@ -8,6 +8,7 @@ import tempfile
 from xml.etree.ElementTree import ParseError
 import zipfile
 
+from .child_process import run_child
 from .common import DIError
 from .ooxml import w
 from .ooxml import validate_package_limits
@@ -167,15 +168,8 @@ def try_convert_doc(src, dst):
         destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="di_conv_", dir=str(destination.parent)) as work:
             staged = Path(work) / "converted.docx"
-            env = {name: os.environ[name] for name in ("SystemRoot", "WINDIR", "SystemDrive", "OS", "ComSpec",
-                   "ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles", "CommonProgramFiles(x86)",
-                   "USERPROFILE", "APPDATA", "LOCALAPPDATA") if name in os.environ}
-            env.update(TEMP=work, TMP=work)
-            if env.get("SystemRoot"):
-                env["PATH"] = str(Path(env["SystemRoot"]) / "System32")
-            finished = subprocess.run([converter, "-oice", "-nme", str(source), str(staged)], cwd=work, env=env,
-                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                      timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            finished = run_child([converter, "-oice", "-nme", str(source), str(staged)],
+                                 cwd=work, scratch=work, timeout=60, word_converter=True)
             if finished.returncode or not _valid_docx(staged):
                 return False
             os.replace(staged, destination)

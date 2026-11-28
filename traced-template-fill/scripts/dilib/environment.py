@@ -3,7 +3,7 @@ import os
 import re
 import sys
 
-from .child_process import child_environment
+from pathlib import Path
 
 
 # ---- 环境汇总（doctor 用）：每一项探测失败都降级成文字，不抛异常
@@ -25,15 +25,18 @@ def _progid_ver(progid):
 
 
 def _lo_version(path):
-    import subprocess
+    installation = Path(path).resolve().parent.parent
+    registry = installation / "share" / "registry" / "main.xcd"
     try:
-        r = subprocess.run([path, '--version'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, timeout=20, env=child_environment(),
-                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        s = r.stdout.decode('utf-8', 'replace').strip()
-        return s.splitlines()[0].strip() if s else None
-    except Exception:
-        return None
+        with registry.open("rb") as stream:
+            data = stream.read(8 * 1024 * 1024)
+        for name in (b"ooSetupVersionAboutBox", b"ooSetupVersion"):
+            match = re.search(rb'<prop\s+oor:name="' + name + rb'">\s*<value>([0-9]+(?:\.[0-9]+){1,3})</value>', data)
+            if match:
+                return "LibreOffice " + match[1].decode("ascii")
+    except OSError:
+        pass
+    return None
 
 
 def _office_lines():

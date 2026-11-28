@@ -161,6 +161,99 @@ class ReviewDecisionsTests(unittest.TestCase):
         self.assertEqual(len(records), 4)
         self.assertTrue(all(r["user_quote"] == quote for r in records))
 
+    def relay_and_draft(self):
+        q = {"id": "Q1", "key": "src:verify:S1", "topic": "来源核对", "question": "是否已核对来源？",
+             "options": [{"label": "待核对", "effect": {"ok": False}}, {"label": "已核对", "effect": {"ok": True}}],
+             "input_fp": self.job.fingerprint(), "recommended": 0}
+        self.job.write("questions.json", [q])
+        self.invoke("answer", self.job.dir, "Q1=2", "--user-quote", "来源已核对", "--reviewer", "转述姓名")
+        self.invoke("draft", self.job.dir)
+
+    def test_strict_final_requires_independent_confirmation_of_relay(self):
+        self.relay_and_draft()
+        args = ("final", self.job.dir, "--template-comments", "drop", "--reviewer-comments", "drop")
+        self.assertIn("agent_relay", self.invoke(*args))
+        self.assertIn("确认 N", self.invoke(*args, "--require-signed", "--accept-unverified", "--user-quote", "接受", rc=2))
+        prefs = self.root / "preferences.json"
+        prefs.write_text('{"require_signed": true}', encoding="utf-8")
+        with patch("dilib.decisions.project_dir", return_value=self.root):
+            self.assertIn("确认 N", self.invoke(*args, rc=2))
+
+    def test_terminal_confirmation_requires_tty_and_records_entered_option(self):
+        self.relay_and_draft()
+        with patch("sys.stdin", io.StringIO("2\n")):
+            self.assertIn("交互", self.invoke("confirm", self.job.dir, rc=2))
+        with patch("sys.stdin", io.StringIO("2\n")) as terminal, patch.object(terminal, "isatty", return_value=True):
+            self.invoke("confirm", self.job.dir)
+        self.invoke("final", self.job.dir, "--require-signed", "--template-comments", "drop")
+        record = json.loads(Path(self.job.p("decisions.jsonl")).read_text("utf-8").splitlines()[-1])
+        self.assertEqual(record["source"], "confirm_cli")
+        self.assertTrue(record["author"])
+        report = Path(self.job.p("终稿", "终稿审核报告.md")).read_text("utf-8")
+        for value in ("confirm_cli", record["author"], record["hash"], "src:verify:S1", record["time"]):
+            self.assertIn(value, report)
+
+    def test_signed_word_reply_reaffirms_effect_and_keeps_chain_on_retry(self):
+        from xml.etree import ElementTree as ET
+        from dilib import finalize
+        self.relay_and_draft()
+        pkg = Package(self.draft)
+        comments = pkg.xml("word/comments.xml")
+        roots = [el for el in comments if "【Word 核对 Q1】" in "".join(el.itertext())]
+        self.assertEqual(len(roots), 1)
+        list(roots[0].iter(w("p")))[-1].set(finalize.PARA_ID, "000000AB")
+        reply = ET.SubElement(comments, w("comment"), {w("author"): "复核员", w("id"): "989"})
+        p = ET.SubElement(reply, w("p"), {finalize.PARA_ID: "000000AC"})
+        ET.SubElement(ET.SubElement(p, w("r")), w("t")).text = "确认 2"
+        ext = ET.Element("{%s}commentsEx" % W15)
+        ET.SubElement(ext, "{%s}commentEx" % W15, {finalize.EX_ID: "000000AB"})
+        ET.SubElement(ext, "{%s}commentEx" % W15, {finalize.EX_ID: "000000AC", finalize.EX_PARENT: "000000AB"})
+        pkg.new_xml("word/commentsExtended.xml", ext, [("w15", W15)])
+        pkg.save(self.draft)
+        for _ in range(2):
+            self.invoke("final", self.job.dir, "--require-signed", "--reviewer-comments", "drop", "--template-comments", "drop")
+        log = [json.loads(line) for line in Path(self.job.p("decisions.jsonl")).read_text("utf-8").splitlines()]
+        self.assertEqual([r["source"] for r in log], ["agent_relay", "word_reply"])
+        self.assertEqual(log[1]["prev_hash"], log[0]["hash"])
+        self.assertEqual(log[1]["author"], "复核员")
+        self.assertIn(log[-1]["hash"], Path(self.job.p("审核报告.md")).read_text("utf-8"))
+
+    def test_chain_checks_modified_middle_and_truncated_tail(self):
+        self.relay_and_draft()
+        path = Path(self.job.p("decisions.jsonl"))
+        for quote in ("再次核实", "第三次核实"):
+            self.invoke("answer", self.job.dir, "Q1=2", "--user-quote", quote)
+        lines = path.read_text("utf-8").splitlines(True)
+        for invalid in (lines[:1]+lines[2:], lines[:-1], [lines[0], lines[1].replace("再次核实","虚假"), lines[2]]):
+            path.write_text("".join(invalid), encoding="utf-8")
+            self.assertIn("决定记录", self.invoke("final", self.job.dir, "--template-comments", "drop", rc=2))
+
+    def test_first_new_receipt_anchors_entire_legacy_prefix(self):
+        path = Path(self.job.p("decisions.jsonl"))
+        legacy = '{"action":"draft --defaults","user_quote":"legacy"}'
+        path.write_text(legacy, encoding="utf-8")
+        self.relay_and_draft()
+        self.invoke("final", self.job.dir, "--template-comments", "drop")
+        records = path.read_text("utf-8")
+        self.assertTrue(records.startswith(legacy + "\n"))
+        path.write_text(records.replace("legacy", "edited"), encoding="utf-8")
+        self.assertIn("决定记录", self.invoke("final", self.job.dir, "--template-comments", "drop", rc=2))
+
+    def test_interrupted_append_is_recovered_exactly_once(self):
+        from dilib import decisions
+        path = Path(self.job.p("decisions.jsonl"))
+        self.relay_and_draft()
+        def interrupt(dest, data):
+            with dest.open("ab") as stream:
+                stream.write(data[:13])
+            raise OSError("interrupted")
+        with patch.object(decisions, "_append_bytes", interrupt), self.assertRaises(OSError):
+            decisions.record_decision(self.job, "draft --defaults", "允许默认", draft=self.draft.name)
+        for _ in range(2):
+            events, head = decisions.ledger(path)
+            self.assertEqual([event["action"] for event in events], ["answer", "draft --defaults"])
+            self.assertEqual(head, events[-1]["hash"])
+
     def test_final_requires_matching_receipt_even_with_override(self):
         self.modern_draft()
         q = {"id": "Q1", "key": "src:verify:S1", "topic": "来源核对", "question": "来源适用？",
@@ -172,7 +265,7 @@ class ReviewDecisionsTests(unittest.TestCase):
         edited = json.loads(original)
         edited["answers"][0]["binding"] = "0" * 64
         args = ("final", self.job.dir, "--reviewer-comments", "drop", "--accept-unverified",
-                "--user-quote", "仅接受列出的遗留项", "--json")
+                "--user-quote", "仅接受列出的遗留项", "--json", "--strict-exit")
         for changed in ("", "{", json.dumps(edited), original.replace("本批适用", "其他批次"),
                         original.replace("src:verify:S1", "src:verify:S2")):
             with self.subTest(receipt=changed):
@@ -186,7 +279,7 @@ class ReviewDecisionsTests(unittest.TestCase):
         self.invoke("draft", self.job.dir, "--defaults", "--user-quote", "先按推荐生成")
         Path(self.job.p("decisions.jsonl")).write_text("", encoding="utf-8")
         self.assertIn("决定记录", self.invoke("final", self.job.dir, "--accept-unverified",
-                      "--user-quote", "接受列出的遗留项", "--json", rc=4))
+                      "--user-quote", "接受列出的遗留项", "--json", "--strict-exit", rc=4))
 
     def test_reused_confirmation_requires_original_remember_receipt(self):
         from dilib.decisions import verify_receipts

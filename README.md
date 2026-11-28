@@ -6,18 +6,18 @@
 
 Windows x64、Linux x86_64 和 Linux aarch64 各有独立的运行时套装，均使用同一份技能指令。离线套装包括 Python、PDF 后端和中英文 OCR；旧版 Word/Excel 文档转换与 PDF 导出使用目标机已有的办公软件。
 
-**当前交付版本为 1.2.0，完整包供本地验收。** 已用本机 Claude Code 和配置的 DeepSeek 实际填写记录、按批注摘抄和处理批量任务。报告分别记录了准确率、漏填、工具调用和判分依据。官方扫描仍有未解决项，公开仓库仅发布源代码。[内网使用手册](tools/offline/README.md) · [第二轮验收与跨平台结果](qa/reports/second-review/README.md) · [第三轮验收与安全扫描](qa/reports/third-review/README.md)
+**1.3.0 的完整套装供本地验收，公开仓库交付源码。** 正式套装的测试覆盖、使用 Claude Code 与 DeepSeek 生成的 Word 和逐格比对结果，以本轮验收报告为准。[综合验收](qa/reports/fourth-review/README.md) · [内网使用手册](tools/offline/README.md) · [第二轮验收与跨平台结果](qa/reports/second-review/README.md) · [第三轮验收与安全扫描](qa/reports/third-review/README.md)
 
 ## 源码安装与调用
 
-维护者可直接运行仓库内的 [traced-template-fill](traced-template-fill)。部署到其他电脑时将构建好的技能 ZIP 解压至宿主技能目录；需要内置解释器、PDF 和 OCR 的电脑还需解压与该技能版本配对的平台运行时。在项目内选择对应宿主的技能目录；已配置两个入口指向同一目录时，只需维护一份内容。
+维护者可以直接运行仓库内的 [traced-template-fill](traced-template-fill)。正式安装时，将同版技能 ZIP、平台运行时、安装脚本、deploy.py 及 SHA256SUMS 清单放在同一目录并核验摘要。Windows 运行 `.\install.ps1 -ProjectRoot <项目>`，Linux 运行 `sh install.sh --project-root <项目>`。安装器备份选定范围内的旧副本，在两个宿主间共享同一份技能，并从实际入口运行 `doctor`。[安装与迁移](tools/offline/README.md)
 
 | 使用环境 | 项目内位置 | 调用示例 |
 |---|---|---|
 | Claude Code | `.claude/skills/traced-template-fill/SKILL.md` | `/traced-template-fill 按报告里的批注摘入任务书的进度要求，先出草稿` |
 | Codex | `.agents/skills/traced-template-fill/SKILL.md` | `$traced-template-fill 把规范和测试表填进这份验证记录` |
 
-Claude Code 也可将文件夹放入用户目录下的 `.claude/skills/`，供多个项目使用。请选择项目级或用户级其中一处安装。同一台机器上已经有两份 `traced-template-fill` 时，先保留两份中的自定义规则与排版配置，将停用的副本移到 `skills` 目录外备份，重新开始会话。技能支持自然语言触发。没有技能加载器时，可在技能目录直接执行 `python scripts/di.py --help`。[命令参考](traced-template-fill/references/commands.md)
+需要用户级安装时，改用 `-User` 或 `--user`。项目级安装会打印检测到的全局条目位置。技能支持自然语言触发。没有技能加载器时，可在技能目录直接执行 `python scripts/di.py --help`。[命令参考](traced-template-fill/references/commands.md)
 
 ## 提交一个任务
 
@@ -56,7 +56,7 @@ Claude Code 也可将文件夹放入用户目录下的 `.claude/skills/`，供�
 |---|---|---|
 | source ZIP | 可独立安装的技能，不含 wheel 或解释器 | 用于技能本体复核 |
 | 精简依赖 ZIP | 两个纯 Python wheel、固定版本、哈希与许可证 | 与技能 ZIP 搭配；已有 Python 3.10+，仅需 PDF 文本层 |
-| 平台运行时 | 此架构的 Python、PDF 原生库、中文和英文 OCR、校验清单与许可 | 与同一构建的技能 ZIP 解压到同一个 skills 父目录 |
+| 平台运行时 | 此架构的 Python、PDF 原生库、中文和英文 OCR、校验清单与许可 | 与同一构建的技能 ZIP 配套，安装在用户数据目录 |
 | 完整离线套装 | 技能、对应架构 Python、PDF 原生组件、中英文 OCR 模型及许可证 | 本地验收；项目许可与发布审批待定 |
 
 以下命令从仓库根目录运行，输出到仓库外的 `../release/`。依赖下载仅在构建机进行。校验、构建阶段可以从 `--vendor-dir` 或 `--from-dir` 指定的本地目录取原件。
@@ -77,7 +77,7 @@ python tools/build_linux_agent_kit.py --arch all --fetch-inputs --from-dir ../bu
 python tools/build_linux_agent_kit.py --arch all --runtime-only --from-dir ../build-inputs --out ../release
 ```
 
-以上是 Windows 构建机的三平台交叉编译示例。正式配对部署时，将技能 ZIP 与相应架构的运行时解压至同一个宿主技能父目录。完整套装用于本地验收。已备齐原件、Tesseract 和 wheel 后，可离线执行 `python -B tools/build_offline_bundle.py --platform release --tag 1.2.0 --from-dir ../build-inputs --out ../release`，一次生成八件和总哈希清单。[构建输入、原件摘要与工具链](traced-template-fill/vendor/README.md)
+以上是 Windows 构建机的三平台交叉编译示例。正式安装使用交付目录中的 install.ps1 或 install.sh，在选定项目配置宿主入口和用户数据目录内的运行时。完整套装用于本地验收。已备齐原件、Tesseract 和 wheel 后，可离线执行 `python -B tools/build_offline_bundle.py --platform release --tag 1.3.0 --from-dir ../build-inputs --out ../release`，一次生成八件、两个平台的安装脚本、共用安装程序及摘要清单。[构建输入、原件摘要与工具链](traced-template-fill/vendor/README.md)
 
 同一份 Markdown 手册随完整包交付。对独立技能 ZIP 运行官方 Tier 1。依赖和运行时另外核对原件、许可、SBOM、漏洞记录及解包后的病毒扫描。完整套装供本地验收。SHA-256 用于核对收到的字节；部署方通过可信渠道取得摘要或签名后再核验。[第三方组件和许可](traced-template-fill/THIRD_PARTY_NOTICES.md) · [评审入口与证据](qa/README.md)
 

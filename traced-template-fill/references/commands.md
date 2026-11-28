@@ -23,10 +23,11 @@
 | `draft <任务目录>` | 生成带批注草稿（v1、v2…），尝试合并上一版人工修改 | `--check` 用办公软件验证；`--defaults` 仅用于已获同意的默认草稿；`--discard-edits` 仅在用户要求舍弃上版人工修改时使用 |
 | `review <任务目录>` | 读取审核人批注与修改 | |
 | `final <任务目录>` | 生成终稿 | `--format doc,pdf,md` `--reviewer-comments drop\|keep` `--template-comments keep\|drop`（模板批注）；`--strip-template-comments` `--draft 指定草稿` `--accept-unverified`（带着未核项定稿，登记到 终稿遗留项.md；须用户明确同意）。终稿前会先做收件人视角检查，不通过则不出正式稿，清单见 终稿拦截清单.md |
+| `confirm <任务目录>` | 审核人在自己的交互终端确认受保护问题 | 按屏幕提示逐项输入选项号，回车跳过。登记本次选项、时间、进程所属系统账户和输入指纹。 |
 | `status <任务目录>` | 任务状态 | |
 | `profile` | 查看/生成排版规范 | `--text "要求"` `--save 名称` `--name 名称` |
 | `convert 文件 格式` | 用本地办公软件转换，默认保存到当前目录下的 `整合输出/转换_…/` | `--out 输出文件路径` |
-| `batch init/new/plan/answer/draft/final` | 批量 | 见下方“批量清单” |
+| `batch run 清单 --draft --json` | 建立或继续多份任务，返回各份模板、来源及实际草稿路径 | 同批后续回答使用返回的 `batch` 文件。传统入口 `batch init/new/plan/answer/draft/final` 仍可使用。 |
 
 ## 批量清单
 
@@ -38,11 +39,31 @@ DI batch new "批量清单.csv"
 DI batch plan "<批量任务.json>"
 ```
 
+有多份来件时，可把每份的目标、来源和任务写成 UTF-8 CSV，或按下例写成 JSON 数组。`batch run` 的相对来件路径以清单目录为基准。JSON 的 `sources` 数组逐项保留路径中的空格和分号。首次运行返回可继续使用的绝对 `batch` 路径，`jobs` 中的 J1、J2 按来件顺序对应各自的模板和来源。
+
+```json
+[
+  {"target":"甲项目/记录模板.docx","sources":["甲项目/详细规范.docx","甲项目/测量 表.xlsx"],"task":"填写电特性记录"},
+  {"target":"乙项目/记录模板.docx","sources":["乙项目/详细规范.docx","乙项目/测量 表.xlsx"],"task":"填写电特性记录"}
+]
+```
+
+```text
+DI batch run "来件清单.json" --draft --json
+DI batch answer "返回的批量任务.json" B1=2 B2=2 --user-quote "审核人就这些项目作出的实际回复" --evidence "项目证据.json" --draft --json
+```
+
+`all_questions` 提供本轮全部选项以及每题所属的任务目录。按当前题目回答；来源或样品涉及多个任务时，应确认审核人的答复适用于列出的所有任务。可在项目证据 JSON 中写 `{"J1":"甲项目/程序清单.xlsx","J2":"乙项目/程序清单.csv"}`，相对证据路径以此文件的目录为基准。也可在来件清单相应行放 `evidence` 字段。只有同一程序清单确实适用于各份来件时才用共同的 `--evidence 清单.csv`。需要清单直接决定某组题时，可用裸题号如 `B3` 搭配相应证据。单项及批量使用同一套原话、指纹、适用范围和证据校验。
+
+`needs_answers` 时按返回的下一轮题号继续。未完成的项目可与已完成的草稿并存。成功后 `draft_ready / deliver_drafts` 给出整批数量汇总，每份任务的 `draft`、`report`、`snapshots`、警告和 `review_excerpts` 可直接用于交付。相同来件清单、输出目录和参数重复运行会定位原批次。重放上一轮相同提交保留已完成的决定和草稿；输入或决定变化后重新规划。CI 可加 `--strict-exit` 区分待答和拦截。
+
+返回已有草稿前会重新核对 DOCX 与审核报告的 SHA-256。人工改动、损坏或版本变化时，该项目返回 `review_existing_draft` 并保留文件。已登记的证据文件变动时返回 `review_evidence`；核对后可用 `batch answer 批量任务.json --evidence 项目证据.json --draft --json` 更新相应项目，其他项目保留现有草稿。
+
 `batch plan` 显示合并问题及所属任务。只有实际回答适用于所列的每份任务时才用 `batch answer "<批量任务.json>" B1=2` 等命令；按各任务分别核对来源或选项有差异时，用单任务的 `questions` 和 `answer`。收到实际回答后运行 `batch draft` 加批量任务 JSON。各草稿审核完成后，用同一 JSON 运行 `batch final`；查看每个任务的成功或失败信息。
 
 ## 排版
 
-`DI profile` 查看当前规范。用 `DI profile --text "正文仿宋三号，首行缩进2字符" --save 公文` 保存用户指定的规则，核对识别结果后在 `run` 的完整命令中加 `--profile 公文`。新规范保存在工作区的 `.doc-integrator/profiles/`。内置资源为 `config/profiles/默认_文档摘抄提示词.json`、`config/rules/aliases.json`、`config/rules/learned.json`。
+`DI profile` 查看当前规范。用 `DI profile --text "正文仿宋三号，首行缩进2字符" --save 公文` 保存用户指定的规则，核对识别结果后在 `run` 的完整命令中加 `--profile 公文`。新规范保存在工作区的 `.doc-integrator/profiles/`。内置资源为 `config/profiles/default-excerpt.json`、`config/rules/aliases.json`、`config/rules/learned.json`。
 
 ## 任务目录结构
 ```
@@ -66,14 +87,20 @@ DI batch plan "<批量任务.json>"
 
 关键问题的 `answer` 和批量等价操作，以及 `--defaults`、`--discard-edits`、`--accept-unverified`、`--remember` 均使用 `--user-quote "用户原话"` 记录依据。每个任务写入自己的 `decisions.jsonl`。
 
+`final --require-signed` 和 `batch final --require-signed` 会核对规范适用、来源核对、样品对应、未读取内容和 OCR 原页复核等决定。项目可在工作区的 `.doc-integrator/preferences.json` 设置 `{"require_signed": true}`。普通定稿对仅由 Agent 转述的决定给出提示。严格定稿要求审核人用自己的 Word 署名在对应批注下回复“确认 N”，也可在自己的终端运行 `confirm`。Agent 请将这一步交给审核人。选项改变填写内容时，需要重新生成并审核草稿。`--accept-unverified` 仍会检查署名要求。
+
+回执区分 `agent_relay`、`word_reply` 和 `confirm_cli`。Word 署名来自文档元数据，终端确认记录执行命令的操作系统账户。两者仅用于说明确认渠道；需要核验自然人身份时，请使用单位的签署流程。普通 `answer --reviewer` 提供的姓名归入转述。
+
+`审核报告.md` 记录当前决定日志的链头 SHA-256，`终稿/终稿审核报告.md` 按项列出选项、方式、姓名、时间和输入指纹。备份或迁移整个任务时一并保留 `decisions.jsonl`、`decisions.head.json`、各版草稿和报告。首条新版记录把既有旧版记录的顺序和内容纳入链中。项目复用保留原任务回执依赖；原任务移动后可恢复原路径，或重新在本任务核对并出草稿。拥有整套任务写权限的人可以同时重写日志和摘要，需要外部校验时请将报告或摘要另行保管。
+
 `DI clean [--out 输出根]` 预览可清理的共享缓存；确认所有使用方已结束后加 `--apply`。快照与历史文稿仍保留。
 
 ## 自动化调用与审核表
 
-在 `run --draft`、`answer --draft`、`draft` 和 `final` 后加 `--json`，标准输出只含一个 JSON 对象。成功为退出码 0。3 表示 `needs_answers`，直接展示 `questions` 中最多四道题，下一次调用可同时提交这批回答。4 表示 `blocked`，读取 `reason`。2 表示错误或部分导出失败。Python 调用用 `subprocess.run(args, check=False, capture_output=True, text=True)`，读完结果后再判断退出码。设置 `DI_TIMING=1` 可在标准错误中读取解析、规划、写入和校验各阶段的用时（秒）。
+在 `run --draft`、`answer --draft`、`draft` 和 `final` 后加 `--json`，标准输出为一个 JSON 对象。读取 `status` 和 `next_action`。待答与业务拦截均返回 0；CI 可加 `--strict-exit`，分别返回 3 和 4。错误或部分导出失败返回 2。展示型表单使用 `questions` 的最多四题；支持长表单的宿主一次展示 `all_questions`。依 `question_groups` 将子题与父题一起呈现，按每题的 Q 编号独立作答。草稿返回 `review_then_deliver` 时，只按 `review_refs` 中至多五个位置回读一次，再交付草稿和审核报告。`S1:…` 等引用可一次传给 `show`，文件路径直接打开。设置 `DI_TIMING=1` 可在标准错误读取分阶段耗时。
 
 - `DI questions <任务> --csv 待核清单.csv` 导出当前任务的可选决定。复核人可编辑决定和备注，以 `DI answer <任务> --from-sheet 待核清单.csv --reviewer 姓名 --user-quote "审核原话" --draft --json` 导入。保留原始位置、题号、选项和版本标识。
-- `DI answer <任务> Q3 --evidence 程序清单.xlsx --reviewer 姓名 --user-quote "审核原话" --draft --json` 可回答数据段归属、单位和工况。段序清单含“来源、标签、段序、测试号、参数、单位”。单位或工况清单含“来源、测试号、参数、单位”或“来源、测试号、参数、条件”。使用题目所指工作簿与工作表的来源标识。支持 CSV 和 XLSX。对于工作区中唯一的同名源工作簿且只有一张可见表，XLSX 表头可写成“测试名（读数.xlsx A 列标签）”。其他情形请显式提供“来源”与“标签”。从 1 开始填写段序，单个连续块内需要细分时，在“首行、末行”列给出相对行号，或在备注中写“第1~4行”。同一测试号可对应多个段。工况列登记实际施加的条件，额外的规范条件须单独核对。同一轮可写 `answer <任务> Q1=2 Q3 --evidence 程序清单.xlsx --user-quote "审核原话" --draft --json`。Q1 保存人工选项，Q3 单独关联清单哈希。
+- `DI answer <任务> Q3 --evidence 程序清单.xlsx --reviewer 姓名 --user-quote "审核原话" --draft --json` 可回答数据段归属、单位和工况。段序清单含“来源、标签、段序、测试号、参数、单位”。单位或工况清单含“来源、测试号、标签、参数、单位”或“来源、测试号、标签、参数、条件”。使用题目所指工作簿与工作表的来源标识。支持 CSV 和 XLSX。对于工作区中唯一的同名源工作簿且只有一张可见表，XLSX 表头可写成“测试名（读数.xlsx A 列标签）”。其他情形请显式提供“来源”与“标签”。从 1 开始填写段序，单个连续块内需要细分时，在“首行、末行”列给出相对行号，或在备注中写“第1~4行”。同一测试号可对应多个段。工况列登记实际施加的条件，额外的规范条件须单独核对。同一轮可写 `answer <任务> Q1=2 Q3 --evidence 程序清单.xlsx --user-quote "审核原话" --draft --json`。Q1 保存人工选项，Q3 单独关联清单哈希。也可直接附上 `--evidence 程序清单.xlsx`；引擎将各行声明登记到本任务，随输入及规则版本核对新出现的参数。更换清单时提交新版文件。值类型、极性、合格数量等结论须有独立依据。
 - 任务目录下的 `facts.json` 保存本次确认和来源。审核报告按位置引用事实。产品和程序版本可在测试规则中指定。用 `--remember` 明确确认过且适用范围和选项均匹配的决定可以跨任务复用。每一批都要核对批次身份。
 
 ### 扫描与图文混排 PDF

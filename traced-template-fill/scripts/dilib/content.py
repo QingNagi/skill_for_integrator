@@ -10,7 +10,7 @@ import re
 from . import office
 from .common import DIError, bigrams, contains_score, ensure_dir, file_sha1, read_json, short, write_json
 
-MODEL_VERSION = 14
+MODEL_VERSION = 15
 DOC_EXT = {".docx", ".docm", ".dotx"}
 LEGACY_WORD = {".doc", ".wps", ".wpt", ".rtf", ".dot", ".odt", ".mht"}
 SHEET_EXT = {".xlsx", ".xlsm"}
@@ -57,6 +57,8 @@ def load_model(path, cache_dir):
         from .read_docx import DocxReader
         r = DocxReader(wp, media)
         m = r.read()
+        from .provenance import generated
+        m["generated"] = generated(r.pkg)
         m["images"] = {v["id"]: {k: v[k] for k in ("id", "part", "ext", "cx", "cy", "file", "text", "kind") if k in v}
                        for v in r.images.values()}
     elif wext in SHEET_EXT:
@@ -365,7 +367,7 @@ def _ocr_review(block):
     return ' '.join(labels)
 
 
-def render_sheet(model, rng=None, max_rows=40):
+def render_sheet(model, rng=None, max_rows=40, cell_chars=20):
     m = model.m
     sheet, cells = None, rng
     if rng and "!" in rng:
@@ -384,8 +386,10 @@ def render_sheet(model, rng=None, max_rows=40):
     out.append("| 行 | " + " | ".join(col_letter(c) for c in range(c0, c1 + 1)) + " |")
     for r in range(r0, r1 + 1):
         row = sh["rows"][r] if r < len(sh["rows"]) else []
-        out.append("| %d | " % (r + 1) + " | ".join("" if c >= len(row) or row[c] is None else short(str(row[c]), 20)
-                                                    for c in range(c0, c1 + 1)) + " |")
+        values = [str(row[c]) if c < len(row) and row[c] is not None else "" for c in range(c0, c1 + 1)]
+        if cell_chars is not None:
+            values = [short(value, cell_chars) for value in values]
+        out.append("| %d | " % (r + 1) + " | ".join(values) + " |")
     return "\n".join(out)
 
 

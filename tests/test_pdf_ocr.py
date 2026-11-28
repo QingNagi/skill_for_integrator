@@ -68,8 +68,17 @@ class PdfOcrTests(unittest.TestCase):
         self.assertTrue(shown.endswith('-0.125 1.250 mV'))
         self.assertIn('低置信单位 mV', content.search({'S1': model}, 'mV')[0][-1])
 
+    def require_ocr_files(self, options):
+        if not options["available"]:
+            files = [Path(options["executable"])] + [
+                Path(options["tessdata"], name + ".traineddata") for name in ("eng", "chi_sim")]
+            if not all(path.is_file() for path in files):
+                self.skipTest("Optional OCR engine or language models are absent")
+            self.fail(options["hint"])
+
     def test_native_engine_lists_both_models_with_clean_font_initialization(self):
         options = _bootstrap.ocr_hint()
+        self.require_ocr_files(options)
         proc = subprocess.run([options['executable'], '--list-langs', '--tessdata-dir', '.'],
                               cwd=options['tessdata'], capture_output=True, check=True)
         self.assertEqual(proc.stderr, b'')
@@ -146,6 +155,7 @@ class PdfOcrTests(unittest.TestCase):
             with patch.dict(os.environ, DI_OCR='off'):
                 disabled = content.load_model(str(path), tmp)
             with patch.dict(os.environ, DI_OCR='on'):
+                self.require_ocr_files(_bootstrap.ocr_hint())
                 result = content.load_model(str(path), tmp)
                 self.assertTrue(_bootstrap.ocr_hint(probe=True)['available'])
                 target = Path(tmp) / 'target.docx'

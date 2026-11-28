@@ -353,6 +353,16 @@ def _unchanged_context(base, ours):
     for part, data in base.parts.items():
         if part == 'word/document.xml' or data == ours.parts[part]:
             continue
+        from .provenance import FIELD, part_name
+        if part == part_name(base) == part_name(ours):
+            def other_properties(pkg):
+                root = copy.deepcopy(pkg.xml(part))
+                for child in list(root):
+                    if child.get('name') == FIELD:
+                        root.remove(child)
+                return ET.tostring(root)
+            if other_properties(base) == other_properties(ours):
+                continue
         if part != 'word/comments.xml':
             return False
         shapes = []
@@ -473,11 +483,10 @@ def _merge(job, prev, pristine, new, discard, res):
             merged = Package(prev)
             if ours_rd.pkg.parts[main] != base_rd.pkg.parts[main]:
                 merged.parts[main] = ours_rd.pkg.parts[main]
-            reordered = merged.normalize_cell_properties()
-            if not reordered and ours_rd.pkg.parts[main] == base_rd.pkg.parts[main]:
-                shutil.copyfile(prev, tmp)
-            else:
-                merged.save(tmp)
+            merged.normalize_cell_properties()
+            from .provenance import mark
+            mark(merged, job, new, "draft")
+            merged.save(tmp)
             os.replace(tmp, new)
         finally:
             if os.path.exists(tmp):
@@ -545,6 +554,8 @@ def _merge(job, prev, pristine, new, discard, res):
         tmp = new + '.merge.tmp'
         try:
             ours_rd.pkg.normalize_cell_properties()
+            from .provenance import mark
+            mark(ours_rd.pkg, job, new, "draft")
             ours_rd.pkg.save(tmp)
             os.replace(tmp, new)
         finally:

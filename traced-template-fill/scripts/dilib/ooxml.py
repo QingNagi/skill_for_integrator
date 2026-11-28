@@ -310,11 +310,16 @@ class Package:
                 del self._ns[name]
         return count
 
+    def part_bytes(self, name):
+        if name in self._xml:
+            return serialize(self._xml[name], self._ns.get(name, []))
+        return self.parts[name]
+
     def save(self, path):
         for r in self._rels.values():
             r.save()
-        for name, root in self._xml.items():
-            self.parts[name] = serialize(root, self._ns.get(name, []))
+        for name in self._xml:
+            self.parts[name] = self.part_bytes(name)
         order = list(self.order)
         if "[Content_Types].xml" in order:
             order.remove("[Content_Types].xml")

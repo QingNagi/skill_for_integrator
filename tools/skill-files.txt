@@ -1,6 +1,6 @@
 SKILL.md
 config/ocr.lock.json
-config/profiles/默认_文档摘抄提示词.json
+config/profiles/default-excerpt.json
 config/rules/aliases.json
 config/rules/learned.json
 config/rules/test-data.json
@@ -11,9 +11,11 @@ references/manual-operations.md
 references/rules-and-questions.md
 run.cmd
 run.sh
+scripts/batch_pool.py
 scripts/di.py
 scripts/dilib/__init__.py
 scripts/dilib/_bootstrap.py
+scripts/dilib/batch_workflow.py
 scripts/dilib/child_process.py
 scripts/dilib/cleanup.py
 scripts/dilib/cli.py
@@ -22,6 +24,7 @@ scripts/dilib/content.py
 scripts/dilib/convert_office.ps1
 scripts/dilib/decisions.py
 scripts/dilib/draft_review.py
+scripts/dilib/engineering.py
 scripts/dilib/environment.py
 scripts/dilib/evidence.py
 scripts/dilib/export_md.py
@@ -44,6 +47,7 @@ scripts/dilib/planner.py
 scripts/dilib/preferences.py
 scripts/dilib/profile.py
 scripts/dilib/program_manifest.py
+scripts/dilib/provenance.py
 scripts/dilib/read_docx.py
 scripts/dilib/read_other.py
 scripts/dilib/runtime_maintenance.py

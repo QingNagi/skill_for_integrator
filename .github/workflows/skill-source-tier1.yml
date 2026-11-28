@@ -29,12 +29,12 @@ jobs:
           mkdir gitleaks-bin
           tar -xzf gitleaks.tar.gz -C gitleaks-bin gitleaks
       - name: Build the source release
-        run: python -B tools/build_offline_bundle.py --platform source --tag 1.2.0 --out "$RUNNER_TEMP/release"
+        run: python -B tools/build_offline_bundle.py --platform source --tag 1.3.0 --out "$RUNNER_TEMP/release"
       - name: Run source gate
         shell: pwsh
         run: |
-          ./qa/run-tier1.ps1 -SourceGate -PreviousVersion 1.1.2 `
-            -Package "$env:RUNNER_TEMP/release/traced-template-fill-1.2.0-source.zip" `
+          ./qa/run-tier1.ps1 -SourceGate -ScannerDiagnostics -PreviousVersion 1.2.0 `
+            -Package "$env:RUNNER_TEMP/release/traced-template-fill-1.3.0-source.zip" `
             -Evaluator "$env:RUNNER_TEMP/evaluator/bin/skillevaluator" `
             -SkillSpector "$env:RUNNER_TEMP/inspector/bin/skillspector" `
             -Gitleaks "$env:RUNNER_TEMP/gitleaks-bin/gitleaks" `

@@ -8,9 +8,25 @@
 
 旧版 Windows 完整包曾得到 `CRITICAL / DO_NOT_INSTALL`。更换 PDF 引擎后的套装按各自 SHA-256 单独验收，部署方可将技术验收记录与对应包的安全评审一起核对。下列步骤用于功能验收及通过组织审核后的部署。[发布评审说明](https://github.com/QingNagi/skill_for_integrator/blob/main/qa/README.md)
 
-## 1.2.0 分开部署
+## 正式安装
 
-建议向内网 Agent 提供同一构建的**技能 ZIP、与目标机匹配的运行时和 SHA-256 清单**。让 Agent 核对摘要，并把两个包解压到同一个宿主的 skills 父目录。项目级 Claude Code 使用 `.claude/skills/`，Codex 使用 `.agents/skills/`。得到同一技能目录下的 `SKILL.md`、启动脚本和 `offline-runtime/` 后，在用户发起任务的工作目录调用启动脚本。首次调用会校验并部署；相同版本的后续任务复用用户缓存。来源文件可以留在原位置。
+取得同一构建的技能 ZIP、本机 CPU 对应的 runtime 包、安装脚本、共用的 deploy.py 和 SHA256SUMS 清单，放在同一交付目录。从可信发布渠道核对清单及所用脚本的摘要。安装只需当前用户权限。
+
+~~~powershell
+& 'D:\交接\install.ps1' -ProjectRoot 'D:\验证项目'
+~~~
+
+~~~sh
+sh /交接/install.sh --project-root /工作/验证项目
+~~~
+
+两个命令都指定已有项目目录。需要当前账号的所有项目共用时，使用 `-User` 或 `--user` 选择主目录。已有 Python 3.10+ 且只需源码能力时加 `-SourceOnly` 或 `--source-only`。双包安装可在没有系统 Python 的机器上从已校验的运行时提取解释器。
+
+源码安装在 `.agents/skills/traced-template-fill`。`.claude/skills/traced-template-fill` 是 Windows 目录联接或 Linux 相对符号链接。技能目录中的每个文件均与源码 ZIP 比对。运行时存放在用户数据目录或 `DI_RUNTIME_DIR`，项目的 `.traced-template-fill/` 保存运行时入口与备份。安装器最后从宿主入口执行 `doctor`。
+
+安装器在选定范围内检查旧名称和旧版本，整目录备份到 `.traced-template-fill/backups/<时间与编号>/`，打印每个原位置与备份位置。自定义规则和排版配置随目录保留。项目安装发现用户目录的另一份技能时打印位置。需要沿用的排版规范可从备份复制到项目的 `.doc-integrator/profiles/`。学得的映射可合并到 `.doc-integrator/learned.json` 的 `answers` 字段。同一版本重复安装会复用现有入口。
+
+重新开启 Claude Code 或 Codex 会话后查看技能列表。Hermes 需要信任当前项目。Copilot CLI 可用 `/skills reload`，OpenCode 重启后更新列表。
 
 | 机器条件 | 需要交给 Agent 的内容 | 可用功能 |
 |---|---|---|
@@ -35,30 +51,19 @@ Linux 原生 PDF/OCR 库要求 glibc 2.28 或更高。可用 `getconf GNU_LIBC_V
 
 **SHA-256 用在哪。** 分发包旁的 `.sha256` 供 Agent 在拷贝后核对。Linux 可在两份文件所在目录执行 `sha256sum -c 文件名.tar.gz.sha256`；Windows 用 `Get-FileHash -Algorithm SHA256` 与清单比对。包内摘要供启动器验证载荷、识别同版本安装。校验值从可信发布位置取得。
 
-## Windows 快速开始
+## 运行项目的技能
 
-1. **把 ZIP 拷到内网。** 目标机需要能在内网工作的 Codex 或 Claude Code、可用的本地命令执行权限，以及可写的项目目录和用户数据目录。可直接把 ZIP 路径、目标 Word 模板、来源文件一起交给 Agent。目标机可以没有系统 Python、pip 和单独的 OCR 程序。
-2. **让 Agent 放好 skill 并执行任务。** Codex 项目入口是 `.agents/skills/traced-template-fill/SKILL.md`；Claude Code 项目入口是 `.claude/skills/traced-template-fill/SKILL.md`。ZIP 已包含顶层 `traced-template-fill` 文件夹，解压目标应是上一级 `skills` 目录。若只想在当前会话直接处理文件，也可以解压到独立目录，让 Agent 读取里面的 `SKILL.md` 并调用同级 `run.ps1`。
-3. **审核草稿。** 核对“整合输出”中的草稿和审核报告。看到 OCR 来源时，对照原 PDF 的相应页核实数字和单位。保存、关闭草稿后，告诉 Agent 是继续修改还是定稿。
+~~~powershell
+& '.\.agents\skills\traced-template-fill\run.cmd' run --draft -t '.\验证记录.docx' -s '.\测试数据.xlsx' --task '先生成草稿'
+~~~
 
-**可直接复制给 Agent**（替换以下路径和文件名）：
+~~~sh
+sh .agents/skills/traced-template-fill/run.sh run --draft -t '/模板/验证记录.docx' -s '/来件/扫描规范.pdf' --task '先生成草稿'
+~~~
 
-> 在本项目使用 traced-template-fill。离线包位于 D:\交接\traced-template-fill-offline-win64.zip。如果本项目尚未配置这个版本，请把它解压到本项目的技能目录；已有同版就复用，保留已有规则和其他版本。读取 SKILL.md，直接用 run.ps1 执行任务，首次让它自行部署并自检。目标是“验证记录.docx”，来源是“测试数据.xlsx”和“扫描规范.pdf”。按模板批注填写，先给我草稿和审核报告；扫描识别的数值请标明原页。
+核对草稿和审核报告。含扫描数据时对照 PDF 原页复核数字和单位。审核人保存并关闭草稿后，助手可按批注修改或定稿。
 
-如果 Agent 刚解压完而当前会话的技能列表还没有刷新，可让它直接读取上述入口文件并执行。同一项目后续可直接说“用 traced-template-fill 按批注填写这份记录”。
-
-## Linux 快速开始
-
-把对应的 tar.gz、模板和来源路径交给 Agent，并告诉它「在本项目配置 traced-template-fill，先按来源生成草稿」。Agent 在项目目录执行下列步骤。示例使用 Codex，Claude Code 可将 `.agents` 换成 `.claude`。项目中已经有同版入口时直接执行最后一行。
-
-```bash
-arch=$(uname -m)
-mkdir -p .agents/skills
-tar -xzf "/交接/traced-template-fill-offline-linux-${arch}.tar.gz" -C .agents/skills
-bash .agents/skills/traced-template-fill/run.sh run --draft -t "/模板/验证记录.docx" -s "/来件/扫描规范.pdf" --task "先生成草稿"
-```
-
-同一用户首次运行会从本地载荷部署环境并识别中英文扫描样文。需要系统已有的 shell、GNU tar、gzip、sha256sum 和 flock。运行时默认放在 `~/.local/share/traced-template-fill/offline/`；已设置 `XDG_DATA_HOME` 时使用该数据目录。该文件系统须允许执行程序。后续使用同一入口和参数。变更既有的入口版本前请保存该项目的自定义规则。
+合并的 offline 套装可解到独立工作目录进行兼容验收，Windows 使用其中的 `run.cmd`，Linux 使用 `sh run.sh`。旧的同目录配对入口仍支持将两件归档解到独立目录后直接调用。
 
 ## 什么时候需要 OCR
 
@@ -90,7 +95,7 @@ bash .agents/skills/traced-template-fill/run.sh run --draft -t "/模板/验证�
 | 首次部署中断 | 本次命令报告失败。修复磁盘、写权限或文件问题后重试，未通过自检的临时目录不会被当作成功安装。 |
 | 换电脑、账号或发布包 | 新电脑或账号需要自己的环境。不同载荷有独立版本目录；已有项目技能带有自定义规则时先保留原目录，再迁移需要的规则。 |
 
-Windows 的本机缓存位于 `%LOCALAPPDATA%\traced-template-fill\offline\` 内按载荷摘要分开的版本目录，目录名使用摘要前 24 位，就绪标记保存完整摘要。在多个项目调用同一个完整包入口时，它们复用该缓存。如果已用 `install.ps1 -Agent Claude -ProjectRoot <项目>` 部署独立副本，请显式运行该副本中的 `run.cmd`，或使用其中的 `runtime\python\python.exe` 调用同目录树的 `scripts\di.py`。
+Windows 的本机缓存位于 `%LOCALAPPDATA%\traced-template-fill\offline\` 内按载荷摘要分开的版本目录，目录名使用摘要前 24 位，就绪标记保存完整摘要。在多个项目调用同一个完整包入口时，它们复用该缓存。迁移项目可从两个宿主入口调用同一版本。
 
 ## 能力与依赖
 
@@ -110,7 +115,7 @@ Windows x64 套装支持原生 `run.cmd`；使用 `run.ps1` 时需要 Windows Po
 在 PowerShell 中，从项目根目录可直接调用已解压的入口。Claude Code 项目把第一行的 `.agents` 换成 `.claude`。文件路径按当前工作目录解释。
 
 ```powershell
-$di = (Resolve-Path '.\.agents\skills\traced-template-fill\run.ps1').Path
+$di = (Resolve-Path '.\.agents\skills\traced-template-fill\run.cmd').Path
 & $di run --draft -t '.\验证记录.docx' -s '.\扫描规范.pdf' -s '.\测试数据.xlsx' --task '按批注填写，实测数值取范围'
 ```
 
@@ -127,7 +132,7 @@ $di = (Resolve-Path '.\.agents\skills\traced-template-fill\run.ps1').Path
 
 原文件保持只读。默认在发起任务时的当前工作目录下生成 `整合输出\<任务名>\`，其中包含 `草稿\`、`审核报告.md`，定稿后还有 `终稿\`。草稿批注中的链接指向来源快照，移动草稿时应保留相邻的快照目录。待确认项按任务保存；源文件换版后，已绑定原版本的回答需要重新核对。
 
-## Windows 包内结构
+## Windows 合并验收包结构
 
 ```text
 traced-template-fill/

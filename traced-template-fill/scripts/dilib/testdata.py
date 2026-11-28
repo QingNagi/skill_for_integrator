@@ -21,6 +21,7 @@ import re
 from decimal import Decimal, InvalidOperation, localcontext, ROUND_HALF_UP, ROUND_HALF_EVEN
 from pathlib import Path
 
+from .engineering import extract_symbol, norm_sym, token_variants, unit_key
 from .common import DIError, norm_text, numeric_text
 from .read_other import col_index, col_letter, measurement_value
 
@@ -183,7 +184,7 @@ def parse_sheet(sheet, rules):
         if not str(lab or "").strip() and not any(v is not None and str(v).strip() for v in vals.values()):
             continue
         if lab not in (None, "") and str(lab).strip():
-            cur = {"label": str(lab).strip(), "rows": [r], "values": {}, "meta": {}, "units": [], "conditions": []}
+            cur = {"label": str(lab).strip(), "rows": [r], "values": {}, "meta": {}, "units": [], "conditions": [], "row_units": {}}
             blocks.append(cur)
         elif cur is None:
             continue
@@ -196,6 +197,8 @@ def parse_sheet(sheet, rules):
             if c < len(row) and row[c] is not None:
                 cur["meta"].setdefault(k, row[c])
                 group = {"unit": "units", "condition": "conditions"}.get(k)
+                if k == "unit" and str(row[c]).strip():
+                    cur["row_units"].setdefault(r, set()).add(str(row[c]).strip())
                 if group and str(row[c]).strip() and str(row[c]).strip() not in cur[group]:
                     cur[group].append(str(row[c]).strip())
     occ = {}
@@ -209,28 +212,6 @@ def parse_sheet(sheet, rules):
 
 
 # ======================================================================= 符号匹配
-def norm_sym(s):
-    s = norm_text(s).upper()
-    s = s.replace("Δ", "Δ")
-    s = re.sub(r"[^0-9A-ZΔ+\-]", "", s)
-    return s
-
-
-def extract_symbol(text):
-    """'TTL输入高电平电压VIH' -> 'VIH'；'差分输出电压变化△VOD' -> '△VOD'"""
-    m = re.search(r"([△ΔA-Za-z][A-Za-z0-9△Δ+\-]*)\s*$", text or "")
-    return m.group(1) if m else ""
-
-
-def token_variants(tok, prefixes):
-    t = tok.upper()
-    out = [t]
-    for p in prefixes:
-        if t.startswith(p.upper()) and len(t) > len(p):
-            out.append("Δ" + t[len(p):])
-    return out
-
-
 def match_token(tok, syms, aliases, prefixes):
     """返回 [(sym, score, how)]；syms: {norm_sym: 原符号}。"""
     res = []
@@ -266,6 +247,48 @@ def measurement_number(value):
     except InvalidOperation:
         return None
     return number if number.is_finite() else None
+
+
+SI_PREFIX = {"": 0, "p": -12, "n": -9, "u": -6, "m": -3, "c": -2, "k": 3, "M": 6, "G": 9, "T": 12}
+SI_UNIT = re.compile(r"([pnumckMGT]?)(V|A|s|Hz|F|H|W|Pa|Ohm|\u03a9|m|g|bit/s|bps)")
+
+
+def normalized_unit(unit):
+    return unit_key(unit).replace("\u03bc", "u").replace("Ohm", "\u03a9")
+
+
+def unit_exponent(source, target):
+    """Return the base-ten exponent for a compatible multiplicative SI conversion."""
+    if not source or not target:
+        return None
+    source, target = normalized_unit(source), normalized_unit(target)
+    if source == target:
+        return 0
+    left, right = SI_UNIT.fullmatch(source), SI_UNIT.fullmatch(target)
+    if left and right and left[2] == right[2]:
+        return SI_PREFIX[left[1]] - SI_PREFIX[right[1]]
+    return None
+
+
+def reading_units(block, fallback=None):
+    # A unit on the label row identifies its block. A differing inline unit identifies that row only.
+    first = block.get("label_row", block["rows"][0] + 1) - 1
+    by_row = block.get("row_units", {})
+    baseline = by_row.get(first, set())
+    units = []
+    for row in block["rows"]:
+        actual = by_row.get(row, baseline)
+        units.append(next(iter(actual)) if len(actual) == 1 else "单位冲突" if actual else fallback)
+    return units
+
+
+def scaled_reading(value, exponent):
+    number = measurement_number(value)
+    if not exponent or number is None:
+        return value
+    # Shift the decimal point exactly, preserving the original significant digits.
+    sign, digits, power = number.as_tuple()
+    return Decimal((sign, digits, power + exponent))
 
 
 def display_measurement(value, rules, lo, hi, *, preserve_limit=True):
@@ -375,6 +398,42 @@ def plausibility(nums, lo, hi):
     return "ok", ""
 
 
+def interpretation_choices(binary_choice, rate_flag):
+    options = [{"label":"暂不确认，留空", "effect":{"kind":"blank"}}]
+    if binary_choice:
+        options.extend({"label":"此参数填判定，%d 表示通过" % code, "effect":{"kind":"flags","pass_code":code}}
+                       for code in (1, 0))
+        if not rate_flag:
+            options.append({"label":"已核对为原始测量数值", "effect":{"kind":"measurement"}})
+    else:
+        options.extend([{"label":"按实测值填写", "effect":{"kind":"measurement"}},
+                        {"label":"带符号的原始值与限值比较，填写判定", "effect":{"kind":"limits","sign":"signed"}},
+                        {"label":"原始数据为绝对值，按负值比较，填写判定", "effect":{"kind":"limits","sign":"negate"}}])
+    return options
+
+
+def conditional_interpretation(target, blocks, rules):
+    """Bind a prospective convention to the exact source labels and reading type."""
+    symbol, unit = target["sym"], target.get("unit")
+    data = [v for block in blocks for readings in block["values"].values() for v in readings]
+    binary = bool(unit and data and all(measurement_number(v) in (0, 1) for v in data))
+    column = target.get("column_type") or rules["column_types"].get(symbol)
+    if column != "measurement" or not (binary or "阈值" in target.get("name", "")):
+        return None
+    labels = sorted({b["label"] for b in blocks})
+    rate = binary and bool(re.fullmatch(r"[kMG]?b(?:it)?(?:ps|/s)", unit or "", re.I))
+    options = interpretation_choices(binary, rate)
+    if unit and any(not b.get("units") for b in blocks):
+        for opt in options:
+            if opt["effect"]["kind"] in ("limits", "measurement"):
+                opt["label"] += "（已核对读数单位 %s）" % unit
+                opt["effect"]["unit"] = unit
+    sig = hashlib.sha256(json.dumps([labels, options, target], sort_keys=True).encode()).hexdigest()[:16]
+    return {"key": "td:interpret_if:" + sig + ":" + symbol, "topic": "值类型与极性",
+            "question": "若采用 %s 对应 %s，请同时确认填写方式、极性及所需单位。" % ("、".join(labels), symbol),
+            "source_labels": labels, "symbols": [symbol], "options": options}
+
+
 def build(parsed, targets, rules, aliases, answers):
     """parsed: parse_sheet 结果；targets: [{row, sym, name, lo, hi, unit, not_tested}]
     answers: {key: effect}；返回 dict(fills, questions, ignored, unmatched, verdict, notes)"""
@@ -400,6 +459,14 @@ def build(parsed, targets, rules, aliases, answers):
         b["base"] = b["label"][:m.start()] if m else b["label"]
         b["declared_voltage"] = {voltage_names[norm_text(v)] for v in b.get("conditions", [])
                                  if norm_text(v) in voltage_names}
+        # Some programs spell the condition as "-nom". Strip it only when the
+        # measured condition independently agrees and the base is an exact parameter.
+        if (not m and rules["cond_pattern"] == DEFAULT_RULES["cond_pattern"] and b["declared_voltage"] == {"vnorm"}
+                and all(voltage_names.get(norm_text(v)) == "vnorm" for v in b["conditions"])):
+            base, sep, suffix = b["label"].rpartition("-")
+            if (sep and suffix.casefold() in {"nom", "norm", "vnom", "vnorm"} and norm_sym(base) in tested_syms
+                    and norm_sym(b["label"]) not in syms and norm_sym(b["label"]) not in aliases):
+                b["base"], b["cond"] = base, "Vnorm"
         if b["cond"]:
             conds[b["cond"]] = conds.get(b["cond"], 0) + 1
     keep = rules.get("cond_keep")
@@ -484,6 +551,7 @@ def build(parsed, targets, rules, aliases, answers):
                 if b2 != base and not i2["unexplained"] and [m[0] for m in i2["matched"]] == ms:
                     info["shadowed_by"] = b2
                     break
+    program_symbols = set()
     assign = {}     # sym -> [(block, how, score)]
     ignored = []
     alias_groups = {}
@@ -537,6 +605,8 @@ def build(parsed, targets, rules, aliases, answers):
         if not q:
             ignored.append((base, "无可测参数候选"))
             continue
+        if q["requires_program"]:
+            program_symbols.update(q["parameter_candidates"])
         if len(matched) > 1 and not rules["split_compound"]:
             q["options"] = q["options"][:1]  # 可以用自由回答明确给出每段符号
         ans = answers.get(key, grouped_answers.get(base))
@@ -594,6 +664,23 @@ def build(parsed, targets, rules, aliases, answers):
             if sym:
                 actual = tested_targets[norm_sym(sym)]["sym"]
                 assign.setdefault(actual, []).append((block, mapped_by, 1.0))
+    # Ask conditional conventions alongside the parent. They never establish a mapping.
+    for parent in list(questions):
+        candidates = {}
+        if parent["key"].startswith("td:map:"):
+            for sym in parent["parameter_candidates"]:
+                candidates[sym] = groups[parent["source_label"]]
+        elif parent["key"].startswith("td:alias:"):
+            token, sym = parent["key"].split(":")[2:]
+            candidates[sym] = [b for base in alias_groups[(token, sym)] for b in groups[base]]
+        elif parent["key"] == "td:no_suffix":
+            for b in parsed["blocks"]:
+                if b["label"] in parent["source_labels"] and norm_sym(b["label"]) in tested_syms:
+                    candidates.setdefault(tested_syms[norm_sym(b["label"])], []).append(b)
+        for sym, blocks in candidates.items():
+            child = conditional_interpretation(tested_targets[norm_sym(sym)], blocks, rules)
+            if child and child["key"] not in answers and not any(q["key"] == child["key"] for q in questions):
+                questions.append(dict(child, conditional_on=parent["key"]))
     # ---- 逐行汇总
     fills, unmatched, verdict = {}, [], {s: "pass" for s in parsed["samples"]}
     unit_map = {t["sym"]: str(t["unit"]).strip() for t in targets if t.get("sym") and t.get("unit")}
@@ -641,8 +728,6 @@ def build(parsed, targets, rules, aliases, answers):
                           for k, v in (("lo", lo), ("hi", hi)))
         unit = unit_map.get(symbol)
         declared_units = {u for b, _, _ in hits for u in b.get("units", []) if u}
-        unit_conflict = bool(unit and any(numeric_text(u) != numeric_text(unit) for u in declared_units))
-        unit_missing = bool(unit and any(not b.get("units") for b, _, _ in hits))
         condition = str(t.get("cond") or "").strip()
         def proves_condition(block):
             documented = {norm_text(c) for c in block.get("conditions", [])}
@@ -653,6 +738,12 @@ def build(parsed, targets, rules, aliases, answers):
         context_missing = condition not in ("", "—", "-", "/") and any(not proves_condition(b) for b, _, _ in hits)
         column_type = t.get("column_type") or rules["column_types"].get(symbol)
         interpretation = answers.get("td:interpret:" + symbol) or {}
+        if not interpretation:
+            scoped = conditional_interpretation(t, [b for b, _, _ in hits], rules)
+            if scoped:
+                candidate = answers.get(scoped["key"])
+                if candidate in [o["effect"] for o in scoped["options"]]:
+                    interpretation = candidate
         if interpretation.get("_default"):
             interpretation = {}
         kind, sign = interpretation.get("kind"), interpretation.get("sign", "signed")
@@ -663,30 +754,32 @@ def build(parsed, targets, rules, aliases, answers):
         threshold_choice = bool(column_type == "measurement" and "阈值" in t.get("name", ""))
         needs_interpretation = (binary_choice or threshold_choice) and not interpretation
         if needs_interpretation:
-            options = [{"label":"暂不确认，留空", "effect":{"kind":"blank"}}]
-            if binary_choice:
-                options.extend({"label":"此参数填判定，%d 表示通过" % code, "effect":{"kind":"flags","pass_code":code}}
-                               for code in (1, 0))
-                if not rate_flag:
-                    options.append({"label":"已核对为原始测量数值", "effect":{"kind":"measurement"}})
-            else:
-                options.extend([{"label":"按实测值填写", "effect":{"kind":"measurement"}},
-                                {"label":"带符号的原始值与限值比较，填写判定", "effect":{"kind":"limits","sign":"signed"}},
-                                {"label":"原始数据为绝对值，按负值比较，填写判定", "effect":{"kind":"limits","sign":"negate"}}])
             questions.append({"key":"td:interpret:" + symbol, "topic":"值类型与极性",
                               "question":"参数 %s（%s）的原始读数应以哪种方式记入模板？请核对本单位记录约定。" % (symbol,t.get("name","")),
                               "value_context": {k: t.get(k) for k in ("sym","unit","lo","hi","column_type")},
-                              "source_labels": sorted({b["label"] for b, _, _ in hits}), "options":options})
+                              "source_labels": sorted({b["label"] for b, _, _ in hits}), "options":interpretation_choices(binary_choice, rate_flag)})
+        fallback_unit = identity["units"].get(symbol) or interpretation.get("unit")
+        source_units = [reading_units(b, fallback_unit) for b, _, _ in hits]
+        unit_conflict = bool(unit and any(u and unit_exponent(u, unit) is None for units in source_units for u in units))
+        unit_missing = bool(unit and any(not u for units in source_units for u in units))
+        exponents = [[unit_exponent(u, unit) for u in units] for units in source_units]
+        convert = (any(n for group in exponents for n in group) and not (unit_missing or unit_conflict)
+                   and kind != "flags" and vans.get("mode") != "flags")
+        if (unit_missing and not needs_interpretation and kind not in ("blank", "flags")
+                and vans.get("mode") not in ("blank", "flags") and not rate_flag):
+            needed["units"][symbol] = unit
         for sid in parsed["samples"]:
-            vals, ranges = [], []
+            vals, adjusted, ranges = [], [], []
             col = parsed["sample_cols"][sid]
             incomplete = False
-            for b, _, _ in hits:
+            for (b, _, _), scale in zip(hits, exponents):
                 values = b["values"].get(sid, [])
+                if convert:
+                    adjusted.extend(scaled_reading(v, n) for v, n in zip(values, scale))
                 incomplete |= len(values) != len(b["rows"])
                 vals.extend(values)
                 ranges.append("%s!%s%d:%s%d" % (parsed["sheet"], col, b["rows"][0] + 1, col, b["rows"][-1] + 1))
-            text, how, status, nums = aggregate(vals, format_rules, lo=lo, hi=hi)
+            text, how, status, nums = aggregate(adjusted if convert else vals, format_rules, lo=lo, hi=hi)
             pst, msg = plausibility(nums, lo, hi)
             if incomplete or status == "unknown" or how == "文本结果":
                 msg = "样品有缺少读数的行" if incomplete else how
@@ -728,7 +821,7 @@ def build(parsed, targets, rules, aliases, answers):
                         msg = "源单位 %s 与目标单位 %s 不一致" % ("、".join(sorted(declared_units)), unit)
                         required_review.append("%s：%s（%s）" % (symbol, msg, "；".join(ranges)))
                         text, pst, status = "", "unknown", "unknown"
-                    elif unit_missing and identity["units"].get(symbol) != unit:
+                    elif unit_missing:
                         needed["units"][symbol] = unit
                         text, pst, status, msg = "", "unknown", "unknown", "源表未注明单位，记录单位为 " + unit
                     elif unsupported or (lo is None and hi is None):
@@ -743,10 +836,15 @@ def build(parsed, targets, rules, aliases, answers):
                     return (lo is None or n >= lo) and (hi is None or n <= hi)
                 flips = [(n, rounded_n) for n, rounded_n in zip(nums, rounded) if passed(n) != passed(rounded_n)]
                 if flips:
-                    msg = "修约前后限值判定翻转：" + "、".join(
-                        "原始 %s（%s）→ 显示 %s（%s）" %
-                        (raw, "限内" if passed(raw) else "超限", shown, "限内" if passed(shown) else "超限")
-                        for raw, shown in flips[:3])
+                    details = []
+                    for raw, shown in flips[:3]:
+                        bound = ("低于下限 %s" % lo if lo is not None and raw < lo else
+                                 "超出上限 %s" % hi if hi is not None and raw > hi else "限内")
+                        action = ("按修约判定规则暂留空，原始值" if format_rules["comparison"] == "rounded"
+                                  else "已保留原始值")
+                        details.append("按常用修约会显示为 %s 并看似%s，%s %s（%s）" %
+                                       (shown, "合格" if passed(shown) else "超限", action, raw, bound))
+                    msg = "；".join(details)
                     required_review.append("%s 样品%s (%s)：%s" % (symbol, sid, "；".join(ranges), msg))
                     if format_rules["comparison"] == "rounded":
                         text, status, pst = "", "unknown", "unknown"
@@ -779,6 +877,9 @@ def build(parsed, targets, rules, aliases, answers):
                              "actual_condition": identity["conditions"].get(symbol) if context_missing else condition,
                              "check": pst, "check_msg": msg, "raw": _fmt_list(vals),
                              "limits": [str(v) if v is not None else None for v in (lo, hi)]}
+            if convert and nums:
+                row_fill[sid]["unit_conversion"] = {"sources": source_units, "target": unit}
+                row_fill[sid]["how"] += "（%s 换算为 %s）" % ("、".join(dict.fromkeys(u for units in source_units for u in units)), unit)
             row_fill[sid]["label_rows"] = [b.get("label_row", b["rows"][0]+1) for b, _, _ in hits]
             if kind == "limits" and text:
                 row_fill[sid].update(value_kind="limits", sign=sign)
@@ -803,6 +904,8 @@ def build(parsed, targets, rules, aliases, answers):
                                           {"label": "已核对，所列要求与本批试验一致", "effect": {name: missing}}]})
     # Keep the scope of a decision when its answer removes the question on the next plan.
     def affected_symbols(key):
+        if key.startswith("td:interpret_if:"):
+            return [key.rsplit(":", 1)[-1]]
         if key.startswith(("td:val:", "td:merge:", "td:interpret:")):
             return [key.split(":", 2)[2]]
         if key.startswith(("td:units:", "td:conditions:")):
@@ -823,13 +926,13 @@ def build(parsed, targets, rules, aliases, answers):
         return list(dict.fromkeys(c[0] for b in hits for tok in re.split(rules["token_separator"], b["base"])
                                   for c in match_token(tok, syms, aliases, rules["delta_prefixes"])))
     for q in questions:
-        q["symbols"] = q.get("parameter_candidates") or affected_symbols(q["key"])
+        q["symbols"] = q.get("symbols") or q.get("parameter_candidates") or affected_symbols(q["key"])
         if q["key"].startswith(("td:units:", "td:conditions:")):
             q["labels_by_symbol"] = {sym: sorted({b["label"] for b, _, _ in assign.get(sym, [])}) for sym in q["symbols"]}
         if q.get("parameter_candidates"):
             q["parameter_units"] = {s: unit_map.get(s, "") for s in q["parameter_candidates"]}
     dependencies = {key: affected_symbols(key) for key in answers}
-    return {"dependencies": dependencies, "fills": fills, "questions": questions, "ignored": ignored, "unmatched": unmatched,
+    return {"dependencies": dependencies, "program_symbols": sorted(program_symbols), "fills": fills, "questions": questions, "ignored": ignored, "unmatched": unmatched,
             "verdict": verdict, "rules": rules, "samples": parsed["samples"], "review": required_review, "condition_gaps": condition_gaps}
 
 

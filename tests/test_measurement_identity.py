@@ -19,6 +19,13 @@ def value(result, row=1, sample="1"):
 
 
 class MeasurementIdentityTests(unittest.TestCase):
+    def test_hyphenated_nominal_label_requires_matching_independent_condition(self):
+        target = [{"sym": "VX", "row": 1, "unit": "V", "hi": "9"}]
+        for condition, expected in (("中间电压", "4"), ("最高电压", ""), ("", "")):
+            rows = [["item", "单位", "测试条件", 1], ["vx-nom", "V", condition, "4"]]
+            with self.subTest(condition=condition):
+                self.assertEqual(value(mapping(rows, target, {"cond_keep": ["Vnorm"]})), expected)
+
     def fixture_plan(self, sample_ids, rows, extra_sheets=()):
         sheet = {"name": "Readings", "rows": rows, "ncols": len(rows[0]), "nrows": len(rows)}
         planner = object.__new__(Planner)
@@ -88,9 +95,23 @@ class MeasurementIdentityTests(unittest.TestCase):
         self.assertEqual(value(res), "4")
         self.assertIn("td:no_suffix", [q["key"] for q in res["questions"]])
 
+    def test_explicit_prefix_conversion_keeps_raw_values_and_skips_flag_codes(self):
+        for raw, src, dst, expected in ((2346, "mV", "V", "2.35"), (2040, "nA", "µA", "2.040")):
+            target = [{"sym": "R", "row": 1, "hi": "10", "unit": dst, "column_type": "measurement"}]
+            result = mapping([["item", "unit", 1], ["R", src, raw]], target)
+            self.assertEqual(value(result), expected)
+            cell = result["fills"][1]["1"]
+            self.assertEqual(cell["raw"], str(raw))
+            self.assertIn(src, cell["how"])
+            self.assertIn(dst, cell["how"])
+            flags = mapping([["item", "unit", 1], ["R", src, 1]], target,
+                            answers={"td:interpret:R": {"kind": "flags", "pass_code": 1}})
+            self.assertEqual(value(flags), "合格")
+            self.assertNotIn("unit_conversion", flags["fills"][1]["1"])
+
     def test_unknown_sample_unit_and_conflicting_unit(self):
         target = [{"sym": "R", "row": 1, "unit": "mV", "hi": "100"}]
-        for unit in ("V", ""):
+        for unit in ("A", ""):
             res = mapping([["item", "unit", 1], ["R", unit, 4]], target)
             self.assertEqual(value(res), "")
         self.assertEqual(value(mapping([["item", "unit", 1], ["R", "mV", 4]], target)), "4")

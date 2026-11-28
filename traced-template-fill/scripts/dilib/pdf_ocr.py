@@ -7,7 +7,8 @@ import os
 import re
 import subprocess
 
-from .child_process import child_environment, tesseract_path
+from .engineering import MEASUREMENT_UNIT
+from .child_process import run_child, tesseract_path
 
 # Tesseract confidence is on a 0–100 scale. This flags words for human review.
 WORD_REVIEW_THRESHOLD = 80
@@ -15,8 +16,6 @@ WORD_REVIEW_THRESHOLD = 80
 
 # The OCR engine scores a whole token. A flagged decimal/sign inherits that
 # token score; we do not claim a per-character confidence.
-_UNITS = re.compile(r"(?:^|[0-9])(?:[fpnumµμkMGT]?(?:V|A|W|F|H|Hz|Ω|Ohm|s|S|m|g|J|Pa|rad|dB|bps|bit/s)"
-                    r"(?:/[fpnumµμkMGT]?(?:V|A|Hz|s|m))?|°[CF]?|℃|[％%])$")
 _DEFAULT_SCAN = {"sparse_area": 0.04, "mixed_area": 0.25, "native_chars": 15, "body_margin": 0.12}
 
 
@@ -47,7 +46,7 @@ def review_groups(block):
         tags = []
         if numeric:
             tags.append("数字")
-        if _UNITS.search(token):
+        if MEASUREMENT_UNIT.search(token):
             tags.append("单位")
         if token in (".", "．") or re.search(r"[.．]\d|\d[.．]", token):
             tags.append("小数点")
@@ -178,9 +177,7 @@ def recognize_image(image, options):
                '-l', options['language'], '--dpi', str(options.get('dpi', 300)),
                '-c', 'tessedit_create_tsv=1']
     try:
-        proc = subprocess.run(command, cwd=options['tessdata'], input=data.getvalue(),
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
-                              env=child_environment(ocr=True), creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        proc = run_child(command, cwd=options['tessdata'], input_bytes=data.getvalue(), timeout=120, ocr=True)
     except subprocess.TimeoutExpired as exc:
         raise ValueError('Tesseract 识别超时') from exc
     if proc.returncode:

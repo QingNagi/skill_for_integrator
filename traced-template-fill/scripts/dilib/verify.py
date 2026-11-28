@@ -136,8 +136,32 @@ def check_value(value, raws, rules, how=''):
 
 
 # ======================================================================= 测试数据
+def _converted_range(md, ref, raw, index, fill, facts, rules, unit_cache):
+    sheet_name, _, start, _, end = ref.groups()
+    key = (id(md), sheet_name)
+    if key not in unit_cache:
+        sheet = next(s for s in md.m["sheets"] if s["name"] == sheet_name)
+        parsed = testdata.parse_sheet(sheet, rules)
+        unit_cache[key] = {row: unit for block in parsed["blocks"]
+                           for row, unit in zip(block["rows"], testdata.reading_units(block))}
+    conv = fill["unit_conversion"]
+    entries = [facts[fid] for fid in fill.get("fact_ids", []) if fid in facts]
+    declared = {item["value"]["units"][fill["symbol"]] for item in entries if isinstance(item.get("value"), dict)
+                and fill["symbol"] in (item["value"].get("units") or {})}
+    fallback = next(iter(declared)) if len(declared) == 1 else None
+    units = [unit_cache[key].get(r) or fallback for r in range(int(start) - 1, int(end or start))]
+    target_units = {item["evidence"].get("unit") for item in entries
+                    if item["type"] == "值类型与极性" and isinstance(item.get("evidence"), dict) and "unit" in item["evidence"]}
+    if (conv["target"] not in target_units or index >= len(conv["sources"]) or units != conv["sources"][index]
+            or len(raw) != len(units) or "pass_code" in fill):
+        return None
+    scales = [testdata.unit_exponent(u, conv["target"]) for u in units]
+    return None if None in scales else [testdata.scaled_reading(v, n) for v, n in zip(raw, scales)]
+
+
 def _testdata(plan, models, rules, res, target=None):
-    grids = {}
+    grids, unit_cache = {}, {}
+    facts = {r["id"]: r for r in plan["report"].get("facts", [])}
     for f in plan['report'].get('fills', []):
         m = re.match(r'^(S\d+):(.+!.+)$', f.get('source') or '')
         if not m:
@@ -169,8 +193,13 @@ def _testdata(plan, models, rules, res, target=None):
             if vals is None:
                 miss.append(part)
             else:
-                raws += vals
                 ref = _REF_RE.fullmatch(part.strip())
+                if f.get("unit_conversion"):
+                    vals = _converted_range(md, ref, vals, i, f, facts, rules, unit_cache)
+                    if vals is None:
+                        miss.append(part + '（单位换算依据不符）')
+                        continue
+                raws += vals
                 if 'source_sample' in f:
                     name, col, row, end_col, _ = ref.groups()
                     header = sheet_values(md, '%s!%s%d' % (name, col, f['header_row']))
@@ -236,7 +265,7 @@ def verify_draft(job, plan, draft=None):
     _fields(plan, models, job.data.get('task', ''), res)
     _orphans(plan, res)
     if draft:
-        _readback(plan, draft, res)
+        _readback(plan, draft, res, job.target_model())
     return res
 
 
@@ -380,7 +409,7 @@ def _orphans(plan, res):
 
 
 # ----------------------------------------------------------------------- 草稿回读
-def _readback(plan, draft, res):
+def _readback(plan, draft, res, template=None):
     '''草稿回读：计划写入的格子，草稿里真的是这个值（写入失败、被后面的操作覆盖都会暴露）。
     计划里有加行或插入章节时块编号会整体移位，无法按编号回读：登记在 notes 里，来源回查照常进行。'''
     kinds = {o['op'] for o in plan['ops']}
@@ -391,6 +420,11 @@ def _readback(plan, draft, res):
     for o in plan['ops']:
         if o['op'] == 'set_cell' and o.get('cell'):
             want[o['cell']] = ''.join(r[0] for r in o.get('runs', []))
+    for item in plan.get('report', {}).get('held_measurements', []):
+        cid = item['target']
+        original = template.get(cid) if template is not None else None
+        if original is not None:
+            want.setdefault(cid, original['text'])
     if not want:
         return
     try:
@@ -401,7 +435,9 @@ def _readback(plan, draft, res):
         return
     res['readback'] = len(want)
     for cid, text in want.items():
-        if norm_text(got.get(cid, '')) != norm_text(text):
+        if cid not in got:
+            _bad(res, cid, '%s 的单元格在草稿中缺失' % cid)
+        elif got[cid].strip() != text.strip():
             _bad(res, cid, '%s 计划写入“%s”，草稿里实际是“%s”' % (cid, short(text, 20), short(got.get(cid, ''), 20)))
 
 

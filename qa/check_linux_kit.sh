@@ -130,6 +130,23 @@ test -s "$test_dir/指定 输出/指定/plan.json"
 test ! -e "$input/整合输出"
 if bash "$entry" unknown-test-command >error.log 2>&1; then exit 1; else test "$?" -eq 2; fi
 
+python3 - "$project" <<'PY'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1]) / '整合输出'
+Path('batch.json').write_text(json.dumps({'jobs': [str(root / n) for n in ('复用1', '复用2')]}))
+PY
+bash "$entry" batch draft batch.json --jobs 2 > parallel-drafts.log
+python3 - <<'PY'
+import json
+from pathlib import Path
+rows = [line.split(' {', 1) for line in Path('parallel-drafts.log').read_text().splitlines()]
+assert [name for name, _ in rows] == ['复用1', '复用2']
+for _, body in rows:
+    result = json.loads('{' + body)
+    assert result['status'] == 'draft_ready' and Path(result['draft']).is_file()
+PY
+
 if command -v soffice >/dev/null || command -v libreoffice >/dev/null || [[ -x /opt/libreoffice/program/soffice ]]; then
     bash "$entry" convert "$input/目标.docx" pdf > convert.log
     pdfs=(整合输出/转换_*/目标.pdf)
@@ -196,7 +213,7 @@ for line in Path(metrics).read_text(encoding='utf-8').splitlines():
     samples.setdefault(name, []).append(float(value))
 report = {
     'arch': arch, 'glibc': platform.libc_ver(), 'kernel': platform.release(),
-    'payload_sha256': digest, 'libreoffice': office, 'clock': 'perf_counter_ns',
+    'payload_sha256': digest, 'libreoffice': office, 'parallel_batch_drafts': 2, 'clock': 'perf_counter_ns',
     'cold_condition': 'new application cache per sample; OS disk cache not flushed',
     'timings_ms': {name: {'samples': values, 'median': statistics.median(values)}
                    for name, values in samples.items()},

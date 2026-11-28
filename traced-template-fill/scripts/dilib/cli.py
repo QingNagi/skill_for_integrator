@@ -25,7 +25,7 @@ from .decisions import answer_binding, protected_question, record_decision, requ
 from .draft_review import check_with_office, pending, run_selfcheck, write_report
 from .input_paths import cmd_find, expand_pattern, join_paths, split_paths
 from .job import Job
-from .workflow import ask_form, plan_result, timed
+from .workflow import ask_form, plan_result, review_excerpts, review_references, timed
 from .manual_ops import record_ops, validate_ops
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -46,9 +46,8 @@ def nxt(*steps):
 
 
 def load_aliases():
-    a = read_json(os.path.join(SKILL_DIR, "config", "rules", "aliases.json"), {}) or {}
-    a = {k: v for k, v in a.items() if not k.startswith("_")}
-    return a
+    from .engineering import symbol_aliases
+    return symbol_aliases(read_json(os.path.join(SKILL_DIR, "config", "rules", "aliases.json"), {}))
 
 
 def load_learned(job):
@@ -68,7 +67,12 @@ def do_plan(job, quiet=False, extra_answers=None):
     rule_sha = evidence.rule_pack(job)["sha256"]
     stale_ans = [k for k, v in answers.items() if isinstance(v, dict)
                  and ((v.get("fp") and v["fp"] != fp) or v.get("rule_sha256", rule_sha) != rule_sha)]
-    answers = {k: v for k, v in answers.items() if k not in stale_ans}
+    answers = {k: v for k, v in answers.items() if k not in stale_ans
+               and not (isinstance(v, dict) and v.get("effect") == {"await_evidence": True})}
+    manifest = answers.pop("_program_manifest", None)
+    # Recheck the labels currently contributing to a result; previous selections may have changed.
+    submitted = {k: v for k, v in answers.items() if isinstance(v, dict) and v.get("from_manifest")}
+    answers = {k: v for k, v in answers.items() if k not in submitted}
     merged = dict(answers)
     merged.update(extra_answers or {})
     learned = load_learned(job)
@@ -77,13 +81,27 @@ def do_plan(job, quiet=False, extra_answers=None):
                        rules_override=job.data.get("rules", {})).run()
 
     plan = plan_with(merged)
-    reused = evidence.reusable_answers(job, plan["questions"])
-    if reused:
-        confirmed = [q for q in plan["questions"] if q["key"] in reused]
-        merged = {**reused, **merged}
+    reused, confirmed = {}, {}
+    while True:
+        pending_facts = [q for q in plan["questions"] if q["key"] not in merged]
+        additions = evidence.reusable_answers(job, pending_facts)
+        if manifest:
+            local = evidence.manifest_answers(manifest, pending_facts)
+            for key, item in local.items():
+                if submitted.get(key, {}).get("effect") == item["effect"]:
+                    local[key] = submitted[key]
+            additions.update(local)
+        # Resolve mappings before units and conditions, since they determine the set of source labels.
+        mappings = {k: v for k, v in additions.items() if not k.startswith(("td:units:", "td:conditions:"))}
+        additions = {k: v for k, v in (mappings or additions).items() if k not in merged}
+        if not additions:
+            break
+        confirmed.update((q["key"], q) for q in pending_facts if q["key"] in additions)
+        reused.update(additions)
+        merged.update(additions)
         plan = plan_with(merged)
-        current_keys = {q["key"] for q in plan["questions"]}
-        plan["questions"].extend(q for q in confirmed if q["key"] not in current_keys)
+    current_keys = {q["key"] for q in plan["questions"]}
+    plan["questions"].extend(q for key, q in confirmed.items() if key not in current_keys)
     # 问题编号在任务内保持稳定：已回答的问题仍保留原编号，新问题顺延编号
     prev = job.read("questions.json", []) or []
     cur = {q["key"]: q for q in plan["questions"]}
@@ -124,7 +142,7 @@ def do_plan(job, quiet=False, extra_answers=None):
     qs.sort(key=lambda q: -q.get("impact_count", 0))
     plan["questions"] = qs
     plan["stale_answers"] = stale_ans
-    evidence.save_plan_facts(job, plan, {**reused, **answers})
+    evidence.save_plan_facts(job, plan, {**reused, **answers}, manifest)
     job.write("plan.json", plan)
     job.write("questions.json", qs)
     write_questions_md(job, qs)
@@ -289,7 +307,43 @@ def _choice_indices(q, val):
     return indices
 
 
-def cmd_answer(a):
+def cmd_confirm(a):
+    if not sys.stdin.isatty():
+        raise DIError("confirm 需要审核人本人在交互式终端输入选项。")
+    job = Job(a.job)
+    questions = do_plan(job, quiet=True)["questions"]
+    answers = job.read("answers.json", {}) or {}
+    items = []
+    for q in questions:
+        if not protected_question(q["key"]):
+            continue
+        out("%s %s" % (q["id"], q["question"]))
+        current = answers.get(q["key"], {})
+        if current and current.get("fp") == q["input_fp"]:
+            out("当前决定：%s；%s" % (current["label"], json.dumps(current["effect"], ensure_ascii=False)))
+        for i, opt in enumerate(q["options"], 1):
+            out("  %d. %s" % (i, opt["label"]))
+        try:
+            value = input("请输入本人核对后的选项序号（回车跳过）：").strip()
+        except (EOFError, KeyboardInterrupt):
+            raise DIError("确认已取消，本轮没有登记。") from None
+        if value:
+            if not value.isdecimal() or not 1 <= int(value) <= len(q["options"]):
+                raise DIError("无效选项，本轮没有登记。")
+            items.append(q["id"] + "=" + value)
+    if not items:
+        out("本轮没有登记受保护决定。")
+        return
+    if os.name == "nt":
+        author = os.getlogin()
+    else:
+        import pwd
+        author = pwd.getpwuid(os.geteuid()).pw_name
+    submission = argparse.Namespace(job=job.dir, items=items, remember=False, reviewer=author, user_quote=" ".join(items))
+    return cmd_answer(submission, confirmation=(questions, answers))
+
+
+def cmd_answer(a, *, confirmation=None):
     job = Job(a.job)
     quote = getattr(a, "user_quote", None)
     if a.remember:
@@ -303,6 +357,8 @@ def cmd_answer(a):
         raise DIError('问题依据的输入文件已变化或属于旧版任务。已重新规划，请查看当前 questions 后再回答。')
     byid = {q["id"]: q for q in qs}
     answers = job.read("answers.json", {}) or {}
+    if confirmation is not None and confirmation != (qs, answers):
+        raise DIError("交互期间问题或已有决定发生变化，请重新运行 confirm。")
     remembered = {}
     items = a.items
     attachment = None
@@ -313,7 +369,13 @@ def cmd_answer(a):
         if items:
             raise DIError("--from-sheet 与命令行回答不能同时使用。")
         items, sheet_metadata = evidence.sheet_submission(job, qs, a.from_sheet)
-    if not items:
+    if attachment:
+        old = answers.get("_program_manifest", {})
+        if old.get("sha256") != attachment["sha256"]:
+            answers = {key: rec for key, rec in answers.items() if not (isinstance(rec, dict) and rec.get("from_manifest"))}
+        answers["_program_manifest"] = dict(fp=fp, rule_sha256=rule_sha,
+                                            **{k: v for k, v in attachment.items() if k != "effects"})
+    if not items and not attachment:
         raise DIError("请提供至少一个有效回答。")
     selected_ids = set()
     for item in items:
@@ -357,9 +419,22 @@ def cmd_answer(a):
             rec["evidence"] = sheet_metadata[qid]
         if attachment and qid in attachment["effects"]:
             rec["effect"] = attachment["effects"][qid]
-            rec["evidence"] = {k: v for k, v in attachment.items() if k != "effects"}
+            rec["evidence"] = {"file": attachment["file"], "sha256": attachment["sha256"]}
+            rec["from_manifest"] = True
+        current = answers.get(q["key"], {})
+        if (confirmation is not None and current.get("fp") == fp and current.get("rule_sha256", rule_sha) == rule_sha
+                and current.get("choice") == idx and current.get("label") == rec["label"] and current.get("evidence")):
+            rec.update(effect=current["effect"], evidence=current["evidence"])
+        if confirmation is None and not rec.get("evidence"):
+            from .decisions import needs_reviewer_reply
+            if needs_reviewer_reply(q["key"], rec["effect"], job.data.get("task"), quote,
+                                    requires_program=q.get("requires_program", False)):
+                reason = "%s 需审核人就当前问题补充核对结果；请展示待答题并等待回复，本次提交尚未登记。" % qid
+                out(reason)
+                return dict(plan_result(job, {"questions": qs}), reason=reason)
         answers[q["key"]] = rec
         if quote:
+            rec["source"] = "confirm_cli" if confirmation is not None else "agent_relay"
             rec["user_quote"] = quote
             rec["receipt_version"] = 2
             decisions.append({"id": qid, "key": q["key"], "question": q["question"],
@@ -368,7 +443,9 @@ def cmd_answer(a):
         if a.remember and q["key"].startswith("td:") and isinstance(rec["effect"], dict) and not rec["effect"].get("free"):
             remembered[q["key"]] = {"effect": rec["effect"], "label": rec["label"]}
     if decisions:
-        record_decision(job, "answer --remember" if a.remember else "answer", quote, answers=decisions)
+        action = "confirm" if confirmation is not None else ("answer --remember" if a.remember else "answer")
+        record_decision(job, action, quote, source="confirm_cli" if confirmation is not None else "agent_relay",
+                        author=getattr(a, "reviewer", None), answers=decisions)
     job.write("answers.json", answers)
     if remembered:
         out("已保存项目规则：%s。后续任务会把已有对应作为推荐项。" % preferences.remember(job, remembered))
@@ -472,7 +549,7 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
         return plan_result(job, plan)
     if stop_if_unmapped and all(op["op"] == "format_heading" for op in plan["ops"]):
         out("尚未找到可填写的目标与来源。请指定模板位置和对应的来源章节或字段，然后在本任务中继续。")
-        return {"status": "blocked", "job": job.dir, "reason": "缺少可填写的目标与来源对应"}
+        return {"status": "blocked", "job": job.dir, "reason": "缺少可填写的目标与来源对应", "next_action": "resolve_blockers"}
     if pend:
         extra = {}
         for _ in range(4):      # 按推荐回答后可能出现新问题，迭代至稳定
@@ -521,9 +598,13 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
         unv_src.extend(vres["items"])
         unv_src.extend(verify.full_read_items(verify.full_read_pending(job, plan["report"])))
         plan["report"]["verify_summary"] = verify.summary(vres)
+        delivery_check = {"source_checks": vres["checked"], "source_skipped": len(vres["skipped"]),
+                          "readback_cells": vres.get("readback", 0), "discrepancies": len(vres["items"]),
+                          "notes": vres["notes"]}
     except Exception as e:      # 校验自己出错不能让 draft 崩溃，但要如实登记“没跑完”，不能当作通过
         plan["report"].setdefault("unverified_sources", []).append({"kind": "unread", "key": "verify:crash", "name": "数字回溯校验", "detail": "数字回溯校验没跑完（%s: %s），填入的数值没有回源核对" % (type(e).__name__, e)})
         plan["report"]["verify_summary"] = "数字回溯校验没跑完，不能当作通过"
+        delivery_check = {"error": plan["report"]["verify_summary"]}
     # 登记“本批未核”的项（原有值/数据来源未核对/未读取内容）：定稿时逐项检查，没处理的会拦截
     unv = [dict(x) for x in plan["report"].get("stale", [])] + [dict(x) for x in plan["report"].get("unverified_sources", [])]
     # 按推荐默认处理的问题也登记：用户没有正式回答之前，定稿会拦截（默认推荐不等于已确认）
@@ -565,8 +646,9 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
         out("    %s ← %s：%s" % (fill.get("target", ""), fill.get("source", ""), short(str(fill.get("value", "")), 64)))
     if pend:
         out("  [注意] %d 个问题按推荐默认处理，已在批注中标“⚠”，请审核时确认" % len(pend))
-    if unv:
-        out("  [未核] %d 项需要确认（原有值本批未核 / 数据来源未核对 / 有未读取内容），已在批注标“⚠”；没处理之前 final 会拦截" % len(unv))
+    unresolved_count = sum(not item.get("spec_question") for item in unv)
+    if unresolved_count:
+        out("  [未核] %d 项需要确认（原有值本批未核 / 数据来源未核对 / 有未读取内容），已在批注标“⚠”；没处理之前 final 会拦截" % unresolved_count)
     for wmsg in (report["warnings"] + warns)[:10]:
         out("  [警告] " + wmsg)
     if check:
@@ -582,14 +664,19 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
 
     result = {"status": "draft_ready", "job": job.dir, "draft": draft, "report": job.p("审核报告.md"),
             "snapshots": os.path.join(os.path.dirname(draft), "源文件快照"),
+            "template": job.data["target"]["path"], "held_measurements": len(report.get("held_measurements", [])),
             "stale": len(report.get("stale", [])), "unread": unread,
-            "fills": len(report["fills"]), "unfilled": len(report["unfilled"]), "unverified": len(unv),
+            "fills": len(report["fills"]), "unfilled": len(report["unfilled"]), "unverified": unresolved_count,
             "structure": "incomplete" if checked is None else "failed" if checked.has_errors() else "passed",
+            "verification": delivery_check,
             "warnings": list(dict.fromkeys(report["warnings"] + warns))}
     if not result["warnings"] and not any((unread, unv, result["stale"], result["unfilled"])) and result["structure"] == "passed":
         result["next_action"] = "deliver_draft"
+    else:
+        refs = review_references(report)
+        result.update(next_action="review_then_deliver", review_refs=refs, review_excerpts=review_excerpts(job, refs))
     if result["structure"] != "passed":
-        result.update(status="blocked", reason="草稿已保存，结构自检失败或未完成，请核对审核报告。")
+        result.update(status="blocked", next_action="resolve_blockers", reason="草稿已保存，结构自检失败或未完成，请核对审核报告。")
     return result
 
 
@@ -643,7 +730,7 @@ def cmd_final(a):
     res = finalize(job, draft, [f for f in (a.format or "").split(",") if f] or None,
                    reviewer_comments=a.reviewer_comments, strip_template_comments=a.strip_template_comments,
                    accept_unverified=getattr(a, "accept_unverified", False), user_quote=getattr(a, "user_quote", None),
-                   template_comments=a.template_comments)
+                   template_comments=a.template_comments, require_signed=getattr(a, "require_signed", False))
     out("终稿已生成：")
     for f in res["files"]:
         out("  " + f)
@@ -660,8 +747,10 @@ def cmd_final(a):
     for e in res["errors"]:
         out("  [转换失败] " + e)
     out("草稿已保留：%s" % draft)
+    out("终稿审核报告：%s" % res["report"])
     return {"status": "partial" if res["errors"] else "final_ready", "job": job.dir, "files": res["files"],
-            "errors": res["errors"], "warnings": res.get("warnings", []), "blockers": res.get("blockers", [])}
+            "next_action": "review_export_errors" if res["errors"] else "deliver_final",
+            "errors": res["errors"], "warnings": res.get("warnings", []), "blockers": res.get("blockers", []), "report": res["report"]}
 
 
 def cmd_status(a):
@@ -733,7 +822,8 @@ def cmd_batch(a):
             srcs = list(common)
             if a.pair:
                 srcs += expand_pattern(a.pair.replace("{stem}", stem))
-            rows.append({"目标": t, "源文件": join_paths(srcs), "任务": a.task or "", "格式": a.format or "", "排版": ""})
+            rows.append({"目标": os.path.abspath(t), "源文件": join_paths([os.path.abspath(s) for s in srcs]),
+                         "任务": a.task or "", "格式": a.format or "", "排版": ""})
         path = a.manifest or "批量清单.csv"
         with open(path, "w", encoding="utf-8-sig", newline="") as f:
             wr = csv.DictWriter(f, fieldnames=["目标", "源文件", "任务", "格式", "排版"])
@@ -741,123 +831,44 @@ def cmd_batch(a):
             wr.writerows(rows)
         out("已生成批量清单（可用 Excel 编辑）：%s，共 %d 个目标" % (path, len(rows)))
         nxt("%s batch new \"%s\"" % (PY, path))
-        return
-    if a.action == "new":
-        with open(a.manifest, encoding="utf-8-sig") as f:
-            rows = list(csv.DictReader(f)) if a.manifest.lower().endswith(".csv") else json.load(f)
-        out_root = os.path.abspath(a.out or "整合输出")
-        jobs = []
-        for r in rows:
-            tgt = r.get("目标") or r.get("target")
-            srcs = split_paths(r.get("源文件") or r.get("sources"))
-            job = Job.create(tgt, srcs, task=r.get("任务") or r.get("task") or a.task or "", out_root=out_root,
-                             profile=(r.get("排版") or r.get("profile") or None),
-                             test_rules=r.get("测试规则") or r.get("test_rules") or a.test_rules,
-                             formats=[x for x in (r.get("格式") or r.get("formats") or "").split(",") if x])
-            jobs.append(job.dir)
-            out("  建立：%s" % job.dir)
-        bpath = os.path.join(out_root, "批量_%s.json" % datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
-        write_json(bpath, {"jobs": jobs})
-        out("批量任务文件：%s" % bpath)
-        nxt("%s batch plan \"%s\"" % (PY, bpath))
-        return
+        return {"status": "created", "manifest": os.path.abspath(path), "targets": len(rows), "next_action": "batch_run"}
+    if a.action in ("new", "run", "plan", "answer") or (a.action == "draft" and a.json):
+        from .batch_workflow import run
+        if a.action == "draft" and a.json and (a.defaults or workers != 1):
+            raise DIError("批量 JSON 草稿逐项核对；并行或默认草稿请使用 batch draft 的文本入口。")
+        return run(a)
+    if a.json:
+        raise DIError("--json 适用于 batch new/run/plan/answer/draft。")
     b = read_json(a.manifest)
     jobs = [Job(d) for d in b["jobs"]]
-    if a.action == "plan":
-        merged = {}
-        for job in jobs:
-            plan = do_plan(job, quiet=True)
-            for q in pending(plan["questions"]):
-                options = json.dumps(q['options'], sort_keys=True, ensure_ascii=False)
-                scope = q['input_fp'] if protected_question(q['key']) else None
-                k = (q['key'], q['question'], options, bool(q.get('multi')), q.get('recommended', 0), scope)
-                group = merged.setdefault(k, {'q': q, 'jobs': [], 'input_fps': {}, 'rule_shas': {}})
-                group['jobs'].append((job.dir, q['id']))
-                group['input_fps'][job.dir] = q['input_fp']
-                group['rule_shas'][job.dir] = q.get('rule_sha256')
-            out("  %s：%d 个操作，%d 个待答" % (os.path.basename(job.dir), len(plan["ops"]), len(pending(plan["questions"]))))
-        items = []
-        for i, (k, v) in enumerate(merged.items()):
-            items.append({"id": "B%d" % (i + 1), "key": k[0], "question": v["q"]["question"], "topic": v["q"]["topic"],
-                          "options": [o["label"] for o in v["q"]["options"]], "recommended": v["q"].get("recommended", 0),
-                          "option_details": v['q']['options'], "input_fps": v['input_fps'], "rule_shas": v["rule_shas"], "jobs": v["jobs"]})
-        b["questions"] = items
-        write_json(a.manifest, b)
-        if items:
-            out("\n合并后待确认问题 %d 个（相同问题只问一次）：" % len(items))
-            for it in items:
-                out("  %s [%s] %s（涉及%d个任务）" % (it["id"], it["topic"], short(it["question"], 120), len(it["jobs"])))
-                for i, o in enumerate(it["options"]):
-                    out("      %d) %s%s" % (i + 1, short(o, 60), "  ← 推荐" if i == it["recommended"] else ""))
-            nxt("%s batch answer \"%s\" B1=1 B2=2 ..." % (PY, a.manifest))
-        else:
-            nxt("%s batch draft \"%s\"" % (PY, a.manifest))
-        return
-    if a.action == "answer":
-        items = {it["id"]: it for it in b.get("questions", [])}
-        assignments = []
-        for kv in a.items:
-            bid, sep, val = kv.partition("=")
-            it = items.get(bid.strip().upper())
-            if not sep or not it:
-                raise DIError("未知批量问题或答案格式有误：%s" % kv)
-            if protected_question(it["key"]):
-                require_quote(a.user_quote, "%s %s" % (bid, it["topic"]))
-            assignments.append((it, val))
-        grouped = {}
-        for it, val in assignments:
-            for jd, _ in it['jobs']:
-                grouped.setdefault(jd, []).append((it, val))
-        commands = []
-        for jd, selections in grouped.items():
-            job = Job(jd)
-            fp = job.fingerprint(files_only=True)
-            by_key = {q['key']: q for q in job.read('questions.json', [])}
-            choices = []
-            rule_sha = evidence.rule_pack(job)['sha256']
-            for it, val in selections:
-                q = by_key.get(it['key'])
-                if (not q or q.get('input_fp') != fp or it.get('input_fps', {}).get(jd) != fp
-                        or q.get('rule_sha256', rule_sha) != rule_sha or it.get('rule_shas', {}).get(jd, rule_sha) != rule_sha
-                        or q['question'] != it['question'] or [o['label'] for o in q['options']] != it['options']
-                        or it.get('option_details') != q['options']):
-                    raise DIError('批量问题的来源或选项已变化。请重新运行 batch plan 并核对选项：%s' % jd)
-                _choice_indices(q, val.strip().strip('"').strip('“”'))
-                choices.append('%s=%s' % (q['id'], val))
-            commands.append(argparse.Namespace(job=jd, items=choices, remember=False, user_quote=a.user_quote))
-        with open(os.devnull, 'w', encoding='utf-8') as sink, contextlib.redirect_stdout(sink):
-            for command in commands:
-                cmd_answer(command)
-        for it, _ in assignments:
-            out("%s → 已应用到 %d 个任务" % (it["id"], len(it["jobs"])))
-        return
     if a.action == "draft" and workers > 1:
-        from concurrent.futures import ThreadPoolExecutor
-        from subprocess import DEVNULL, TimeoutExpired, run
-        from .child_process import child_environment
+        from subprocess import TimeoutExpired
+        from .child_process import run_child
+        from batch_pool import JOB_TIMEOUT
         paths = [os.path.normcase(os.path.realpath(job.dir)) for job in jobs]
         if len(set(paths)) != len(paths):
             raise DIError("批量清单有重复任务目录，无法并行生成草稿。")
-
-        def run_one(job):
-            command = [sys.executable, "-B", "-X", "utf8", os.path.join(SKILL_DIR, "scripts", "di.py"),
-                       "draft", job.dir, "--json"]
-            if a.defaults:
-                command.extend(["--defaults", "--user-quote", a.user_quote])
-            try:
-                proc = run(command, stdin=DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
-                           timeout=7200, env=child_environment(worker=True))
-            except TimeoutExpired:
-                return job.dir, 2, "此任务生成草稿超过两小时，请单独运行并检查输入。"
-            except OSError as exc:
-                return job.dir, 2, "无法启动草稿任务：%s" % exc
-            return job.dir, proc.returncode, proc.stdout.strip() or proc.stderr.strip()
-
-        with ThreadPoolExecutor(max_workers=min(workers, len(jobs) or 1)) as pool:
-            results = list(pool.map(run_one, jobs))
-        for directory, _, result in results:
-            out(os.path.basename(directory), result)
-        codes = {rc for _, rc, _ in results}
+        if not jobs:
+            return 0
+        request = {"directories": [job.dir for job in jobs], "workers": workers,
+                   "defaults": a.defaults, "quote": a.user_quote}
+        command = [sys.executable, "-B", "-X", "utf8", os.path.join(SKILL_DIR, "scripts", "batch_pool.py")]
+        try:
+            proc = run_child(command, timeout=(JOB_TIMEOUT + 10) * len(jobs) + 60, worker=True,
+                             input_bytes=json.dumps(request, ensure_ascii=False).encode("utf-8"))
+        except (OSError, TimeoutExpired) as exc:
+            raise DIError("批量草稿调度失败：%s" % exc) from exc
+        if proc.returncode:
+            raise DIError("批量草稿调度失败：%s" % proc.stderr.decode("utf-8", "replace").strip())
+        try:
+            results = json.loads(proc.stdout)
+        except (UnicodeError, ValueError) as exc:
+            raise DIError("没有收到完整的批量草稿结果。") from exc
+        if len(results) != len(jobs):
+            raise DIError("批量草稿结果数与清单不一致。")
+        for job, (_, result) in zip(jobs, results):
+            out(os.path.basename(job.dir), result)
+        codes = {rc for rc, _ in results}
         if codes - {0, 3, 4}:
             return 2
         return 4 if 4 in codes else 3 if 3 in codes else 0
@@ -869,7 +880,8 @@ def cmd_batch(a):
                 cmd_draft(argparse.Namespace(job=job.dir, defaults=a.defaults, check=False, user_quote=a.user_quote))
             elif a.action == "final":
                 cmd_final(argparse.Namespace(job=job.dir, draft=None, format=a.format, reviewer_comments=a.reviewer_comments,
-                                             strip_template_comments=False, template_comments=a.template_comments))
+                                             strip_template_comments=False, template_comments=a.template_comments,
+                                             require_signed=a.require_signed))
         except DIError as e:
             out("  [失败] %s" % e)
             failed = True
@@ -1006,8 +1018,13 @@ def main(argv=None):
     s.add_argument("job")
     s.set_defaults(fn=cmd_review)
 
+    s = sp.add_parser("confirm", help="由审核人在交互终端逐项确认受保护决定")
+    s.add_argument("job")
+    s.set_defaults(fn=cmd_confirm)
+
     s = sp.add_parser("final", help="审核确认后生成终稿")
     s.add_argument("job")
+    s.add_argument("--require-signed", action="store_true", help="受保护决定必须有 Word 署名回复或终端交互确认")
     s.add_argument("--draft", help="指定草稿文件（默认最新版本）")
     s.add_argument("--format", help="额外输出格式：doc,pdf,md")
     s.add_argument("--reviewer-comments", choices=["ask", "drop", "keep"], default="ask")
@@ -1034,7 +1051,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_convert)
 
     s = sp.add_parser("batch", help="批量：init/new/plan/answer/draft/final")
-    s.add_argument("action", choices=["init", "new", "plan", "answer", "draft", "final"])
+    s.add_argument("action", choices=["init", "new", "run", "plan", "answer", "draft", "final"])
     s.add_argument("manifest", nargs="?", help="清单csv/json（init/new）或批量任务json（其余）")
     s.add_argument("items", nargs="*")
     s.add_argument("--manifest", dest="manifest_opt", help="同位置参数 manifest")
@@ -1050,10 +1067,14 @@ def main(argv=None):
     s.add_argument("--template-comments", choices=["keep", "drop"], default="ask", help="批量定稿时模板原有批注的去留")
     s.add_argument("--reviewer-comments", choices=["ask", "drop", "keep"], default="ask")
     s.add_argument("--jobs", type=int, default=1, help="batch draft 同时处理的独立任务数，默认 1")
+    s.add_argument("--require-signed", action="store_true", help="批量定稿要求受保护决定有署名确认")
+    s.add_argument("--draft", action="store_true", help="为本批已答齐的项目生成草稿")
+    s.add_argument("--evidence", help="批量回答的共同程序清单，或 J1、J2 到独立证据路径的 JSON 目录")
     s.set_defaults(fn=cmd_batch)
 
-    for command in ("run", "answer", "draft", "final"):
-        sp.choices[command].add_argument("--json", action="store_true", help="输出单个 JSON；3=待答，4=被拦截，2=错误")
+    for command in ("run", "answer", "draft", "final", "batch"):
+        sp.choices[command].add_argument("--json", action="store_true", help="输出单个 JSON；待答、拦截按 status 区分")
+        sp.choices[command].add_argument("--strict-exit", action="store_true", help="配合 --json，待答返回 3、拦截返回 4")
     sp.choices["answer"].add_argument("--draft", action="store_true", help="用本轮规划生成草稿；仍有问题时返回选项")
     a = p.parse_args(argv)
     if not getattr(a, "fn", None):
@@ -1065,17 +1086,17 @@ def main(argv=None):
             with open(os.devnull, "w", encoding="utf-8") as sink, contextlib.redirect_stdout(sink):
                 result = a.fn(a)
             out(json.dumps(result, ensure_ascii=False))
-            return {"needs_answers": 3, "blocked": 4, "partial": 2}.get(result["status"], 0)
+            return {"needs_answers": 3 if a.strict_exit else 0, "blocked": 4 if a.strict_exit else 0, "partial": 2}.get(result["status"], 0)
         rc = a.fn(a)      # doctor --selfcheck 等命令用返回值表示结果
         return rc if isinstance(rc, int) else 0
     except DIError as e:
         if machine:
             from .common import ReviewBlocked
             blocked = isinstance(e, ReviewBlocked)
-            out(json.dumps({"status": "blocked" if blocked else "error", "reason": str(e)}, ensure_ascii=False))
-            return 4 if blocked else 2
+            out(json.dumps({"status": "blocked" if blocked else "error", "next_action": "resolve_blockers" if blocked else "correct_input", "reason": str(e)}, ensure_ascii=False))
+            return (4 if a.strict_exit else 0) if blocked else 2
         out("错误：%s" % e)
         return 2
     except OSError as e:
-        out(json.dumps({"status": "error", "reason": str(e)}, ensure_ascii=False) if machine else "文件访问失败：%s" % e)
+        out(json.dumps({"status": "error", "reason": str(e), "next_action": "check_files"}, ensure_ascii=False) if machine else "文件访问失败：%s" % e)
         return 2

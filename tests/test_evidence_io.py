@@ -33,7 +33,7 @@ class EvidenceIO(unittest.TestCase):
         self.assertEqual(meta["effects"]["Q1"], {"map": ["A", "B"]})
         self.assertEqual(len(meta["sha256"]), 64)
         self.assertEqual(len(items), 1)
-        for old, new in [("A,mV", "A,V"), ("A_B,1,100", "A_B,2,100"), ("S1:Data", "S2:Data")]:
+        for old, new in [("A,mV", "A,mA"), ("A_B,1,100", "A_B,2,100"), ("S1:Data", "S2:Data")]:
             path.write_text(rows.replace(old, new), encoding="utf-8")
             with self.assertRaises(DIError):
                 evidence.program_answers([self.q], ["Q1"], path)

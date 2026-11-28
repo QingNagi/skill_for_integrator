@@ -32,10 +32,10 @@ def run(entry, inputs, outputs):
             response = json.loads(cmd.stdout)
             if cmd.returncode == 0 and response["status"] == "draft_ready":
                 break
-            if cmd.returncode != 3 or response["status"] != "needs_answers":
+            if cmd.returncode != 0 or response["status"] != "needs_answers":
                 raise ValueError((folder.name, cmd.returncode, response))
             args = ["answer", job]
-            for q in response["questions"]:
+            for q in response["all_questions"]:
                 choice = DECISIONS[q["header"]]
                 qid = q["question"].split()[0]
                 if not any(o["description"] == "选项%d" % choice for o in q["options"]):

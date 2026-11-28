@@ -63,9 +63,9 @@ def mappings(skill_dir, job):
 
 
 @contextmanager
-def locked_preferences(folder):
+def locked_preferences(folder, lock_name="learned.lock"):
     folder.mkdir(parents=True, exist_ok=True)
-    with (folder / "learned.lock").open("a+b") as lock:
+    with (folder / lock_name).open("a+b") as lock:
         if os.name == "nt":
             import msvcrt
             # Windows byte-range locks can extend beyond end-of-file.

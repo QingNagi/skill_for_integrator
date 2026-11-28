@@ -16,11 +16,15 @@ def document_info(path):
     with ZipFile(path) as doc:
         body = ET.fromstring(doc.read("word/document.xml"))
         comments = ET.fromstring(doc.read("word/comments.xml")) if "word/comments.xml" in doc.namelist() else []
-        app = ET.fromstring(doc.read("docProps/app.xml"))
+        app = ET.fromstring(doc.read("docProps/app.xml")) if "docProps/app.xml" in doc.namelist() else ET.Element("Properties")
+        props = ET.fromstring(doc.read("docProps/custom.xml")) if "docProps/custom.xml" in doc.namelist() else []
+        generated = next(("".join(item.itertext()) for item in props if item.get("name") == "TTF-Generated"), None)
     return {
+        "generated": generated,
         "producer": app.findtext("{*}Application", ""),
         "body": "".join(p.text or "" for p in body.iter(ns + "t")),
-        "review_notes": [("".join(c.itertext())).strip() for c in comments],
+        "review_notes": ["".join(t.text or "" for t in c.iter(ns + "t")).strip() for c in comments],
+        "review_authors": [c.get(ns + "author", "") for c in comments],
     }
 
 
@@ -28,6 +32,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--entry", required=True, type=Path, help="Path to run.cmd or scripts/di.py")
     parser.add_argument("--backend", required=True, choices=["word", "libreoffice"])
+    parser.add_argument("--native-edits", action="store_true", help="Use the actual editor to save a body edit and QA annotation")
     parser.add_argument("--soffice", type=Path, help="Isolated LibreOffice program/soffice.exe")
     parser.add_argument("--output", type=Path, required=True, help="New directory for synthetic evidence")
     args = parser.parse_args()
@@ -67,9 +72,24 @@ def main():
     invoke("draft", "run", "--draft", "-t", target, "-s", source, "--task", "按批注摘录项目背景", "--name", "验收")
     job = target_dir / "整合输出" / "验收"
     draft, = (job / "草稿").glob("*.docx")
+    saved_marker = None
+    if args.native_edits:
+        helpers = Path(__file__).resolve().parent
+        editor = ([os.path.join(os.environ["SystemRoot"], "System32/WindowsPowerShell/v1.0/powershell.exe"),
+                   "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(helpers / "edit_word_review.ps1")]
+                  if args.backend == "word" else [str(args.soffice.with_name("python.exe")), str(helpers / "edit_lo_review.py")])
+        subprocess.run(editor + [str(draft)], env=env, check=True, timeout=120)
+        saved = document_info(draft)
+        saved_marker = saved["generated"]
+        assert "QA-EDIT-8642" in saved["body"] and any("QA reviewer annotation" in note for note in saved["review_notes"])
+        assert "QA Editor" in saved["review_authors"]
     invoke("review", "review", job)
-    invoke("final", "final", job, "--template-comments", "keep")
+    invoke("final", "final", job, "--template-comments", "keep", "--reviewer-comments", "keep")
     final, = (job / "终稿").glob("*.docx")
+    if args.native_edits:
+        saved = document_info(final)
+        assert "QA-EDIT-8642" in saved["body"] and any("QA reviewer annotation" in note for note in saved["review_notes"])
+        assert "QA Editor" in saved["review_authors"]
     # Exercise both real readers/writers in an output path whose name contains non-ASCII characters.
     invalid_temp = target_dir / "模拟不可用的临时路径"
     invalid_temp.write_text("not a directory", encoding="ascii")
@@ -90,7 +110,9 @@ def main():
     assert originals == [hashlib.sha256(p.read_bytes()).hexdigest() for p in (target, source)]
     report = {"backend":args.backend, "docx_producer":info["producer"], "pdf_producer":producer,
               "review_notes_after_doc_roundtrip":len(info["review_notes"]), "pdf_pages":len(pdfdoc.pages),
-              "originals_unchanged":True, "seconds":steps}
+              "originals_unchanged":True, "native_edit_and_annotation_retained":args.native_edits,
+              "generated_property_after_editor_save": saved_marker, "generated_property_after_doc_roundtrip": info["generated"],
+              "seconds":steps}
     (target_dir / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))
 

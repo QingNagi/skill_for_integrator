@@ -22,7 +22,7 @@ import re
 import zipfile
 
 from . import __version__
-from .common import DIError, cache_hasher, ensure_dir, file_sha1, read_json, safe_name, write_json
+from .common import DIError, ReviewBlocked, TOOL_AUTHOR, cache_hasher, ensure_dir, file_sha1, read_json, safe_name, write_json
 from .content import Model, load_model
 
 DOC_TYPES = {".docx", ".doc", ".docm", ".wps", ".rtf", ".odt", ".xlsx", ".xlsm", ".xls", ".et", ".csv", ".tsv", ".md",
@@ -119,7 +119,13 @@ class Job:
                     raise DIError("没有源别名 %s（可用：%s）" % (alias, ", ".join(s["alias"] for s in self.data["sources"])))
                 p = src["path"]
             try:
-                self._models[alias] = Model(load_model(p, self.cache), alias)
+                model = load_model(p, self.cache)
+                if model.get("generated"):
+                    if alias != "T":
+                        raise ReviewBlocked("%s 是本工具生成的文档，不能作为来源。请提供原始规范或原始记录。" % p)
+                    model["comments"] = [c for c in model["comments"] if c["author"] != TOOL_AUTHOR]
+                    model.setdefault("read_warnings", []).append("模板为本工具已生成的文档；重填沿用正文并移除旧工具批注。")
+                self._models[alias] = Model(model, alias)
             except zipfile.BadZipFile as exc:
                 raise DIError("无法读取文件 %s：压缩结构已损坏或文件扩展名与内容不符" % p) from exc
         return self._models[alias]
