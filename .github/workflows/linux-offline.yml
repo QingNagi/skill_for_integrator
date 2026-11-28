@@ -38,7 +38,11 @@ jobs:
         shell: bash
         run: |
           python -B traced-template-fill/scripts/di.py --help
-          python -m pip install --only-binary=:all: 'pdfplumber==0.11.11' 'pypdf==6.21.4' Pillow pypdfium2
+          if [[ "${{ matrix.python }}" == "3.10" ]]; then
+            python -m pip install --only-binary=:all: 'pypdf==6.21.4' 'Pillow==12.3.0' 'pypdfium2==5.15.2' 'pdfplumber==0.11.10'
+          else
+            python -m pip install --only-binary=:all: 'pdfplumber==0.11.11' 'pypdf==6.21.4' 'Pillow==13.0.0' 'pypdfium2==5.15.2'
+          fi
           python -B qa/run_tests.py | tee "$RUNNER_TEMP/source-tests.log"
       - uses: actions/upload-artifact@v4
         if: always()

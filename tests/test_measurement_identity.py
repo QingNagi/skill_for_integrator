@@ -1,5 +1,4 @@
 import unittest
-from types import SimpleNamespace
 
 from test_selfcheck import make_docx
 from dilib import testdata, verify
@@ -33,7 +32,8 @@ class MeasurementIdentityTests(unittest.TestCase):
         planner.n, planner.aliases, planner.rules, planner.row_shift = 0, {}, {"multi": "range"}, {}
         planner.report = {"fills": [], "unfilled": [], "warnings": [], "ignored": []}
         planner.src = {"S1": Model({"type": "xlsx", "name": "source", "sheets": [sheet, *extra_sheets]}, "S1")}
-        planner.T = SimpleNamespace(by={"T0": {"cells": []}})
+        cells = [{"r": 2, "c": i, "text": ""} for i in range(len(sample_ids))]
+        planner.T = Model({"type": "docx", "blocks": [{"id": "T0", "t": "tbl", "cells": cells}]}, "T")
         planner.verify_data_source = lambda *args: None
         planner.fill_testdata({"id": "T0"}, {"id": "T0.D0"},
                               [{"c": i, "path": [sid]} for i, sid in enumerate(sample_ids)],
