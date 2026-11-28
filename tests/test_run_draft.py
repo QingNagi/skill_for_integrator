@@ -130,7 +130,7 @@ class RunDraftTests(unittest.TestCase):
         self.assertEqual(len(drafts), 2)
         self.assertTrue(all(Path(path).is_file() for path in drafts))
         report = Path(result["delivery_report"])
-        self.assertEqual(report.parent, self.root / "整合输出")
+        self.assertTrue(report.parent.samefile(self.root / "整合输出"))
         self.assertIn(report.name, result["message"])
         original_report = report.read_bytes()
         self.assertEqual(original_report.decode("utf-8").count("## J"), 2)

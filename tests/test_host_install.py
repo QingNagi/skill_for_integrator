@@ -53,7 +53,7 @@ class HostInstallTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
                 self.assertIn(b"doctor ok", result.stdout)
             canonical = project / ".agents/skills" / NAME
-            self.assertEqual((project / ".claude/skills" / NAME).resolve(), canonical)
+            self.assertTrue((project / ".claude/skills" / NAME).samefile(canonical))
             self.assertEqual({p.relative_to(canonical).as_posix(): p.read_bytes()
                               for p in canonical.rglob("*") if p.is_file()}, source)
             backups = list((project / ".traced-template-fill/backups").rglob("custom.json"))

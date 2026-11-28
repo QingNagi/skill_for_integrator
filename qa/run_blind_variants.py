@@ -3,6 +3,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -169,11 +170,16 @@ def main():
         by_case[case.name] = {"attempts": len(runs), "scored": len(scored),
                               "max_wrong_fills": max((r["wrong_fills"] for r in scored), default=None),
                               "min_fill_rate_among_scored": min((r["fill_rate"] for r in scored), default=None),
-                              "max_observed_calls_after_draft": max(calls, default=None)}
-    passed = all(r.get("returncode") == 0 and r.get("wrong_fills") == 0 and r.get("fill_rate", 0) >= .95
-                 and r.get("calls_after_observed_draft") is not None and r["calls_after_observed_draft"] <= 5 for r in results)
+                              "max_observed_calls_after_draft": max(calls, default=None),
+                              "p90_observed_calls_after_draft": sorted(calls)[math.ceil(.9 * len(calls))-1] if calls else None}
+    correctness = all(r.get("returncode") == 0 and r.get("wrong_fills") == 0 and r.get("fill_rate", 0) >= .95
+                      for r in results)
+    overhead = all(r.get("calls_after_observed_draft") is not None and r["calls_after_observed_draft"] <= 5
+                   for r in results)
+    passed = correctness and overhead
     name = "rescored-summary.json" if args.rescore else "summary.json"
-    save(args.run_dir / name, {"cases": by_case, "runs": results, "passed": passed})
+    save(args.run_dir / name, {"cases": by_case, "runs": results, "correctness_passed": correctness,
+                               "every_run_within_call_target": overhead, "passed": passed})
     return int(not passed)
 
 
