@@ -4,6 +4,7 @@ import json
 import os
 import re
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from .common import DIError, ReviewBlocked, read_json, write_json
@@ -28,33 +29,162 @@ def copied_request(task, quote):
     return bool(clauses) and all(clause in original for clause in clauses)
 
 
-def needs_reviewer_reply(key, effect, task, quote, *, requires_program=False):
+def numbered_reply(words, refs, choice, multiple=False):
+    selected = re.findall(r"(?<![a-z0-9])([qb]\d+)\s*[=:选]\s*([0-9]+)(?![0-9])", words)
+    if selected:
+        values = {v for ref, v in selected if ref.upper() in refs}
+        if values:
+            return (choice is not None and values == {str(choice)}
+                    and not re.search(r"是否|暂不|不要|如果|比如|例如|示例|[?？]|\b(?:whether|if|not|example)\b", words))
+    ordinal = re.fullmatch(r"((?:两项|两题|以上|全部)?(?:均|都)|both\s+|all\s+)?(?:我?选(?:择)?\s*|option\s*|choice\s*)?第?([1-9一二三四五六七八九])(?:项|个选项|个)?", words.strip("。.! "))
+    if ordinal:
+        s = ordinal[2]
+        return (not multiple or bool(ordinal[1])) and choice == (int(s) if s.isdecimal() else "一二三四五六七八九".index(s) + 1)
+    return None
+
+
+def source_confirmation(key, quote, refs, choice, multiple):
+    """Check what the quoted reply affirms for this question. Provenance remains agent_relay."""
+    words = unicodedata.normalize("NFKC", quote or "").casefold().strip()
+    short = words.strip(" \t\r\n.。!！,，")
+    numbered = numbered_reply(words, refs, choice, multiple)
+    if numbered is not None:
+        return numbered
+    if re.fullmatch(r"(?:yes[, ]+)?(?:both|all)(?: (?:are )?(?:confirmed|correct|verified|applicable))?", short):
+        return True
+    if re.fullmatch(r"(?:(?:我|两项|两题|两份|两者|这两项|以上|全部)(?:都|均)?|都)?(?:是的?|对的?|没错|没问题|可以|同意|"
+                    r"确认|已(?:核对|核实|确认|复核)(?:过|了)?|(?:再次|第[二三]次)核实)|"
+                    r"(?:yes|yeah|yep|correct|ok(?:ay)?|confirmed|verified|agreed|i (?:agree|confirm))(?:,? (?:both|please proceed))?", short):
+        return not multiple or bool(re.search(r"都|均|两项|两题|两份|两者|全部|以上|\b(?:both|all)\b", short))
+
+    spec = key.startswith("src:spec:")
+    subject = (r"规范|规格|标准|细则|\bspec(?:ification)?s?\b|\bstandard\b" if spec else
+               r"本批|这批|该批|同批|批号|批次|样品|原始记录|实测记录|记录(?:都|均)?已|来源|数据表|读数表|\.xlsx?\b|"
+               r"\b(?:batch|lot|samples?|spreadsheet|workbook|source (?:records?|data)|measurements?)\b")
+    reviewed = r"(?:已经?|确已|经|本人|我|均已|都已)(?:逐份|逐项|认真|再次)?(?:核对|核实|确认|核查|复核|核验)|核(?:实|对)?过|核对(?:了|无误)|已核|\b(?:checked|verified|confirmed|validated)\b"
+    finding = (r"(?:适用|适合|可以使用|可用于)|\b(?:appl(?:y|ies|icable)|suitable|valid for)\b" if spec else
+               r"(?:属于|系|确为|确属|就是|是|来自|取自|对应|匹配|一致).{0,12}(?:本批|这批|该批|同批|同一批|同一组)|"
+               r"(?:本批|这批|该批|同批)(?:的)?(?:原始|实测|采集|测试|数据|记录|样品)|(?:确认|核实)(?:为)?本批|"
+               r"\b(?:belong(?:s)? to|(?:is|are|comes?|came) from|(?:is|are) (?:for|part of)|matches?|same (?:batch|lot))\b")
+    uncertain = (r"是否|能否|(?:(?:不|未|尚未|无法|不能|还没|没有|待)(?:能|曾|经|敢|予以)?(?:确定|确认|核实|核对|适用|属于|是|对应|匹配))|"
+                 r"不属|不同批|[?？]|\b(?:not|never|unverified|unknown|uncertain|whether|isn't|aren't|doesn't|cannot)\b")
+    instruction = r"^(?:(?:请|麻烦|需要|务必|先|要|待|将|把|根据|按照)|(?:please|check|verify|confirm whether|use|copy|fill|populate)\b)"
+    clauses = re.split(r"[。;；,，\n]|\.\s+|(?:但是|不过|然而|\bbut\b)|(?:并|再|进一步)(?=将|把)", words)
+    direct_finding = r"(?:本任务|本次|本批)?适用|applicable|it applies"
+    affirmed = spec and any(re.fullmatch(direct_finding, c.strip()) for c in clauses)
+    for clause in (s.strip() for s in clauses):
+        if not clause or re.search(instruction, clause) or not re.search(subject, clause):
+            continue
+        if re.search(uncertain, clause):
+            return False
+        if re.search(reviewed, clause) or re.search(finding, clause.replace("适用范围", "")):
+            affirmed = True
+    if affirmed:
+        return True
+    # Common direct replies omit the subject supplied by the displayed question.
+    if spec:
+        return bool(re.fullmatch(r"(?:(?:本任务|本次|本批|可以)?适用|适用于(?:本任务|本次|本批)|applicable|it applies)", short))
+    return bool(re.fullmatch(r"(?:同一批(?:次)?|本批(?:适用|无误)|属于本批|(?:我|本人)?核过这份[：:].{1,15}对应|same (?:batch|lot))", short))
+
+
+VALUE_QUESTIONS = ("td:interpret:", "td:interpret_if:", "td:val:")
+
+
+def value_terms(text):
+    terms = set()
+    for part in re.split(r"[。;；,，\n]|\.\s+", unicodedata.normalize("NFKC", text or "").casefold()):
+        if re.search(r"是否|未核|待核|不能确认|不确定|不要|并非|不是|[?？]|\b(?:not|unknown|whether)\b", part):
+            continue
+        for digit, result in re.findall(r"(?<!\d)([01])\s*(?:均|都)?(?:表示|代表|为|是|即|对应|填|=|means?|is|indicates?)\s*[“\"']?"
+                                       r"(通过|合格|成功|失败|不通过|不合格|pass(?:ed)?|fail(?:ed)?)", part):
+            passed = result in ("通过", "合格", "成功", "pass", "passed")
+            terms.add("pass%d" % (int(digit) if passed else 1-int(digit)))
+        if re.search(r"实测(?:读数|数值|值)|原始(?:测量|实测|读数|数值)|测量(?:数值|值)|原样(?:填|记录)|"
+                     r"\b(?:raw|measured|measurement) (?:values?|readings?|numbers?|measurements?)\b", part):
+            terms.add("measurement")
+        if re.search(r"相反极性|按负值|取负|取反|反转极性|绝对值|\b(?:negat(?:e|ed)|invert|absolute value)\b", part):
+            terms.add("negate")
+        if re.search(r"带符号|保留.{0,5}(?:符号|正负)|原(?:始)?符号|\bsigned\b", part):
+            terms.add("signed")
+        if re.search(r"(?:填|记|写|做|算)(?:写)?判定|与限值比较|按限值|\b(?:judg(?:e)?ment|compare.{1,12}limits?)\b", part):
+            terms.add("limits")
+    return terms
+
+
+def value_confirmation(effect, quote, refs, choice):
+    mode = effect.get("kind") or effect.get("mode")
+    if mode == "blank":
+        return True
+    words = unicodedata.normalize("NFKC", quote or "").strip().casefold()
+    numbered = numbered_reply(words, refs, choice)
+    if numbered is not None:
+        return numbered
+    if effect.get("free"):
+        required = value_terms(effect.get("text"))
+    elif mode == "flags":
+        required = {"pass%s" % effect.get("pass_code")}
+    elif mode == "limits":
+        required = {"limits", effect.get("sign")}
+    elif mode in ("raw", "measurement"):
+        required = {"measurement"}
+    elif mode == "negate":
+        required = {"negate"}
+    else:
+        return False
+    confirmed = value_terms(words)
+    for code in ("pass0", "pass1"):
+        if code in required and ({'pass0', 'pass1'} - {code}) & confirmed:
+            return False
+    return bool(required) and required <= confirmed
+
+
+def value_option(options, text):
+    hold = text.strip("。.! ").casefold() in ("留空", "暂留空", "先留空", "跳过", "不填", "leave blank", "skip")
+    matches = []
+    for i, opt in enumerate(options):
+        effect = opt["effect"]
+        blank = (effect.get("mode") or effect.get("kind")) == "blank"
+        if hold == blank and value_confirmation(effect, text, (), None):
+            matches.append(i)
+    return matches[0] if len(matches) == 1 else None
+
+
+def stored_reply_needed(key, rec, task, question_id):
+    if not isinstance(rec, dict) or not key.startswith((*VALUE_QUESTIONS, "src:spec:", "src:verify:")):
+        return False
+    if rec.get("source") in ("confirm_cli", "word_reply") or rec.get("word_draft") or rec.get("evidence"):
+        return False
+    if key.startswith(VALUE_QUESTIONS) and isinstance(rec.get("effect"), dict) and rec["effect"].get("free"):
+        return True
+    indices = rec.get("choice") or []
+    choice = indices[0] + 1 if len(indices) == 1 and isinstance(indices[0], int) else None
+    return needs_reviewer_reply(key, rec.get("effect"), task, rec.get("user_quote"),
+                                refs=(question_id, rec.get("quoted_id")), choice=choice)
+
+
+def needs_reviewer_reply(key, effect, task, quote, *, requires_program=False, refs=(), choice=None, multiple=False):
     """A request to fill a form does not attest to the identities or conventions subsequently queried."""
     if not isinstance(effect, dict):
         return False
-    convention = key.startswith(("td:interpret:", "td:interpret_if:", "td:val:"))
-    if convention and (effect.get("kind") or effect.get("mode")) in ("blank", None):
-        return False
+    if ((key.startswith("src:spec:") and effect.get("applicable") is True)
+            or (key.startswith("src:verify:") and effect.get("ok") is True)):
+        return not source_confirmation(key, quote, refs, choice, multiple)
+    if key.startswith(VALUE_QUESTIONS):
+        return not value_confirmation(effect, quote, refs, choice)
     context = bool(effect.get("units") or effect.get("conditions") or effect.get("no_suffix") == "keep")
     omit_segments = requires_program and "map" in effect and effect["map"] is None
-    if not (convention or context or omit_segments or (protected_question(key) and (effect.get("ok") or effect.get("applicable")))):
+    if not (context or omit_segments or (protected_question(key) and (effect.get("ok") or effect.get("applicable")))):
         return False
     if not quote:
-        return convention or context or omit_segments
+        return context or omit_segments
     plain = "".join(quote.split()).strip("。；;，,.")
     if not plain or not copied_request(task, quote):
         return False
     # Accept a pre-existing explicit review statement. A generic instruction is already in the job.
-    if key.startswith("src:spec:"):
-        explicit = ("本任务适用", "适用于本任务", "适用于本次", "已核对", "已核实")
-    elif key.startswith("src:verify:"):
-        explicit = ("属于本批", "本批原始记录", "已核对", "已核实")
-    elif omit_segments:
+    if omit_segments:
         explicit = ("没有清单时留空", "缺少清单时留空", "未测项留空", "省略这些段")
     elif context:
         explicit = ("已核对单位", "实测单位为", "原始单位为", "实际工况为", "实际测试条件", "均在", "下测得")
-    elif convention:
-        explicit = ("填判定", "写判定", "按判定", "通过标志", "表示通过", "绝对值", "原始实测值", "带符号")
     else:
         explicit = ("已复核", "已核对", "已核实")
     return not any(word in plain for word in explicit)

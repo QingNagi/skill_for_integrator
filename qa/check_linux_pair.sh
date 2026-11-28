@@ -46,8 +46,12 @@ if [ -f "$dist/install.sh" ]; then
     for tool in sh awk dirname uname mktemp cp tar gzip sha256sum mkdir rm env mv chmod flock; do
         ln -s "$(command -v "$tool")" "$tools/$tool"
     done
-    PATH="$tools" /bin/sh "$dist/install.sh" --project-root "$project"
+    bad_temp="$tmp/not-a-temp-directory"
+    printf 'unchanged' > "$bad_temp"
+    PATH="$tools" TEMP="$bad_temp" TMP="$bad_temp" TMPDIR="$bad_temp" /bin/sh "$dist/install.sh" --project-root "$project"
     sh "$dist/install.sh" --project-root "$project"
+    test "$(cat "$bad_temp")" = unchanged
+    test -z "$(find "$project" "$DI_RUNTIME_DIR" -maxdepth 1 \( -name '.ttf-bootstrap.*' -o -name '.ttf-install-*' \) -print -quit)"
     canon="$project/.agents/skills/traced-template-fill"
     [[ "$canon" -ef "$project/.claude/skills/traced-template-fill" ]]
     [[ "$(find "$project/.traced-template-fill/backups" -name my-rule | wc -l)" -eq 1 ]]

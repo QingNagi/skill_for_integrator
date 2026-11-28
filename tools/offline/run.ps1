@@ -77,7 +77,7 @@ function Test-OfflineReady {
 }
 
 function Invoke-OfflinePython {
-    param([string] $Python, [string[]] $Arguments, [ref] $ExitCode, [switch] $BundledDefaults)
+    param([string] $Python, [string[]] $Arguments, [ref] $ExitCode, [switch] $BundledDefaults, [string] $CheckTemp)
     # Windows PowerShell 5.1 drops empty argv entries and embedded quotes in native
     # calls. Quote each token according to the Windows argv rules on every host.
     $native = [Diagnostics.ProcessStartInfo]::new()
@@ -95,6 +95,11 @@ function Invoke-OfflinePython {
     if ($BundledDefaults) {
         foreach ($name in 'DI_OCR', 'DI_NO_VENDOR') {
             $native.EnvironmentVariables.Remove($name)
+        }
+    }
+    if ($CheckTemp) {
+        foreach ($name in 'TEMP', 'TMP', 'TMPDIR') {
+            $native.EnvironmentVariables[$name] = $CheckTemp
         }
     }
     $process = [Diagnostics.Process]::Start($native)

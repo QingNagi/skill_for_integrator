@@ -55,7 +55,31 @@ from pathlib import Path
 metrics, label, log, *command = sys.argv[1:]
 with open(log, 'wb') as stream:
     start = time.perf_counter_ns()
-    result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT)
+    with subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT) as result:
+        private_check_seen = False
+        while label == "cold_run" and not private_check_seen and result.poll() is None:
+            # Inspect only this launcher's descendants. Python may silently fall back to /tmp.
+            todo = [result.pid]
+            while todo and not private_check_seen:
+                pid = todo.pop()
+                proc = Path("/proc") / str(pid)
+                try:
+                    todo.extend(map(int, (proc / "task" / str(pid) / "children").read_text().split()))
+                    argv = (proc / "cmdline").read_bytes().split(b"\0")
+                    check = next((Path(arg.decode()) for arg in argv if arg.endswith(b"/scripts/offline_check.py")), None)
+                    if not check:
+                        continue
+                    env = dict(item.split(b"=", 1) for item in (proc / "environ").read_bytes().split(b"\0") if item)
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                expected = check.parents[2] / "selfcheck-temp"
+                assert expected.is_dir() and all(env.get(key) == bytes(expected) for key in (b"TMPDIR", b"TEMP", b"TMP"))
+                private_check_seen = True
+            if not private_check_seen:
+                time.sleep(0.025)
+        result.wait()
+        if label == "cold_run" and result.returncode == 0:
+            assert private_check_seen, "The offline self-check did not run with a private staging temp"
     elapsed = (time.perf_counter_ns() - start) / 1_000_000
 with open(metrics, 'a', encoding='utf-8') as samples:
     print(label, f'{elapsed:.3f}', sep='\t', file=samples)
@@ -88,12 +112,13 @@ for sample in 1 2 3; do
     project="$test_dir/工作 项目 $sample"
     mkdir -p "$project"
     cd "$project"
-    measure cold_run "$project/cold.log" bash "$entry" "${task[@]}" --name 本次
+    TEMP="$input" TMP="$input" TMPDIR="$input" measure cold_run "$project/cold.log" bash "$entry" "${task[@]}" --name 本次
     grep -q '离线自检通过' cold.log
     check_delivery 整合输出/本次
 done
 installed="$XDG_DATA_HOME/traced-template-fill/offline/$digest"
 job="$project/整合输出/本次"
+test -z "$(find "$XDG_DATA_HOME/traced-template-fill/offline" \( -name "selfcheck-temp" -o -name ".stage.*" \) -print -quit)"
 test -x "$installed/runtime/python/bin/python3"
 test -x "$installed/runtime/ocr/tesseract"
 "$installed/runtime/ocr/tesseract" --version > "$project/tesseract-version.log"
@@ -215,6 +240,7 @@ for line in Path(metrics).read_text(encoding='utf-8').splitlines():
     samples.setdefault(name, []).append(float(value))
 report = {
     'arch': arch, 'glibc': platform.libc_ver(), 'kernel': platform.release(),
+    'cold_install_with_read_only_caller_temp': True, 'staging_temp_removed': True,
     'payload_sha256': digest, 'libreoffice': office, 'parallel_batch_drafts': 2, 'clock': 'perf_counter_ns',
     'independent_terminal_handoff': {'jobs': 2, 'same_installed_interpreter_and_entry': True, 'read_only_originals': True, 'cancelled_without_drafts': True,
                                      'piped_input_and_hidden_output_refused': True},

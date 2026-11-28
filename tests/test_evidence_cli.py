@@ -30,6 +30,22 @@ class EvidenceCLI(unittest.TestCase):
             job = Job.create(target, [str(readings)], task="将读数表填进记录，多值填范围", out_root=str(root), name="job")
             questions = cli.do_plan(job, quiet=True)["questions"]
             batch = next(q["id"] for q in questions if q["key"] == "src:verify:S1")
+            generated = Path(job.dir, "推导段序清单.csv")
+            generated.write_bytes(declarations.read_bytes())
+            provisional = root / "未审核清单.csv"
+            provisional.write_text("来源,测试号,标签,参数,单位,备注\nS1:Sheet1,12,B,B,nA,推导，待审核\n", "utf8")
+            for path in (generated, provisional):
+                with self.subTest(path=path.name), contextlib.redirect_stdout(io.StringIO()) as output:
+                    rc = cli.main(["answer", job.dir, "--evidence", str(path), "--json"])
+                    self.assertEqual(rc, 0)
+                    self.assertEqual(json.loads(output.getvalue())["status"], "blocked")
+                    self.assertFalse(job.read("answers.json", {}))
+            # A legacy session may already have registered a generated manifest.
+            _, old = evidence.program_answers(questions, [], declarations, job)
+            old.update(path=str(generated), fp=job.fingerprint(), rule_sha256=evidence.rule_pack(job)["sha256"])
+            job.write("answers.json", {"_program_manifest": old})
+            self.assertIn("_program_manifest", cli.do_plan(job, quiet=True)["stale_answers"])
+            job.write("answers.json", {})
             rejected = io.StringIO()
             with contextlib.redirect_stdout(rejected):
                 rc = cli.main(["answer", job.dir, batch + "=2", "--user-quote", "将读数表填进记录", "--draft", "--json"])

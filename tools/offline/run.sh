@@ -89,7 +89,9 @@ else
             chmod 755 "$stage/skill/run.sh"
             # The acceptance test exercises the bundled configuration independent of
             # user overrides. The user's environment applies to their actual command.
-            env -u DI_OCR -u DI_NO_VENDOR DI_CACHE_DIR="$stage/skill/vendor/_unpacked" \
+            mkdir -m 700 -- "$stage/selfcheck-temp"
+            env -u DI_OCR -u DI_NO_VENDOR TMPDIR="$stage/selfcheck-temp" TMP="$stage/selfcheck-temp" TEMP="$stage/selfcheck-temp" \
+                DI_CACHE_DIR="$stage/skill/vendor/_unpacked" \
                 "$stage/skill/runtime/python/bin/python3" -E -s -B -X utf8 \
                 "$stage/skill/scripts/offline_check.py" >&2 || fail '离线运行时自检失败。若挂载为 noexec，请将 DI_RUNTIME_DIR 或 XDG_DATA_HOME 指向允许执行的目录。'
             printf '%s\n' "$digest" > "$stage/skill/.offline-payload.sha256"

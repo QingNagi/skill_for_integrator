@@ -86,7 +86,14 @@ function Test-OfflineSkill {
     $code = 0
     Invoke-OfflinePython $python @('-B', '-X', 'utf8', $entry, '--help') ([ref]$code) -BundledDefaults | Out-Null
     if ($code -ne 0) { throw "Skill CLI help failed (exit $code). If Windows reports a DLL pathname is too long, use install.ps1 -ProjectRoot with a shorter existing project path." }
-    Invoke-OfflinePython $python @('-B', '-X', 'utf8', $smoke) ([ref]$code) -BundledDefaults
+    $checkTemp = Join-Path $Root 'selfcheck-temp'
+    $ioTemp = Get-OfflineIoPath $checkTemp
+    [void] [IO.Directory]::CreateDirectory($ioTemp)
+    try {
+        Invoke-OfflinePython $python @('-B', '-X', 'utf8', $smoke) ([ref]$code) -BundledDefaults -CheckTemp $checkTemp
+    } finally {
+        Complete-InstallStage $ioTemp
+    }
     if ($code -ne 0) { throw "Offline document/OCR check failed (exit $code). For a Windows native model/DLL path-length error, use install.ps1 -ProjectRoot with a shorter existing project path." }
 }
 

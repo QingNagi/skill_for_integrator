@@ -37,7 +37,11 @@ if ($python -and $python.Source -notmatch '\\Microsoft\\WindowsApps\\python.exe$
 }
 if ($SourceOnly) { throw 'Source-only installation requires Python 3.10+' }
 $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-$tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+$cache = if ($env:DI_RUNTIME_DIR) { $env:DI_RUNTIME_DIR } else {
+    $local = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [Environment]::GetFolderPath('LocalApplicationData') }
+    Join-Path $local 'traced-template-fill\offline'
+}
+$tempBase = [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($cache)).FullName
 $work = [IO.Directory]::CreateDirectory((Join-Path $tempBase ('ttf-' + [guid]::NewGuid().ToString('N'))))
 try {
     $archive = 'traced-template-fill-runtime-win64.zip'

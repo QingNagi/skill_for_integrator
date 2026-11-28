@@ -21,6 +21,70 @@ CEX = "http://schemas.microsoft.com/office/word/2018/wordml/cex"
 
 
 class ReviewDecisionsTests(unittest.TestCase):
+    def test_free_value_interpretation_and_positive_option_require_the_same_review(self):
+        from dilib.decisions import needs_reviewer_reply
+        task = "将 B.xlsx 中的测试结果填入验证记录。只取中间电压。"
+        for key in ("td:interpret:VIH:S2", "td:interpret_if:sig:VIL:S2", "td:val:VIH:S2"):
+            with self.subTest(key=key):
+                proposal = {"free": True, "text": "VIH 原始值 1 为判定，1 表示通过"}
+                option = {"kind": "flags", "pass_code": 1}
+                for effect in (proposal, option):
+                    for quote in (None, "请把表内数据填完", "电压按原始实测值填写", "0 表示通过"):
+                        self.assertTrue(needs_reviewer_reply(key, effect, task, quote), (effect, quote))
+                    for quote in ("1 表示通过，0 表示失败", "These are pass/fail flags: 1 means pass."):
+                        self.assertFalse(needs_reviewer_reply(key, effect, task, quote), (effect, quote))
+                self.assertFalse(needs_reviewer_reply(key, {"kind": "blank"}, task, None))
+        fp = self.job.fingerprint()
+        key = "td:interpret:VIH:S2"
+        q = {"id": "Q1", "key": key, "topic": "值类型与极性", "question": "该值是判定或测量值？",
+             "options": [{"label": "留空", "effect": {"kind": "blank"}}, {"label": "1 表示通过", "effect": {"kind": "flags", "pass_code": 1}}],
+             "input_fp": fp, "answered": False, "recommended": 0}
+        self.job.write("questions.json", [q])
+        raw = "Q1=VIH 原始值 1 为判定，1 表示通过"
+        result = json.loads(self.invoke("answer", self.job.dir, raw, "--draft", "--json"))
+        self.assertEqual(result["status"], "needs_answers")
+        self.assertFalse(self.job.read("answers.json"))
+        self.assertFalse(self.job.drafts())
+        self.invoke("answer", self.job.dir, raw, "--user-quote", "VIH 的 1 表示通过。")
+        self.assertEqual(self.job.read("answers.json")[key]["user_quote"], "VIH 的 1 表示通过。")
+        self.assertEqual(self.job.read("answers.json")[key]["effect"], {"kind": "flags", "pass_code": 1})
+
+    def test_record_five_relay_requires_an_answer_for_each_source_check(self):
+        from dilib.decisions import needs_reviewer_reply
+        task = "将 SYN90LV804N1 详细规范（备案+第2次变更）中的电特性填写进验证记录对应位置；再将 B.xlsx 测试结果填入验证记录。"
+        paraphrase = ("将 SYN90LV804N1 详细规范（备案+第2次变更）中的电特性填写进验证记录；"
+                      "进一步将 B.xlsx 中的测试结果数据填入验证记录。只处理本项目。")
+        self.job.data["task"] = task
+        self.job.save()
+        qs = []
+        for ix, (key, prop) in enumerate((("src:spec:SYN90LV804E,SYN90LV804N1", "applicable"), ("src:verify:S2", "ok")), 1):
+            qs.append({"id": "Q%d" % ix, "key": key, "topic": "来源核对", "question": "请核对依据",
+                       "options": [{"label": "留空", "effect": {prop: False}}, {"label": "确认", "effect": {prop: True}}],
+                       "input_fp": self.job.fingerprint(), "recommended": 0, "answered": False})
+        self.job.write("questions.json", qs)
+        for quote in (paraphrase, "已确认所供规范适用于本任务；请把 B.xlsx 的数据填入记录。", "是", "Yes", "选2"):
+            result = json.loads(self.invoke("answer", self.job.dir, "Q1=2", "Q2=2", "--user-quote", quote, "--draft", "--json"))
+            self.assertEqual(result["status"], "needs_answers")
+            self.assertFalse(self.job.read("answers.json"))
+            self.assertFalse(Path(self.job.p("decisions.jsonl")).exists())
+            self.assertFalse(self.job.drafts())
+        for quote, spec, batch in (
+            ("所供规范适用。请把 B.xlsx 测试结果填入验证记录。", True, False),
+            ("请按此规范填写。B.xlsx 是本批的原始测量记录。", False, True),
+            ("规范尚未核对，B.xlsx 已核实属于本批。", False, True),
+            ("请确认这个规范是否适用、数据是否属于本批。", False, False),
+            ("The provided spec applies to this task. Please copy the readings from B.xlsx.", True, False),
+            ("The specification does not apply. The source data belongs to this batch.", False, True),
+            ("Yes.", True, True), ("确认。", True, True)):
+            with self.subTest(quote=quote):
+                self.assertEqual(not needs_reviewer_reply(qs[0]["key"], {"applicable": True}, task, quote), spec)
+                self.assertEqual(not needs_reviewer_reply(qs[1]["key"], {"ok": True}, task, quote), batch)
+        for quote in ("两项都确认", "Yes, both", "Both confirmed", "两题均选第二项"):
+            self.assertFalse(needs_reviewer_reply(qs[0]["key"], {"applicable": True}, task, quote,
+                                                 refs=("Q1",), choice=2, multiple=True))
+        self.invoke("answer", self.job.dir, "Q1=2", "Q2=2", "--user-quote", "Q1=2，Q2=2")
+        self.assertEqual(set(self.job.read("answers.json")), {q["key"] for q in qs})
+
     def test_reordered_instructions_are_not_a_new_batch_confirmation(self):
         from dilib.decisions import needs_reviewer_reply
         request = "把表格填入记录。按样品计算范围。仅处理本任务。"

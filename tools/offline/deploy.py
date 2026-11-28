@@ -236,7 +236,7 @@ def main():
     archives = [source_name]
     if not args.source_only:
         archives.append(NAME + "-runtime-" + arch + (".zip" if WINDOWS else ".tar.gz"))
-    with tempfile.TemporaryDirectory(prefix="ttf-") as scratch:
+    with tempfile.TemporaryDirectory(prefix=".ttf-install-", dir=root) as scratch:
         stage = Path(scratch)
         for name in archives:
             if name != Path(name).name or name not in expected:

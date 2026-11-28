@@ -78,9 +78,13 @@ def install(payload, target, digest, required):
             env = os.environ.copy()
             for name in ("DI_OCR", "DI_NO_VENDOR"):
                 env.pop(name, None)
-            for args in (["scripts/di.py", "--help"], ["scripts/offline_check.py"]):
-                subprocess.run([python, "-B", "-X", "utf8", stage / args[0], *args[1:]], check=True,
-                               env=env, stdout=subprocess.DEVNULL if len(args) > 1 else sys.stderr)
+            subprocess.run([python, "-B", "-X", "utf8", stage / "scripts/di.py", "--help"],
+                           check=True, env=env, stdout=subprocess.DEVNULL)
+            check_temp = Path(temp) / "selfcheck-temp"
+            check_temp.mkdir()
+            env.update(TEMP=str(check_temp), TMP=str(check_temp), TMPDIR=str(check_temp))
+            subprocess.run([python, "-B", "-X", "utf8", stage / "scripts/offline_check.py"],
+                           check=True, env=env, stdout=sys.stderr)
             if repair is None:
                 subprocess.run([python, "-I", "-B", stage / "scripts/dilib/runtime_maintenance.py",
                                 stage, target, digest], check=True)

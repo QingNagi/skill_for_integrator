@@ -21,7 +21,8 @@ from .cleanup import cmd_clean
 from .common import DIError, TOOL_AUTHOR, ensure_dir, out, read_json, setup_console, short, write_json
 from .content import outline, parse_ref
 from .source_queries import cmd_figure, cmd_outline, cmd_search, cmd_show
-from .decisions import answer_binding, protected_question, record_decision, require_quote
+from .decisions import (VALUE_QUESTIONS, answer_binding, protected_question, record_decision, require_quote,
+                        stored_reply_needed, value_option)
 from .draft_review import check_with_office, pending, run_selfcheck, write_report
 from .input_paths import cmd_find, expand_pattern, join_paths, split_paths
 from .job import Job
@@ -68,9 +69,13 @@ def do_plan(job, quiet=False, extra_answers=None):
     rule_sha = evidence.rule_pack(job)["sha256"]
     stale_ans = [k for k, v in answers.items() if isinstance(v, dict)
                  and ((v.get("fp") and v["fp"] != fp) or v.get("rule_sha256", rule_sha) != rule_sha)]
-    answers = {k: v for k, v in answers.items() if k not in stale_ans
+    known_ids = job.data.get("question_ids", {})
+    answers = {k: v for k, v in answers.items() if k not in stale_ans and not stored_reply_needed(k, v, job.data.get("task"), known_ids.get(k))
                and not (isinstance(v, dict) and v.get("effect") == {"await_evidence": True})}
     manifest = answers.pop("_program_manifest", None)
+    if manifest and evidence.program_manifest_issue(manifest.get("path"), manifest.get("rows", []), job):
+        stale_ans.append("_program_manifest")
+        manifest = None
     # Recheck the labels currently contributing to a result; previous selections may have changed.
     submitted = {k: v for k, v in answers.items() if isinstance(v, dict) and v.get("from_manifest")}
     answers = {k: v for k, v in answers.items() if k not in submitted}
@@ -86,6 +91,7 @@ def do_plan(job, quiet=False, extra_answers=None):
     while True:
         pending_facts = [q for q in plan["questions"] if q["key"] not in merged]
         additions = evidence.reusable_answers(job, pending_facts)
+        additions = {k: v for k, v in additions.items() if not stored_reply_needed(k, v, job.data.get("task"), known_ids.get(k))}
         if manifest:
             local = evidence.manifest_answers(manifest, pending_facts)
             for key, item in local.items():
@@ -385,6 +391,9 @@ def cmd_answer(a, *, confirmation=None):
                                             **{k: v for k, v in attachment.items() if k != "effects"})
     if not items and not attachment:
         raise DIError("请提供至少一个有效回答。")
+    protected_ids = {item.partition("=")[0].strip().upper() for item in items}
+    multiple = getattr(a, "multiple_protected", False) or sum(
+        protected_question(byid[i]["key"]) for i in protected_ids if i in byid) > 1
     selected_ids = set()
     for item in items:
         if "=" not in item:
@@ -403,6 +412,8 @@ def cmd_answer(a, *, confirmation=None):
         rec = {"label": "", "answered_at": datetime.datetime.now().isoformat(timespec="seconds"), "fp": fp, "rule_sha256": rule_sha}
         if a.remember:
             rec["remember"] = True
+        if q["key"].startswith((*VALUE_QUESTIONS, "src:spec:", "src:verify:")):
+            rec["quoted_id"] = getattr(a, "batch_refs", {}).get(qid, qid)
         if getattr(a, "reviewer", None):
             rec["confirmed_by"] = a.reviewer
         idx = _choice_indices(q, val)
@@ -423,6 +434,12 @@ def cmd_answer(a, *, confirmation=None):
                 eff = {"values": vals}
             rec["effect"] = eff
             rec["label"] = "自由回答：" + val
+            if q["key"].startswith(VALUE_QUESTIONS):
+                selected_value = value_option(q["options"], val)
+                if selected_value is not None:
+                    opt = q["options"][selected_value]
+                    idx = [selected_value]
+                    rec.update(effect=opt["effect"], label=opt["label"], choice=idx)
         if qid in sheet_metadata:
             rec["evidence"] = sheet_metadata[qid]
         if attachment and qid in attachment["effects"]:
@@ -433,10 +450,13 @@ def cmd_answer(a, *, confirmation=None):
         if (confirmation is not None and current.get("fp") == fp and current.get("rule_sha256", rule_sha) == rule_sha
                 and current.get("choice") == idx and current.get("label") == rec["label"] and current.get("evidence")):
             rec.update(effect=current["effect"], evidence=current["evidence"])
-        if confirmation is None and not rec.get("evidence"):
+        unresolved_value = q["key"].startswith(VALUE_QUESTIONS) and rec["effect"].get("free")
+        if unresolved_value or (confirmation is None and not rec.get("evidence")):
             from .decisions import needs_reviewer_reply
-            if needs_reviewer_reply(q["key"], rec["effect"], job.data.get("task"), quote,
-                                    requires_program=q.get("requires_program", False)):
+            choice = idx[0] + 1 if idx and len(idx) == 1 else None
+            if unresolved_value or needs_reviewer_reply(q["key"], rec["effect"], job.data.get("task"), quote,
+                                    requires_program=q.get("requires_program", False), refs=(qid, rec.get("quoted_id")),
+                                    choice=choice, multiple=multiple):
                 reason = "%s 需审核人就当前问题补充核对结果；请展示待答题并等待回复，本次提交尚未登记。" % qid
                 out(reason)
                 return dict(plan_result(job, {"questions": qs}), reason=reason)

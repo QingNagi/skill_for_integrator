@@ -14,7 +14,10 @@ if command -v python3 >/dev/null 2>&1 && python3 -I -c 'import sys; sys.exit(sys
 fi
 case " $* " in *" --source-only "*) echo 'Source-only installation requires Python 3.10+' >&2; exit 1 ;; esac
 archive="traced-template-fill-runtime-linux-$(uname -m).tar.gz"
-scratch=$(mktemp -d)
+cache=${DI_RUNTIME_DIR:-"${XDG_DATA_HOME:-"${HOME:?Set HOME or DI_RUNTIME_DIR}/.local/share"}/traced-template-fill/offline"}
+mkdir -p -- "$cache"
+cache=$(CDPATH= cd -- "$cache" && pwd -P)
+scratch=$(mktemp -d -- "$cache/.ttf-bootstrap.XXXXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
 cp -- "$release/$archive" "$scratch/$archive"
 expected=$(awk -v name="$archive" '$2 == name {print $1}' "$manifest")

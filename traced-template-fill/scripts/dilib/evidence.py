@@ -5,7 +5,7 @@ import io
 import json
 from pathlib import Path
 
-from .common import DIError, read_json, write_json
+from .common import DIError, ReviewBlocked, read_json, write_json
 from .preferences import locked_preferences, project_dir
 
 RULES = Path(__file__).resolve().parents[2] / "config" / "rules"
@@ -88,6 +88,14 @@ def reusable_answers(job, questions):
             if original.get("fp") != job.fingerprint() or original.get("rule_sha256", pack["sha256"]) != pack["sha256"]:
                 continue
         if record and record.get("scope") == key:
+            original = record["answer"]
+            if original.get("from_manifest"):
+                attached = original.get("evidence", {})
+                origin = read_json(Path(record["origin_job"]) / "answers.json", {}) or {}
+                manifest = origin.get("_program_manifest") or {}
+                rows = manifest.get("rows", []) if manifest.get("sha256") == attached.get("sha256") else []
+                if program_manifest_issue(attached.get("path"), rows, job):
+                    continue
             reusable[q["key"]] = dict(record["answer"], shared_key=key, remember=False)
     return reusable
 
@@ -171,6 +179,22 @@ def read_csv_evidence(path):
         raise DIError("无法读取证据 CSV：%s" % exc) from exc
 
 
+def program_manifest_issue(path, rows, job):
+    """Keep job products and explicitly provisional declarations out of measured results."""
+    if path:
+        parents = Path(path).resolve().parents
+        current = getattr(job, "dir", None)
+        if (current and Path(current).resolve() in parents) or any(
+                (p / "job.json").is_file() and (p / "questions.json").is_file() for p in parents):
+            return "该清单位于技能生成的任务目录内。请提供审核人收到的原测试程序清单。"
+    for row in rows:
+        status = " ".join(str(row.get(k) or "") for k in ("备注", "状态", "审核状态")).casefold()
+        if any(label in status for label in ("待审核", "待确认", "未经复核", "未经核实", "推导待核",
+                                             "pending review", "unverified")):
+            return "程序清单含待核声明（测试号 %s）。请提供已核实的测试程序清单。" % row.get("测试号", "")
+    return ""
+
+
 def program_answers(qs, items, path, job=None):
     from . import program_manifest
 
@@ -184,6 +208,9 @@ def program_answers(qs, items, path, job=None):
         raise DIError("测试程序清单须为 CSV 或 XLSX。")
     if not rows:
         raise DIError("测试程序清单没有测试项。")
+    issue = program_manifest_issue(path, rows, job)
+    if issue:
+        raise ReviewBlocked(issue)
     by_id = {q["id"]: q for q in qs}
     effects, answers = {}, []
     for item in items:

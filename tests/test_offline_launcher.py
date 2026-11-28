@@ -30,6 +30,8 @@ elif sys.argv[1:] == ['check-parent-env']:
     print('present' if 'DI_TEST_PARENT_ONLY' in os.environ else 'absent')
 elif sys.argv[1:] == ['check-user-options']:
     print(os.environ['DI_OCR'] + '/' + os.environ['DI_NO_VENDOR'])
+elif sys.argv[1:] == ['temp-vars']:
+    print(json.dumps([os.environ.get(k) for k in ('TEMP','TMP','TMPDIR')]))
 elif sys.argv[1:] == ['entry-path']:
     print(json.dumps(__file__))
 else:
@@ -42,6 +44,14 @@ if os.environ.get('DI_OCR') == 'off' or os.environ.get('DI_NO_VENDOR'):
 with open(os.environ['DI_TEST_INSTALL_LOG'], 'a', encoding='utf-8') as log:
     log.write('smoke\\n')
 time.sleep(0.35)
+if os.environ.get('DI_TEST_PRIVATE_TEMP'):
+    import tempfile
+    from pathlib import Path
+    temp = Path(os.environ['TEMP'])
+    assert temp.is_dir() and all(Path(os.environ[k]) == temp for k in ('TMP', 'TMPDIR'))
+    assert temp.resolve().is_relative_to(Path(os.environ['DI_TEST_PRIVATE_TEMP']).resolve())
+    with tempfile.NamedTemporaryFile(dir=temp) as fp:
+        fp.write(b'local smoke file')
 if os.environ.get('DI_TEST_FAIL_SMOKE'):
     raise SystemExit(9)
 if os.environ.get('DI_TEST_STAGE_LOCK'):
@@ -196,6 +206,24 @@ class LauncherTests(unittest.TestCase):
         result = self.call(DI_OCR="off", DI_NO_VENDOR="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), b"off/1")
+
+    def test_private_smoke_temp_is_cleaned_and_only_applies_to_check(self):
+        invalid = self.base / "ordinary file"
+        invalid.write_bytes(b"sentinel")
+        Path(self.env["DI_TEST_ARGS"]).write_text('["temp-vars"]')
+        for cmd in (False, True):
+            cache = self.base / ("cmd cache" if cmd else "PowerShell cache")
+            env = dict(TEMP=str(invalid), TMP=str(invalid), TMPDIR=str(invalid),
+                       DI_RUNTIME_DIR=str(cache), DI_TEST_PRIVATE_TEMP=str(cache))
+            launch = lambda: self.call_cmd("temp-vars", **env) if cmd else self.call(**env)
+            for _ in range(2):
+                result = launch()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout.decode("utf-8-sig")), [str(invalid)] * 3)
+            self.assertEqual([p.name for p in cache.iterdir() if p.is_dir()], [self.digest[:24]])
+            self.assertFalse(list(cache.rglob("selfcheck-temp")))
+        self.assertEqual(invalid.read_bytes(), b"sentinel")
+        self.assertEqual(self.log.read_text().splitlines(), ["smoke", "smoke"])
 
     def test_first_use_with_minimal_windows_environment(self):
         self.env.pop("OS", None)

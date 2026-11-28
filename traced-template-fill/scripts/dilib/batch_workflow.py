@@ -208,6 +208,7 @@ def submit(a, path, state, jobs, blocked, provided):
             grouped.setdefault(jd, []).append((it, val if sep else None))
     commands = []
     processed = set()
+    multiple_protected = sum(protected_question(items[bid]["key"]) for bid in seen) > 1
     for job in jobs:
         jd = job.dir
         if jd in blocked:
@@ -242,7 +243,9 @@ def submit(a, path, state, jobs, blocked, provided):
                 choices.append(q["id"] + "=" + val)
         if doc:
             evidence.program_answers(qs, choices, doc, job=job)
-        commands.append((job, argparse.Namespace(job=jd, items=choices, remember=False, user_quote=a.user_quote, evidence=doc)))
+        batch_refs = {by_key[it["key"]]["id"]: it["id"] for it, _ in selected}
+        commands.append((job, argparse.Namespace(job=jd, items=choices, remember=False, user_quote=a.user_quote,
+                                                 evidence=doc, batch_refs=batch_refs, multiple_protected=multiple_protected)))
     if not same:
         receipt = {"token": token, "questions": list(items.values()), "completed": {}}
         state["submission"] = receipt
