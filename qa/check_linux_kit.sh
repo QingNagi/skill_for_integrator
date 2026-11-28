@@ -69,11 +69,16 @@ with open(log, 'wb') as stream:
                     check = next((Path(arg.decode()) for arg in argv if arg.endswith(b"/scripts/offline_check.py")), None)
                     if not check:
                         continue
+                    # GNU env briefly includes the full Python argv while it still owns the caller environment.
+                    interpreter = check.parents[1] / "runtime/python/bin/python3"
+                    if Path(argv[0].decode()).resolve() != interpreter.resolve():
+                        continue
                     env = dict(item.split(b"=", 1) for item in (proc / "environ").read_bytes().split(b"\0") if item)
                 except (FileNotFoundError, ProcessLookupError):
                     continue
                 expected = check.parents[2] / "selfcheck-temp"
-                assert expected.is_dir() and all(env.get(key) == bytes(expected) for key in (b"TMPDIR", b"TEMP", b"TMP"))
+                values = [env.get(key) for key in (b"TMPDIR", b"TEMP", b"TMP")]
+                assert expected.is_dir() and values == [bytes(expected)] * 3, (check, expected, values)
                 private_check_seen = True
             if not private_check_seen:
                 time.sleep(0.025)
