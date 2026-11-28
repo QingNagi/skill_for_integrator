@@ -102,3 +102,13 @@ python qa/run_blind_variants.py public-inputs operator-key trials --kit FROZEN_S
 python qa/blind_variants.py seal 审核人填写的副本.docx 私存/case.json --name case
 python qa/blind_variants.py score 私存/case.json 保管人副本/case.sha256 实际草稿.docx
 ```
+
+## 性能修改的泛化复验
+
+在旧版和候选版上使用相同的模型、原始来件、评分器和预先封存的答案。每次开新会话，工作目录只放来件与该版本的 Skill。保留首轮未交付、追加提问、历版草稿和最终报告。对两个输出目录分别按原参数加 --rescore 运行一次 qa/run_blind_variants.py，随后比较。下例的两组成对题均保留相同的目标表和样品列，变化发生在来源证据里。
+
+~~~text
+python qa/compare_blind_runs.py 旧版评测目录 候选版评测目录 --vault 封存答案目录 --transform case-01 case-03 --transform case-02 case-04
+~~~
+
+命令要求候选版每个应填位置和应空位置全部正确。对指定的成对题，两个封存答案相同的位置还要保持显示文本一致，例如调换来源列后仍保留小数末尾零。退出码 0 表示这些检查通过，1 表示观察到质量问题，2 表示记录不齐或不可比。耗时单列，不参与判定。复验还要按来件核对批注实际指向的样品或段落、关键缺件是否进入报告，以及模型采用的来源是否超出委托。对日常优化继续使用已封存的回归题，并加入新命名、证据缺失和不同业务文字的未见题。新增题的答案先封存，再交给模型。[一次完整的新旧版对照](reports/fourth-review/generalization.md)

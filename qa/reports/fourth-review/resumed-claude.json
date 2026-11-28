@@ -1,0 +1,653 @@
+{
+  "windows_kit_sha256": "d29d8ba5f3ce665f450df057193c00c0d3613f1819e8e82499e508ccba8a6666",
+  "initial_successful_excerpts": 2,
+  "fresh_sessions_after_402": 28,
+  "original_interrupted_sessions": 28,
+  "calculation": "Nearest-rank P90 per group. Ordinary runs use DOCX mtime. Variant post_draft_calls uses last draft_ready receipt, post_file_write_calls uses DOCX mtime. Handoff seconds include simulated terminal confirmation and refusal checks.",
+  "summary": {
+    "record": {
+      "attempts": 5,
+      "perfect": 5,
+      "wall_seconds": {
+        "median": 344.53,
+        "p90": 495.17,
+        "max": 495.17
+      },
+      "tools": {
+        "median": 51,
+        "p90": 66,
+        "max": 66
+      },
+      "post": {
+        "median": 8,
+        "p90": 13,
+        "max": 13
+      },
+      "within_five": 1
+    },
+    "excerpt": {
+      "attempts": 5,
+      "perfect": 5,
+      "wall_seconds": {
+        "median": 30.89,
+        "p90": 52.42,
+        "max": 52.42
+      },
+      "tools": {
+        "median": 8,
+        "p90": 12,
+        "max": 12
+      },
+      "post": {
+        "median": 2,
+        "p90": 7,
+        "max": 7
+      },
+      "within_five": 4
+    },
+    "batch": {
+      "attempts": 5,
+      "perfect": 5,
+      "wall_seconds": {
+        "median": 294.42,
+        "p90": 394.77,
+        "max": 394.77
+      },
+      "tools": {
+        "median": 76,
+        "p90": 92,
+        "max": 92
+      },
+      "post": {
+        "median": 16,
+        "p90": 35,
+        "max": 35
+      },
+      "within_five": 0
+    },
+    "case-01": {
+      "attempts": 5,
+      "perfect": 5,
+      "wall_seconds": {
+        "median": 176.31,
+        "p90": 210.48,
+        "max": 210.48
+      },
+      "tools": {
+        "median": 37,
+        "p90": 45,
+        "max": 45
+      },
+      "post": {
+        "median": 5,
+        "p90": 10,
+        "max": 10
+      },
+      "within_five": 3
+    },
+    "case-02": {
+      "attempts": 5,
+      "perfect": 5,
+      "wall_seconds": {
+        "median": 169.95,
+        "p90": 217.26,
+        "max": 217.26
+      },
+      "tools": {
+        "median": 35,
+        "p90": 45,
+        "max": 45
+      },
+      "post": {
+        "median": 3,
+        "p90": 9,
+        "max": 9
+      },
+      "within_five": 3
+    },
+    "handoff": {
+      "attempts": 5,
+      "perfect": 5,
+      "wall_seconds": {
+        "median": 109.35,
+        "p90": 127.61,
+        "max": 127.61
+      },
+      "tools": {
+        "median": 22,
+        "p90": 35,
+        "max": 35
+      },
+      "post": {
+        "median": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "within_five": 5
+    }
+  },
+  "runs": {
+    "record": [
+      {
+        "trial": 1,
+        "period": "resumed",
+        "passed": true,
+        "correct": 163,
+        "expected": 163,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit": 0,
+        "draft_versions": 1,
+        "seconds": 344.53,
+        "turns": 3,
+        "first_attempt_returncode": 0,
+        "tool_calls": 53,
+        "post_draft_calls": 13
+      },
+      {
+        "trial": 2,
+        "period": "resumed",
+        "passed": true,
+        "correct": 163,
+        "expected": 163,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit": 0,
+        "draft_versions": 1,
+        "seconds": 312.69,
+        "turns": 3,
+        "first_attempt_returncode": 0,
+        "tool_calls": 47,
+        "post_draft_calls": 9
+      },
+      {
+        "trial": 3,
+        "period": "resumed",
+        "passed": true,
+        "correct": 163,
+        "expected": 163,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit": 0,
+        "draft_versions": 1,
+        "seconds": 210.36,
+        "turns": 3,
+        "first_attempt_returncode": 0,
+        "tool_calls": 35,
+        "post_draft_calls": 8
+      },
+      {
+        "trial": 4,
+        "period": "resumed",
+        "passed": true,
+        "correct": 163,
+        "expected": 163,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit": 0,
+        "draft_versions": 2,
+        "seconds": 495.17,
+        "turns": 3,
+        "first_attempt_returncode": 0,
+        "tool_calls": 66,
+        "post_draft_calls": 8
+      },
+      {
+        "trial": 5,
+        "period": "resumed",
+        "passed": true,
+        "correct": 163,
+        "expected": 163,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit": 0,
+        "draft_versions": 3,
+        "seconds": 353.86,
+        "turns": 3,
+        "first_attempt_returncode": 0,
+        "tool_calls": 51,
+        "post_draft_calls": 4
+      }
+    ],
+    "excerpt": [
+      {
+        "trial": 1,
+        "period": "first",
+        "passed": true,
+        "correct": 24,
+        "expected": 24,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit": 0,
+        "draft_versions": 1,
+        "seconds": 52.42,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 12,
+        "post_draft_calls": 7
+      },
+      {
+        "trial": 2,
+        "period": "first",
+        "passed": true,
+        "correct": 24,
+        "expected": 24,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit": 0,
+        "draft_versions": 1,
+        "seconds": 37.32,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 6,
+        "post_draft_calls": 1
+      },
+      {
+        "trial": 3,
+        "period": "resumed",
+        "passed": true,
+        "correct": 24,
+        "expected": 24,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit": 0,
+        "draft_versions": 1,
+        "seconds": 28.35,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 8,
+        "post_draft_calls": 2
+      },
+      {
+        "trial": 4,
+        "period": "resumed",
+        "passed": true,
+        "correct": 24,
+        "expected": 24,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit": 0,
+        "draft_versions": 1,
+        "seconds": 22.36,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 6,
+        "post_draft_calls": 1
+      },
+      {
+        "trial": 5,
+        "period": "resumed",
+        "passed": true,
+        "correct": 24,
+        "expected": 24,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit": 0,
+        "draft_versions": 1,
+        "seconds": 30.89,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 8,
+        "post_draft_calls": 3
+      }
+    ],
+    "batch": [
+      {
+        "trial": 1,
+        "period": "resumed",
+        "passed": true,
+        "correct": 200,
+        "expected": 200,
+        "score": {
+          "unscored_cells": 0,
+          "counts": {
+            "正确填写": 70,
+            "错误填写": 0,
+            "正确留空": 130,
+            "错误留空": 0
+          }
+        },
+        "exit": 0,
+        "draft_versions": 5,
+        "seconds": 263.87,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 58,
+        "post_draft_calls": 13
+      },
+      {
+        "trial": 2,
+        "period": "resumed",
+        "passed": true,
+        "correct": 200,
+        "expected": 200,
+        "score": {
+          "unscored_cells": 0,
+          "counts": {
+            "正确填写": 70,
+            "错误填写": 0,
+            "正确留空": 130,
+            "错误留空": 0
+          }
+        },
+        "exit": 0,
+        "draft_versions": 5,
+        "seconds": 248.43,
+        "turns": 2,
+        "first_attempt_returncode": 1,
+        "tool_calls": 50,
+        "post_draft_calls": 7
+      },
+      {
+        "trial": 3,
+        "period": "resumed",
+        "passed": true,
+        "correct": 200,
+        "expected": 200,
+        "score": {
+          "unscored_cells": 0,
+          "counts": {
+            "正确填写": 70,
+            "错误填写": 0,
+            "正确留空": 130,
+            "错误留空": 0
+          }
+        },
+        "exit": 0,
+        "draft_versions": 5,
+        "seconds": 328.15,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 76,
+        "post_draft_calls": 25
+      },
+      {
+        "trial": 4,
+        "period": "resumed",
+        "passed": true,
+        "correct": 200,
+        "expected": 200,
+        "score": {
+          "unscored_cells": 0,
+          "counts": {
+            "正确填写": 70,
+            "错误填写": 0,
+            "正确留空": 130,
+            "错误留空": 0
+          }
+        },
+        "exit": 0,
+        "draft_versions": 5,
+        "seconds": 394.77,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 92,
+        "post_draft_calls": 35
+      },
+      {
+        "trial": 5,
+        "period": "resumed",
+        "passed": true,
+        "correct": 200,
+        "expected": 200,
+        "score": {
+          "unscored_cells": 0,
+          "counts": {
+            "正确填写": 70,
+            "错误填写": 0,
+            "正确留空": 130,
+            "错误留空": 0
+          }
+        },
+        "exit": 0,
+        "draft_versions": 10,
+        "seconds": 294.42,
+        "turns": 1,
+        "first_attempt_returncode": 0,
+        "tool_calls": 92,
+        "post_draft_calls": 16
+      }
+    ],
+    "case-01": [
+      {
+        "trial": 1,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 152.76,
+        "tool_calls": 31,
+        "post_draft_calls": 5,
+        "post_file_write_calls": 5
+      },
+      {
+        "trial": 2,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 200.21,
+        "tool_calls": 45,
+        "post_draft_calls": 10,
+        "post_file_write_calls": 10
+      },
+      {
+        "trial": 3,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 210.48,
+        "tool_calls": 37,
+        "post_draft_calls": 7,
+        "post_file_write_calls": 7
+      },
+      {
+        "trial": 4,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 176.31,
+        "tool_calls": 45,
+        "post_draft_calls": 5,
+        "post_file_write_calls": 5
+      },
+      {
+        "trial": 5,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 148.07,
+        "tool_calls": 35,
+        "post_draft_calls": 3,
+        "post_file_write_calls": 3
+      }
+    ],
+    "case-02": [
+      {
+        "trial": 1,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 147.9,
+        "tool_calls": 35,
+        "post_draft_calls": 3,
+        "post_file_write_calls": 3
+      },
+      {
+        "trial": 2,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 156.55,
+        "tool_calls": 31,
+        "post_draft_calls": 3,
+        "post_file_write_calls": 3
+      },
+      {
+        "trial": 3,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 180.02,
+        "tool_calls": 33,
+        "post_draft_calls": 6,
+        "post_file_write_calls": 6
+      },
+      {
+        "trial": 4,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 217.26,
+        "tool_calls": 45,
+        "post_draft_calls": 9,
+        "post_file_write_calls": 9
+      },
+      {
+        "trial": 5,
+        "expected": 33,
+        "correct": 33,
+        "passed": true,
+        "draft_versions": 1,
+        "turns": 1,
+        "seconds": 169.95,
+        "tool_calls": 45,
+        "post_draft_calls": 3,
+        "post_file_write_calls": 3
+      }
+    ],
+    "handoff": [
+      {
+        "trial": 1,
+        "expected": 200,
+        "correct": 200,
+        "passed": true,
+        "draft_versions": 5,
+        "turns": 1,
+        "seconds": 109.346,
+        "tool_calls": 22,
+        "post_draft_calls": 0,
+        "post_seal_calls": 2,
+        "plan_seconds": 105.828,
+        "deliver_seconds": 2.456,
+        "docx_cells_compared": 480
+      },
+      {
+        "trial": 2,
+        "expected": 200,
+        "correct": 200,
+        "passed": true,
+        "draft_versions": 5,
+        "turns": 1,
+        "seconds": 92.954,
+        "tool_calls": 22,
+        "post_draft_calls": 0,
+        "post_seal_calls": 2,
+        "plan_seconds": 89.87,
+        "deliver_seconds": 2.193,
+        "docx_cells_compared": 480
+      },
+      {
+        "trial": 3,
+        "expected": 200,
+        "correct": 200,
+        "passed": true,
+        "draft_versions": 5,
+        "turns": 1,
+        "seconds": 113.563,
+        "tool_calls": 22,
+        "post_draft_calls": 0,
+        "post_seal_calls": 0,
+        "plan_seconds": 110.359,
+        "deliver_seconds": 2.174,
+        "docx_cells_compared": 480
+      },
+      {
+        "trial": 4,
+        "expected": 200,
+        "correct": 200,
+        "passed": true,
+        "draft_versions": 5,
+        "turns": 1,
+        "seconds": 82.501,
+        "tool_calls": 19,
+        "post_draft_calls": 0,
+        "post_seal_calls": 0,
+        "plan_seconds": 79.184,
+        "deliver_seconds": 2.284,
+        "docx_cells_compared": 480
+      },
+      {
+        "trial": 5,
+        "expected": 200,
+        "correct": 200,
+        "passed": true,
+        "draft_versions": 5,
+        "turns": 1,
+        "seconds": 127.607,
+        "tool_calls": 35,
+        "post_draft_calls": 0,
+        "post_seal_calls": 1,
+        "plan_seconds": 124.628,
+        "deliver_seconds": 2.157,
+        "docx_cells_compared": 480
+      }
+    ]
+  }
+}
