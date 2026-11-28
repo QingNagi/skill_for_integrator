@@ -470,11 +470,13 @@ def _merge(job, prev, pristine, new, discard, res):
         tmp = new + '.merge.tmp'
         try:
             main = 'word/document.xml'
-            if ours_rd.pkg.parts[main] == base_rd.pkg.parts[main]:
+            merged = Package(prev)
+            if ours_rd.pkg.parts[main] != base_rd.pkg.parts[main]:
+                merged.parts[main] = ours_rd.pkg.parts[main]
+            reordered = merged.normalize_cell_properties()
+            if not reordered and ours_rd.pkg.parts[main] == base_rd.pkg.parts[main]:
                 shutil.copyfile(prev, tmp)
             else:
-                merged = Package(prev)
-                merged.parts[main] = ours_rd.pkg.parts[main]
                 merged.save(tmp)
             os.replace(tmp, new)
         finally:
@@ -542,6 +544,7 @@ def _merge(job, prev, pristine, new, discard, res):
     if kept or conflicts or ncom:
         tmp = new + '.merge.tmp'
         try:
+            ours_rd.pkg.normalize_cell_properties()
             ours_rd.pkg.save(tmp)
             os.replace(tmp, new)
         finally:

@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import os
 import re
+from xml.etree.ElementTree import ParseError
 
 from .common import norm_text, short
 from .numbering import Numbering
+from .safe_xml import parse_xml
 from .text_patterns import CAPTION_RE, HEAD_PATTERNS
 from .ooxml import (Package, W, W_P, W_PPR, W_R, W_RPR, W_T, W_TBL, W_TC, W_TR, W_VAL, iter_skip_fallback, qn, w)
 
@@ -51,6 +53,35 @@ R_ID = qn("r:id")
 
 
 _SKIP_PARA = {w("del"), w("moveFrom"), w("txbxContent"), qn("mc:Fallback")}
+
+
+# These are structural and ordinary formatting elements in Word's separator paragraphs.
+_NOTE_FORMAT = {w(tag) for tag in ("p", "r", "pPr", "rPr", "pStyle", "rStyle", "spacing", "ind", "jc",
+                                    "rFonts", "sz", "szCs", "color", "lang", "b", "i", "u", "vertAlign",
+                                    "snapToGrid", "contextualSpacing", "keepNext", "keepLines", "widowControl")}
+
+
+def _only_note_separators(raw, kind):
+    try:
+        root = parse_xml(raw)
+    except (ParseError, LookupError, ValueError):
+        return False
+    if root.tag != w(kind + "s") or any(text.strip() for text in root.itertext()):
+        return False
+    markers = set()
+    ids = set()
+    for note in root:
+        marker = note.get(w("type"))
+        note_id = note.get(w("id"), "")
+        if (note.tag != w(kind) or marker not in ("separator", "continuationSeparator") or marker in markers
+                or not re.fullmatch(r"-?[0-9]+", note_id) or note_id in ids):
+            return False
+        allowed = _NOTE_FORMAT | {w(kind), w(kind + "Ref"), w(marker)}
+        if note.find(f".//{W_P}/{W_R}/{w(marker)}") is None or any(el.tag not in allowed for el in note.iter()):
+            return False
+        markers.add(marker)
+        ids.add(note_id)
+    return True
 
 
 def _paragraph_elements(paragraph):
@@ -132,6 +163,13 @@ class DocxReader:
     def _structure_notes(self, body):
         for name, label in (("header", "页眉"), ("footer", "页脚"), ("footnotes", "脚注"), ("endnotes", "尾注")):
             parts = [part for part in self.pkg.order if re.fullmatch("word/" + name + r"\d*\.xml", part)]
+            if name in ("footnotes", "endnotes"):
+                kind = name[:-1]
+                referenced = body.find(".//" + w(kind + "Reference")) is not None
+                if referenced and not parts:
+                    self.read_warnings.append("正文引用%s，但未找到对应部件" % label)
+                if not referenced:
+                    parts = [part for part in parts if not _only_note_separators(self.pkg.parts[part], kind)]
             if parts:
                 self.read_warnings.append("%s部件未作为正文取值：%s" % (label, "、".join(parts)))
         types = {w("txbxContent"): "文本框内容未作为正文取值", qn("m:oMath"): "公式只提取文字，未重建公式结构",

@@ -6,7 +6,7 @@ from pathlib import Path
 from xml.etree.ElementTree import ParseError
 
 import test_selfcheck as fixtures
-from dilib import ooxml, plan_xlsx, read_other, selfcheck
+from dilib import ooxml, program_manifest, read_other, selfcheck
 
 
 class OfficeXmlTests(unittest.TestCase):
@@ -27,10 +27,10 @@ class OfficeXmlTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory, 'source.xlsx')
             fixtures.make_xlsx(path, {'xl/_rels/workbook.xml.rels': rels})
-            for read in (read_other.read_xlsx, plan_xlsx.read_workbook):
-                with self.subTest(reader=read.__module__):
-                    with self.assertRaisesRegex(ParseError, 'DOCTYPE'):
-                        read(str(path))
+            with self.assertRaisesRegex(ParseError, 'DOCTYPE'):
+                read_other.read_xlsx(str(path))
+            with self.assertRaisesRegex(program_manifest.DIError, 'DOCTYPE'):
+                program_manifest.workbook_rows(path, None)
             with self.assertRaisesRegex(ParseError, 'DOCTYPE'):
                 ooxml.Package(path).rels('xl/workbook.xml')
 

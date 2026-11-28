@@ -33,7 +33,7 @@ NS_PR = 'http://schemas.openxmlformats.org/package/2006/relationships'
 NS_X = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 KIND_BY_EXT = {'.docx': 'docx', '.docm': 'docx', '.dotx': 'docx', '.xlsx': 'xlsx', '.xlsm': 'xlsx', '.xltx': 'xlsx'}
 TITLES = {}            # 类别代码 -> 中文名，见文件末尾
-XLSX_CHECKS = []       # write_xlsx 线补 xlsx 专有检查时往这里登记：函数签名 fn(pkg, rep)
+XLSX_CHECKS = []       # 扩展工作簿结构检查时在此登记，函数签名 fn(pkg, rep)
 
 
 def q(ns, local):

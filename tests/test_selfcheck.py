@@ -672,7 +672,7 @@ class XlsxTests(T):
         self.assertHas(sc.check_file(p), 'rid-missing', sc.ERROR)
 
     def test_xlsx_specific_hook_runs(self):
-        '''write_xlsx 线补的专有检查通过 XLSX_CHECKS 登记；这里验证登记点会被调用，且自身出错时登记为“自检没跑完”。'''
+        '''工作簿专有检查通过 XLSX_CHECKS 登记；这里验证登记点会被调用，且自身出错时登记为“自检没跑完”。'''
         p = os.path.join(self.d, 'd.xlsx')
         make_xlsx(p)
         calls = []

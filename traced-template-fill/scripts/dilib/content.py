@@ -10,7 +10,7 @@ import re
 from . import office
 from .common import DIError, bigrams, contains_score, ensure_dir, file_sha1, read_json, short, write_json
 
-MODEL_VERSION = 13
+MODEL_VERSION = 14
 DOC_EXT = {".docx", ".docm", ".dotx"}
 LEGACY_WORD = {".doc", ".wps", ".wpt", ".rtf", ".dot", ".odt", ".mht"}
 SHEET_EXT = {".xlsx", ".xlsm"}

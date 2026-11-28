@@ -291,6 +291,25 @@ class Package:
         el.set("PartName", pn)
         el.set("ContentType", ctype)
 
+    def normalize_cell_properties(self):
+        """Restore known table-cell property sequences on output copies of Word documents."""
+        count = 0
+        for name in self.parts:
+            if not re.fullmatch(r"word/(document|header\d*|footer\d*|footnotes|endnotes|comments|styles|numbering)\.xml", name):
+                continue
+            loaded = name in self._xml
+            data = self.parts[name]
+            if not loaded and b"tcPr" not in data and b"\x00" not in data[:128]:
+                continue
+            root = self.xml(name)
+            changed = sum(_order_cell_properties(pr) for pr in root.iter(W_TCPR))
+            count += changed
+            if not loaded and not changed:
+                # Keep unrelated parts byte-for-byte, including their original namespace declarations.
+                del self._xml[name]
+                del self._ns[name]
+        return count
+
     def save(self, path):
         for r in self._rels.values():
             r.save()
@@ -317,7 +336,27 @@ RPR_ORDER = ["rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "s
              "w", "kern", "position", "sz", "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText",
              "vertAlign", "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath"]
 TCPR_ORDER = ["cnfStyle", "tcW", "gridSpan", "hMerge", "vMerge", "tcBorders", "shd", "noWrap", "tcMar",
-              "textDirection", "tcFitText", "vAlign", "hideMark"]
+              "textDirection", "tcFitText", "vAlign", "hideMark", "headers", "cellIns", "cellDel", "cellMerge", "tcPrChange"]
+_TCPR_RANK = {w(name): index for index, name in enumerate(TCPR_ORDER)}
+
+
+def _order_cell_properties(properties):
+    children = list(properties)
+    # An unknown property or AlternateContent may contain producer-specific
+    # instructions. Reorder only consecutive, recognized Word properties.
+    start = 0
+    while start < len(children):
+        end = start
+        while end < len(children) and children[end].tag in _TCPR_RANK:
+            end += 1
+        children[start:end] = sorted(children[start:end], key=lambda e: _TCPR_RANK[e.tag])
+        start = end + 1
+    if children == list(properties):
+        return 0
+    properties[:] = children
+    return 1
+
+
 TBLPR_ORDER = ["tblStyle", "tblpPr", "tblOverlap", "bidiVisual", "tblStyleRowBandSize", "tblStyleColBandSize",
                "tblW", "jc", "tblCellSpacing", "tblInd", "tblBorders", "shd", "tblLayout", "tblCellMar", "tblLook"]
 TRPR_ORDER = ["cnfStyle", "divId", "gridBefore", "gridAfter", "wBefore", "wAfter", "cantSplit", "trHeight",

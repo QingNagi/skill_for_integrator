@@ -213,7 +213,7 @@ class Planner(TablePlanningMixin):
                            if tablemap.role_of(c["path"])[0] == "sample"}
                 rows = self.affected_spec_rows(t, rg)
                 if rows:
-                    self.add_impact(q, self.measurement_cells(t, rows, samples))
+                    self.add_spec_impact(q, t, rows, samples)
                 self.mark_stale(t, rows, samples, set())
             self.report["unfilled"].append("规范型号适用性待确认，已暂停按规范和测试记录填写。")
         else:
@@ -222,6 +222,7 @@ class Planner(TablePlanningMixin):
             self.plan_sections()
             self.plan_fields()
             self.apply_manual()
+            self.report_sections()
         self.check_unread()
         self.check_ocr()
         self.report['stale'] = self.stale
@@ -428,6 +429,10 @@ class Planner(TablePlanningMixin):
         for alias, md in docs.items():
             title = re.sub(r"\s+", "", md.m.get("title", ""))
             name = re.sub(r"\.\w+$", "", md.m["name"])
+            compact_name = re.sub(r"\s+", "", name)
+            if title.startswith(compact_name) and any(
+                    b["t"] == "p" and re.sub(r"\s+", "", b.get("text", "")) == compact_name for b in md.m.get("blocks", [])[:12]):
+                title = compact_name
             basis = next((x for x in (title, name) if re.search(r"规范|标准|细则|大纲", x)), None)
             if basis:
                 value = re.sub(r"^半导体集成电路", "", basis)
@@ -784,17 +789,41 @@ class Planner(TablePlanningMixin):
                 self.summary.append("[章节摘抄] %s ← %s" % (s["title"], "；".join(
                     ("%s:%s“%s”" % (p["alias"], p.get("sec") or p.get("start"), short(p.get("title", ""), 16))) if p.get("alias")
                     else "待补充(%s)" % p.get("label_doc") for p in picks)))
-                for it in items:
-                    p = it.get("src") or {}
-                    self.report["fills"].append({"target": s["title"], "value": short(" ".join(
-                        "".join(r[0] for r in g.get("runs", [])) if g["type"] in ("para", "subheading") else
-                        ("[表]" if "table" in g["type"] else "[图]") for g in it["group"] if g["type"] != "subheading" or True), 60),
-                        "source": "%s:%s" % (p.get("alias"), p.get("sec") or p.get("start")) if p else "—",
-                        "how": it.get("warn") or p.get("how", "")})
         # 现有标题统一格式
         for s in self.an.get("sections", []):
             if s["empty"] or s["requirements"]:
                 self.ops.append({"id": self.oid(), "op": "format_heading", "block": s["start"]})
+
+    def report_sections(self):
+        """根据实际写入的章节登记来源，含人工追加和替换后的内容。"""
+        titles = {section["start"]: section["title"] for section in self.an.get("sections", [])}
+        for op in self.ops:
+            if op["op"] != "insert_section":
+                continue
+            for item in op.get("items", []):
+                src = item.get("src") or {}
+                alias = src.get("alias")
+                ref = src.get("sec") or src.get("start") or next(iter(src.get("range") or []), None)
+                if alias not in self.src or ref not in self.src[alias].by:
+                    if not item.get("warn"):
+                        continue
+                    source = "—"
+                else:
+                    source = "%s:%s" % (alias, ref)
+                parts = []
+                for block in item.get("group", []):
+                    kind = block["type"]
+                    if kind == "para":
+                        parts.append("".join(run[0] for run in block.get("runs", [])))
+                    elif kind in ("table", "kvtable"):
+                        parts.append("[表]")
+                    elif kind == "figure":
+                        parts.append("[图]")
+                    elif block.get("text"):
+                        parts.append(block["text"])
+                self.report["fills"].append({"target": titles.get(op["anchor"], op["anchor"]),
+                                             "value": short(" ".join(parts), 60), "source": source,
+                                             "how": item.get("warn") or src.get("how", "")})
 
     def _kv_header(self, title, kv):
         if re.search(r"进度|节点|计划|里程碑", title):

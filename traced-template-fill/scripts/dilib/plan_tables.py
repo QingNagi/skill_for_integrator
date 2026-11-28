@@ -61,23 +61,57 @@ class TablePlanningMixin:
             return existing
         _, alias, tid = ranked[0]
         model = self.src[alias]
-        roles = {tablemap.role_of(c["path"])[0]: c["c"] for c in tablemap.table_columns(model, tid)}
+        source_columns = tablemap.table_columns(model, tid)
+        roles = {tablemap.role_of(c["path"])[0]: c["c"] for c in source_columns}
+        mapping, _ = tablemap.map_columns(source_columns, [dict(c) for c in rg["cols"]])
+        field_cols = {c: m["from"][0] for c, m in mapping.items()
+                      if m["role"] in ("cond", "min", "max", "unit") and len(m["from"]) == 1}
+        target_cells = {(c["r"], c["c"]): c["text"] for c in self.T.by[t["id"]]["cells"]}
         foot = tablemap.footnotes(model, tid)
         logical, _ = tablemap.logical_rows(model, tid)
         prospective = []
-        excluded, required = set(), set()
+        by_symbol = {}
         for i, src_row in enumerate(logical):
             cells = src_row["cells"]
             symbol = cells.get(roles.get("symbol"), ("", []))[0] or testdata.extract_symbol(cells.get(roles.get("name"), ("", []))[0])
             marks = [m for _, runs in cells.values() for m in tablemap.strip_marks(runs)[1]]
+            symbol, mark = tablemap.split_symbol_mark(symbol, foot)
+            if mark:
+                marks.append(mark)
             exempt = any(re.search(r"不测试|不检验|设计保证|不考核", foot.get(m, "")) for m in marks)
-            (excluded if exempt else required).add(testdata.norm_sym(symbol))
+            by_symbol.setdefault(testdata.norm_sym(symbol), []).append((src_row, exempt))
             prospective.append({"row": rg["rows"][0] + i, "sym": symbol, "not_tested": exempt})
-        if existing:
-            for r in existing:
-                r["not_tested"] = testdata.norm_sym(r.get("sym", "")) in (excluded - required)
-            return existing
-        return prospective
+        result = existing or prospective
+        for r in result:
+            hits = by_symbol.get(testdata.norm_sym(r["sym"]), [])
+            r["in_spec"] = bool(hits)
+            if not hits:
+                continue
+            r["not_tested"] = all(exempt for _, exempt in hits)
+            if len(hits) != 1:
+                continue
+            source_row = hits[0][0]
+            r["spec_cells"] = []
+            for tc, sc in field_cols.items():
+                source_text = source_row["cells"].get(sc, ("", []))[0]
+                if not source_text.strip() or target_cells.get((r["row"], tc), "").strip():
+                    continue
+                r["spec_cells"].append({"target": "%s.R%d.C%d" % (t["id"], r["row"], tc), "symbol": r["sym"],
+                                        "candidate": source_text, "kind": "规范字段",
+                                        "source": "%s:%s.R%d.C%d" % (alias, source_row["table"], source_row["r"], sc)})
+        return result
+
+    def add_spec_impact(self, q, table, rows, sample_columns):
+        positions = self.measurement_cells(table, [r for r in rows if r.get("in_spec", True)], sample_columns)
+        for cell in positions:
+            cell["kind"] = "规范对应实测位置"
+        spec_cells = [cell for row in rows for cell in row.get("spec_cells", [])]
+        self.add_impact(q, spec_cells + positions)
+        counts = {kind: sum(c.get("kind") == kind for c in q["affected_cells"]) for kind in ("规范字段", "规范对应实测位置")}
+        q["impact_by_kind"] = counts
+        q["question"] = q["question"].split("（影响 ")[0] + "（影响 %s）" % "、".join(
+            "%s %d 格，如 %s" % (kind, count, next(c["target"] for c in q["affected_cells"] if c["kind"] == kind))
+            for kind, count in counts.items() if count)
 
     def fill_from_table(self, t, rg, tcols, alias, tid):
         md = self.src[alias]
@@ -143,6 +177,10 @@ class TablePlanningMixin:
                 elif mp["role"] in ("min", "max", "unit", "cond"):
                     row_info[{"min": "lo", "max": "hi", "unit": "unit", "cond": "cond"}[mp["role"]]] = \
                         "".join(x[0] for x in runs)
+            if row_info.get("sym"):
+                row_info["sym"], plain_mark = tablemap.split_symbol_mark(row_info["sym"], foot)
+                if plain_mark:
+                    marks.append(plain_mark)
             notes = [foot[m] for m in marks if m in foot]
             row_info["not_tested"] = any(re.search(r"不测试|不检验|设计保证|不考核", n) for n in notes)
             row_info["foot"] = ["注%s：%s" % (m, foot[m]) for m in marks if m in foot]
@@ -316,6 +354,10 @@ class TablePlanningMixin:
                             for c in tcols if tablemap.role_of(c["path"])[0] == "sample")
         targets = [{"column_type": rules.get("column_types", {}).get(r.get("sym"), "judgment" if judgment_cols else "measurement"), "row": r["row"], "sym": r.get("sym"), "name": r.get("name", ""), "lo": r.get("lo"), "hi": r.get("hi"),
                     "unit": r.get("unit", ""), "cond": r.get("cond", ""), "not_tested": r.get("not_tested")} for r in rows]
+        permitted_judgments = re.findall(r"(?:允许|约定)([一-鿿]{2,16}?)(?:使用|用|写|填)(?:判定|结论)", getattr(self, "task", ""))
+        for target in targets:
+            if any(name in target["name"] for name in permitted_judgments):
+                target["column_type"] = "judgment"
         ans_map = {}
         for k, v in self.answers.items():
             if k.startswith("td:") and k.endswith(scope):
@@ -337,7 +379,7 @@ class TablePlanningMixin:
             key = question_key(q["key"])
             question = next((existing for existing in self.questions if existing["key"] == key), None)
             if question is None:
-                question = self.ask(dict(q, key=key, source_scope=alias + ":" + sheet["name"],
+                question = self.ask(dict(q, key=key, source_scope=alias + ":" + sheet["name"], source_label_col=parsed["label_col"],
                                          source_models=sorted(book_fields["model"] | template_identity["model"])))
             affected = [dict(c) for c in cells if c["symbol"] in q["symbols"] and c["sample"] in parsed["sample_cols"]]
             for c in affected:
@@ -353,6 +395,11 @@ class TablePlanningMixin:
                     c["source"] = "; ".join(alias + ":" + r for r in item.get("ranges", []))
                     c["candidate"] = item.get("raw", "")
             self.add_impact(question, affected)
+        if res["condition_gaps"]:
+            detail = "；".join("%s 清单工况 %s，规范要求 %s" % (sym, actual, wanted)
+                               for sym, (actual, wanted) in sorted(res["condition_gaps"].items()))
+            self.block_source("verify:conditions" + scope, "实测工况适用范围",
+                              "以下仅反映清单工况，规范要求未经完整核实，不能据此认定全部符合：" + detail)
         review = [s for s in res["review"] if "修约前后限值判定翻转" not in s]
         for detail in res["review"]:
             if "修约前后限值判定翻转" in detail:
@@ -399,6 +446,10 @@ class TablePlanningMixin:
                 notes.add(cell["how"])
                 if cell["check"] != "ok" or cell["conf"] < 0.9:
                     warn = True
+                if cell["value"] and cell["check"] == "out" and cid != first_cell:
+                    self.ops.append({"id": self.oid(), "op":"comment", "anchor":cid, "warn":True,
+                                     "text":"⚠【超限】%s：%s" % (sym_of[row], cell["check_msg"]),
+                                     "links":[{"label":"打开实测原始读数","alias":alias,"ref":ref} for ref in cell["ranges"]]})
                 entries = self.report["fills"] if cell["value"] else self.report.setdefault("held_measurements", [])
                 if not cell["value"]:
                     self.report["unfilled"].append("%s %s 样品%s：%s" % (cid, sym_of[row], sid, cell["check_msg"] or cell["how"]))
@@ -411,9 +462,9 @@ class TablePlanningMixin:
                     "批次身份": {"scope": src_scope, "value": book_identity, "evidence": "来源表头、工作表名和本批来源核对"},
                     "规范适用": {"scope": spec_scope, "value": model_evidence, "evidence": {"target_region": rg["id"]}},
                     "样品对应": {"scope": src_scope, "value": [source_sample[sid], sid], "evidence": {"header_row": parsed["header_row"], "target": rg["id"]}},
-                    "测试条件": {"scope": src_scope, "value": target_row.get("cond"), "evidence": context},
+                    "测试条件": {"scope": src_scope, "value": cell["actual_condition"], "evidence": {"source_labels": context, "required": target_row.get("cond")}},
                     "参数归属": {"scope": src_scope, "value": sym_of[row], "evidence": {"labels": cell["labels"], "method": cell["hows"]}},
-                    "值类型与极性": {"scope": spec_scope, "value": target_row["column_type"], "evidence": {"source": src_scope, "unit": target_row.get("unit"),
+                    "值类型与极性": {"scope": spec_scope, "value": cell["effective_column_type"], "evidence": {"source": src_scope, "unit": target_row.get("unit"),
                               "polarity": "negate" if "取负号" in cell["how"] else rules.get("polarity", {}).get(sym_of[row], "signed"), "method": cell["how"]}}}
 
                 entries.append({"decision_keys": dependencies, "observations": observations, "target": cid, "value": cell["value"], "source": "%s:%s" % (alias, ";".join(cell["ranges"])),
@@ -423,6 +474,7 @@ class TablePlanningMixin:
                                              "source_sample": source_sample[sid], "target_sample": sid,
                                              "target_header": rg.get("header"),
                                              "header_row": parsed["header_row"], "label_col": parsed["label_col"],
+                                             "label_rows": cell["label_rows"], **{k:cell[k] for k in ("value_kind","sign") if k in cell},
                                              "range_labels": cell["range_labels"], **({"pass_code": cell["pass_code"]} if "pass_code" in cell else {})})
             if first_cell:
                 c0 = next(iter(fill.values()))
@@ -525,15 +577,17 @@ class TablePlanningMixin:
         foot = tablemap.footnotes(md, tid)
         src = {}
         for lr in lrows:
-            s = testdata.norm_sym(lr['cells'].get(sym_col, ('', []))[0])
-            if s:
-                src.setdefault(s, lr)
+            raw = lr['cells'].get(sym_col, ('', []))[0].strip()
+            symbol, mark = tablemap.split_symbol_mark(raw, foot)
+            symbol = testdata.norm_sym(symbol)
+            if symbol:
+                src[symbol] = None if symbol in src else (lr, mark)
         tcol = {}
         for tc_, mp in mapping.items():
-            if mp['role'] in ('min', 'max', 'unit') and mp['from']:
+            if mp['role'] in ('cond', 'min', 'max', 'unit') and mp['from']:
                 tcol[mp['role']] = (tc_, mp['from'][0])
-        key_of = {'min': 'lo', 'max': 'hi', 'unit': 'unit'}
-        label_of = {'min': '最小', 'max': '最大', 'unit': '单位'}
+        key_of = {'cond': 'cond', 'min': 'lo', 'max': 'hi', 'unit': 'unit'}
+        label_of = {'cond':'条件', 'min': '最小', 'max': '最大', 'unit': '单位'}
         blank = lambda s: re.fullmatch(r'[\s—–\-]*', s or '') is not None
         same = lambda a, b: (blank(a) and blank(b)) or norm_text(a) == norm_text(b)
         cells = {(c['r'], c['c']): c for c in self.T.by[t['id']]['cells']}
@@ -546,17 +600,31 @@ class TablePlanningMixin:
             if lr is None:
                 notin.append(sym or r.get('name') or '')
                 continue
-            marks = []
+            lr, mark = lr
+            marks = [mark] if mark else []
             for _c, (_t, _rr) in lr['cells'].items():
                 marks += tablemap.strip_marks([list(x) for x in _rr])[1]
             if any(re.search(r'不测试|不检验|设计保证|不考核', foot[m]) for m in marks if m in foot):
                 r['not_tested'] = True  # 规范表注标明“设计保证，不测试”：本批不应有实测值
-            bad = []
+            bad, written = [], []
             for role, (tc_, scol) in tcol.items():
                 old = r.get(key_of[role]) or ''
                 new = lr['cells'].get(scol, ('', []))[0]
-                if not same(old, new):
+                if not old.strip() and new.strip():
+                    cell = '%s.R%d.C%d' % (t['id'], r['row'], tc_)
+                    runs = lr['cells'][scol][1] or [[new, '']]
+                    self.ops.append({'id': self.oid(), 'op':'set_cell', 'cell':cell, 'runs':runs,
+                                     'from_cols':[scol], 'group': 'spec:%d' % r['row']})
+                    r[key_of[role]] = new
+                    written.append(cell)
+                    self.report["fills"].append({"target":cell,"value":new,"source":"%s:%s.R%d" % (alias,lr["table"],lr["r"]),
+                                                 "how":"按相同参数符号补充规范字段"})
+                elif not same(old, new):
                     bad.append((role, tc_, old, new))
+            if written:
+                self.ops.append({'id':self.oid(), 'op':'comment','anchor':written[0], 'group':'spec:%d' % r['row'],
+                                 'text':'【规范】%s 按符号 %s 匹配到源表第%d行' % (md.m['name'], sym, lr['r'] + 1),
+                                 'links':[{'label':'打开原文','alias':alias,'ref':'%s.R%d' % (lr['table'],lr['r'])}]})
             if not bad:
                 continue
             ndrift += 1

@@ -73,7 +73,7 @@ DI batch plan "<批量任务.json>"
 在 `run --draft`、`answer --draft`、`draft` 和 `final` 后加 `--json`，标准输出只含一个 JSON 对象。成功为退出码 0。3 表示 `needs_answers`，直接展示 `questions` 中最多四道题，下一次调用可同时提交这批回答。4 表示 `blocked`，读取 `reason`。2 表示错误或部分导出失败。Python 调用用 `subprocess.run(args, check=False, capture_output=True, text=True)`，读完结果后再判断退出码。设置 `DI_TIMING=1` 可在标准错误中读取解析、规划、写入和校验各阶段的用时（秒）。
 
 - `DI questions <任务> --csv 待核清单.csv` 导出当前任务的可选决定。复核人可编辑决定和备注，以 `DI answer <任务> --from-sheet 待核清单.csv --reviewer 姓名 --user-quote "审核原话" --draft --json` 导入。保留原始位置、题号、选项和版本标识。
-- `DI answer <任务> Q3 --evidence 程序清单.csv --reviewer 姓名 --user-quote "审核原话" --draft --json` 可回答数据段归属、单位和工况。段序清单含“来源、标签、段序、测试号、参数、单位”。单位或工况清单含“来源、测试号、参数、单位”或“来源、测试号、参数、条件”。使用题目所指工作簿与工作表的来源标识。
+- `DI answer <任务> Q3 --evidence 程序清单.xlsx --reviewer 姓名 --user-quote "审核原话" --draft --json` 可回答数据段归属、单位和工况。段序清单含“来源、标签、段序、测试号、参数、单位”。单位或工况清单含“来源、测试号、参数、单位”或“来源、测试号、参数、条件”。使用题目所指工作簿与工作表的来源标识。支持 CSV 和 XLSX。对于工作区中唯一的同名源工作簿且只有一张可见表，XLSX 表头可写成“测试名（读数.xlsx A 列标签）”。其他情形请显式提供“来源”与“标签”。从 1 开始填写段序，单个连续块内需要细分时，在“首行、末行”列给出相对行号，或在备注中写“第1~4行”。同一测试号可对应多个段。工况列登记实际施加的条件，额外的规范条件须单独核对。同一轮可写 `answer <任务> Q1=2 Q3 --evidence 程序清单.xlsx --user-quote "审核原话" --draft --json`。Q1 保存人工选项，Q3 单独关联清单哈希。
 - 任务目录下的 `facts.json` 保存本次确认和来源。审核报告按位置引用事实。产品和程序版本可在测试规则中指定。用 `--remember` 明确确认过且适用范围和选项均匹配的决定可以跨任务复用。每一批都要核对批次身份。
 
 ### 扫描与图文混排 PDF

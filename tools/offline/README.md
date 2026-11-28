@@ -177,7 +177,7 @@ Windows x64 上使用包内 CPython 3.14.10 跑过简体中文与英文扫描页
 
 用套装启动器运行 `doctor --prune` 可预览旧版本，运行 `doctor --prune --apply` 才执行清理。当前版、最近安装的其他可验证版本、使用中的版本及改过规则、配置或其他文件的版本会保留。旧套装未登记安装时文件状态，也会保留。Linux 上若挂载为 `noexec`，可将 `DI_RUNTIME_DIR` 或 `XDG_DATA_HOME` 指向允许执行的文件系统后重新启动。
 
-使用 `run --draft --json` 建立任务。若有待答题，Agent 直接展示返回的问题。回答后用 `answer --draft --json` 一步继续。多项核对可经 `questions --csv` 导出和 `answer --from-sheet` 回填；产品测试程序可经 `answer --evidence` 提供来源并登记文件摘要。操作格式见技能中的 `references/commands.md`。
+使用 `run --draft --json` 建立任务。若有待答题，Agent 直接展示返回的问题。回答后用 `answer --draft --json` 一步继续。多项核对可经 `questions --csv` 导出和 `answer --from-sheet` 回填；测试程序清单支持 XLSX 和 CSV。用 `answer --evidence` 提交时，技能会核对来源、段序和单位，登记文件摘要及实际工况。操作格式见技能中的 `references/commands.md`。
 
 文件解析、OCR、缓存、草稿及来源快照均在本机处理。Agent 调用 `show --full`、展示问题或向模型转述时，当前片段会进入其配置的模型服务。机密数据应使用已获准的内网模型端点。缓存清理预览使用 `clean`，确认清理用 `clean --apply`；草稿、来源快照和审核事实仍保存在任务目录，可按项目留存要求单独管理。
 

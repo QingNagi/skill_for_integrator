@@ -477,6 +477,7 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
     final_docx = os.path.join(out_dir, "%s_终稿.docx" % job.stem)
     chk_dir = ensure_dir(os.path.join(out_dir, '.待检查'))
     chk_path = os.path.join(chk_dir, os.path.basename(final_docx))
+    pkg.normalize_cell_properties()
     pkg.save(chk_path)      # 先存到暂存位置，检查通过才替换正式稿，避免旧的正式稿被未检查的内容覆盖
     # 收件人视角：重新打开刚生成的成品做外发检查，再核对草稿登记的“本批未核”项
     blockers, warns = recipient_check(chk_path)

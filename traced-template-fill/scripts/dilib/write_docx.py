@@ -799,5 +799,8 @@ class DocxWriter:
                 self.job.data.setdefault("word_questions", {})[os.path.basename(self.draft_path)] = self.word_questions
         self.number_captions()
         self.snap.build()
+        reordered = self.pkg.normalize_cell_properties()
+        if reordered:
+            self.warnings.append("草稿副本已校正 %d 个单元格的格式属性顺序。" % reordered)
         self.pkg.save(self.draft_path)
         return self.warnings

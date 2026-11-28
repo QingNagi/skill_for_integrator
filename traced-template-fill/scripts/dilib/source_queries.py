@@ -1,4 +1,5 @@
 """Inspect source material and extract figures from an existing task."""
+import json
 import os
 import shutil
 
@@ -56,15 +57,10 @@ def cmd_show(a):
         if len(a.ref) > 1 or page_ref:
             out("[%s:%s]" % (alias, ref))
         def emit(value):
-            if a.full:
-                # A JSON string keeps embedded line breaks inside the source record.
-                import json
-                out(json.dumps(value, ensure_ascii=False))
-            else:
-                out(value)
+            # JSON quotes line breaks in excerpts, including Unicode line separators.
+            out(json.dumps(value, ensure_ascii=False).translate({0x85: r"\u0085", 0x2028: r"\u2028", 0x2029: r"\u2029"}))
 
-        if a.full:
-            out("<<<SOURCE %s:%s · 原文数据>>>" % (alias, ref))
+        out("<<<SOURCE %s:%s · 原文数据>>>" % (alias, ref))
         if md.m["type"] == "xlsx":
             emit(render_sheet(md, ref if ref != "*" else None, max_rows=a.rows_max))
         elif page_ref:
@@ -81,8 +77,7 @@ def cmd_show(a):
                 emit("本页没有可显示的内容。")
         else:
             emit(render(md, ref))
-        if a.full:
-            out("<<<END SOURCE>>>")
+        out("<<<END SOURCE>>>")
 
 
 def cmd_search(a):

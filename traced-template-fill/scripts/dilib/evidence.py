@@ -13,7 +13,7 @@ TYPES = {
     "src:verify": "批次身份", "src:spec": "规范适用", "td:source": "批次身份", "td:sheet": "批次身份",
     "td:samplemap": "样品对应", "td:duplicate": "样品对应", "td:no_suffix": "测试条件", "td:cond": "测试条件",
     "td:conditions": "测试条件", "td:map": "参数归属", "td:alias": "参数归属", "td:merge": "参数归属",
-    "td:val": "值类型与极性", "td:units": "值类型与极性", "td:multi": "值类型与极性",
+    "td:val": "值类型与极性", "td:interpret": "值类型与极性", "td:units": "值类型与极性", "td:multi": "值类型与极性",
 }
 FIELDS = ["位置", "参数", "样品", "候选值", "原始单元格", "缺少的证据", "决定", "备注", "问题", "有效选项", "版本"]
 
@@ -53,15 +53,16 @@ def prefix(q):
 
 def shared_key(job, q, pack):
     rules = job.data.get("rules", {})
-    if not rules.get("product") or not rules.get("program_version") or prefix(q) not in ("td:map", "td:val", "src:spec"):
+    if not rules.get("product") or not rules.get("program_version") or prefix(q) not in ("td:map", "td:val", "td:interpret", "src:spec"):
         return None
     # The same ordinal Q number, filename or three-word label does not identify a program.
     # Bind reusable decisions to the schema, the specification and (for column conventions) the template.
     signature = {"type": prefix(q), "options": [o["effect"] for o in q["options"]],
                  "label": q.get("source_label"), "segments": q.get("segment_count"),
+                 "block_lengths": q.get("block_lengths"), "source_labels": q.get("source_labels"),
                  "candidates": q.get("parameter_candidates"), "units": q.get("parameter_units"),
                  "key": q["key"].split(":S", 1)[0], "context": q.get("value_context"), "source_models": q.get("source_models")}
-    if prefix(q) == "td:val":
+    if prefix(q) in ("td:val", "td:interpret"):
         signature["template"] = job.target_model().m["sha1"]
     if prefix(q) == "src:spec":
         signature["specifications"] = {alias: md.m["sha1"] for alias, md in job.source_models().items()
@@ -160,58 +161,32 @@ def read_csv_evidence(path):
         raise DIError("无法读取证据 CSV：%s" % exc) from exc
 
 
-def program_answers(qs, items, path):
-    rows, sha = read_csv_evidence(path)
+def program_answers(qs, items, path, job=None):
+    from . import program_manifest
+
+    ext = Path(path).suffix.casefold()
+    binding = None
+    if ext == ".xlsx":
+        rows, sha, binding = program_manifest.workbook_rows(path, job)
+    elif ext == ".csv":
+        rows, sha = read_csv_evidence(path)
+    else:
+        raise DIError("测试程序清单须为 CSV 或 XLSX。")
     if not rows:
         raise DIError("测试程序清单没有测试项。")
     by_id = {q["id"]: q for q in qs}
     effects, answers = {}, []
     for item in items:
+        if "=" in item:
+            answers.append(item)
+            continue
         qid = item.strip().upper()
-        q = by_id.get(qid)
-        if not q:
+        if qid not in by_id:
             raise DIError("请指定当前待回答的问题编号（例如 Q1）。")
-        kind = prefix(q)
-        if kind == "td:map":
-            needed = {"来源", "标签", "段序", "测试号", "参数", "单位"}
-            if not needed <= rows[0].keys():
-                raise DIError("段序证据 CSV 需要列：" + "、".join(sorted(needed)))
-            selected = [r for r in rows if r["标签"] == q["source_label"] and r["来源"] == q["source_scope"]]
-            n = q["segment_count"]
-            if (len(selected) != n or {r["段序"] for r in selected} != {str(i) for i in range(1, n + 1)}
-                    or len({r["测试号"] for r in selected}) != n or not all(r["测试号"].strip() for r in selected)):
-                raise DIError("%s 的来源、测试号或段序与工作表不匹配。" % qid)
-            order = []
-            for r in sorted(selected, key=lambda row: int(row["段序"])):
-                sym = r["参数"]
-                unit = q.get("parameter_units", {}).get(sym)
-                if sym not in q["parameter_candidates"] or (unit and unit != r["单位"]):
-                    raise DIError("%s 提供的参数或单位与规范不符。" % qid)
-                order.append(sym)
-            effects[qid] = {"map": order}
-        elif kind == "td:no_suffix":
-            if not {"来源", "测试号", "标签", "条件"} <= rows[0].keys():
-                raise DIError("无后缀工况证据需要列：来源、测试号、标签、条件。")
-            labels = q["source_labels"]
-            allowed = {term.casefold() for cond in q["conditions"] for term in [cond, *q["condition_names"].get(cond, [])]}
-            for label in labels:
-                measurements = [r for r in rows if r["来源"] == q["source_scope"] and r["标签"] == label]
-                if not measurements or any(not r["测试号"].strip() or r["条件"].strip().casefold() not in allowed for r in measurements):
-                    raise DIError("标签 %s 的工况与所选条件不符或缺少测试号。" % label)
-            effects[qid] = {"no_suffix": "keep"}
-        elif kind in ("td:units", "td:conditions"):
-            field, col = ("units", "单位") if kind == "td:units" else ("conditions", "条件")
-            expected = q["options"][-1]["effect"][field]
-            if not {"来源", "测试号", "参数", col} <= rows[0].keys():
-                raise DIError("单位或工况证据 CSV 需要列：来源、测试号、参数、" + col)
-            for sym, requirement in expected.items():
-                values = {r[col] for r in rows if r["来源"] == q["source_scope"] and r["参数"] == sym and r["测试号"].strip()}
-                if values != {requirement}:
-                    raise DIError("%s 参数 %s 的 %s 缺失或不一致。" % (qid, sym, col))
-            effects[qid] = {field: expected}
-        else:
-            raise DIError("该问题不支持测试程序清单回答。")
+        effects[qid] = program_manifest.effect(by_id[qid], rows, binding)
         answers.append(qid + "=测试程序清单")
+    if not effects:
+        raise DIError("使用 --evidence 时请列出至少一个需要从清单取证的问题编号。")
     return answers, {"file": Path(path).name, "sha256": sha, "effects": effects}
 
 

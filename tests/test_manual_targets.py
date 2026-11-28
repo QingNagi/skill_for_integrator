@@ -35,6 +35,40 @@ class ManualTargetTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return cli.main([args[0], self.job.dir, *args[1:]])
 
+    def test_itemized_report_matches_the_final_appended_or_replaced_sections(self):
+        def heading(label, with_comment=False):
+            start = '<w:commentRangeStart w:id="0"/>' if with_comment else ''
+            end = '<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r>' if with_comment else ''
+            return ('<w:p><w:pPr><w:outlineLvl w:val="0"/></w:pPr>' + start + '<w:r><w:t>' +
+                    label + '</w:t></w:r>' + end + '</w:p>')
+
+        def body(text):
+            return '<w:p><w:r><w:t>' + text + '</w:t></w:r></w:p>'
+
+        make_docx(self.target, {"word/document.xml": doc_xml(heading("项目说明", True) + body("")),
+                                "word/comments.xml": '<w:comments xmlns:w="' + W + '"><w:comment w:id="0" '
+                                'w:author="编辑"><w:p><w:r><w:t>请从任务书摘入项目背景。</w:t></w:r></w:p>'
+                                '</w:comment></w:comments>'})
+        source = self.root / "任务书.docx"
+        make_docx(source, {"word/document.xml": doc_xml(heading("项目背景") + body("蓝色卡标示工位。") +
+                                                        heading("标识复核") + body("挂上橙色牌。"))})
+        self.job = Job.create(self.target, [source], out_root=self.root, name="report-job")
+
+        def reported():
+            self.assertEqual(self.invoke("draft"), 0)
+            return [(row["source"], row["value"]) for row in self.job.read("plan.json")["report"]["fills"]]
+
+        self.assertEqual(reported(), [("S1:H0", "蓝色卡标示工位。")])
+        self.assertEqual(self.invoke("add-section", "--to", "P0", "--src", "S1:H1", "--no-subheading"), 0)
+        self.assertEqual(reported(), [("S1:H0", "蓝色卡标示工位。"), ("S1:H1", "挂上橙色牌。")])
+        report = (Path(self.job.dir) / "审核报告.md").read_text(encoding="utf-8")
+        self.assertEqual(report.count("| 项目说明 | 挂上橙色牌。 | S1:H1 |"), 1)
+        self.assertEqual(self.invoke("add-section", "--to", "P0", "--src", "S1:H0", "--replace",
+                                     "--no-subheading"), 0)
+        self.assertEqual(reported(), [("S1:H0", "蓝色卡标示工位。")])
+        self.assertEqual(self.invoke("set", "P0", "审核暂记"), 0)
+        self.assertEqual(reported(), [("S1:H0", "蓝色卡标示工位。")])
+
     def test_shifted_anchor_stops_new_draft(self):
         self.assertEqual(self.invoke("set", "P1", "new text"), 0)
         self.assertEqual(self.invoke("draft"), 0)

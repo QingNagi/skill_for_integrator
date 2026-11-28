@@ -38,5 +38,6 @@ def ask_form(questions):
 def plan_result(job, plan):
     remaining = [q for q in plan["questions"] if not q.get("answered")]
     return {"status": "needs_answers" if remaining else "planned", "job": job.dir,
+            "next_action": "ask_user" if remaining else "draft",
             "pending": len(remaining), "questions": ask_form(remaining[:4]),
             "details": job.p("questions.md")}

@@ -178,8 +178,12 @@ def _testdata(plan, models, rules, res, target=None):
                         miss.append(part + '（来源样品编号不符）')
                 if 'range_labels' in f:
                     name, _, row, _, _ = ref.groups()
-                    label = sheet_values(md, '%s!%s%s' % (name, f['label_col'], row))
-                    if not label or i >= len(f['range_labels']) or str(label[0]).strip() != f['range_labels'][i]:
+                    label_row = f.get("label_rows", [])[i] if i < len(f.get("label_rows", [])) else int(row)
+                    if not 0 < label_row <= int(row):
+                        miss.append(part + '（来源标签行越界）')
+                        continue
+                    label = sheet_values(md, '%s!%s%s:%s%s' % (name, f['label_col'], label_row, f['label_col'], row))
+                    if not label or len(label) != 1 or i >= len(f['range_labels']) or str(label[0]).strip() != f['range_labels'][i]:
                         miss.append(part + '（来源标签不符）')
         res['checked'] += 1
         if miss:
@@ -189,6 +193,16 @@ def _testdata(plan, models, rules, res, target=None):
             ok = codes and all(code in (0, 1) for code in codes) and f['pass_code'] in (0, 1)
             expected = rules['pass_text' if all(code == f['pass_code'] for code in codes) else 'fail_text']
             why = None if ok and expected == value else '状态码或记录结论与所选的状态定义不符'
+        elif f.get('value_kind') == 'limits':
+            lo, hi = map(testdata.parse_limit, f['limits'])
+            numbers = [testdata.measurement_number(raw) for raw in raws]
+            if not numbers or any(n is None for n in numbers) or lo is None and hi is None:
+                why = '判定缺少有效数值读数或限值'
+            else:
+                if f.get('sign') == 'negate':
+                    numbers = [n.copy_negate() for n in numbers]
+                ok = all((lo is None or n >= lo) and (hi is None or n <= hi) for n in numbers)
+                why = None if rules['pass_text' if ok else 'fail_text'] == value else '按确认的极性与逐个读数判定不符'
         elif 'limits' in f and raws:
             lo, hi = map(testdata.parse_limit, f['limits'])
             if '取负号' in how or '取绝对值' in how:

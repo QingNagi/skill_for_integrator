@@ -45,6 +45,42 @@ class WordRoundtrip(unittest.TestCase):
         self.assertEqual([t.text for t in root.iter(w("t"))], ["已增加", "新"])
         self.assertEqual(len(list(root.iter(w("tr")))), 2)
 
+    def test_draft_repairs_inherited_cell_order_without_changing_format_or_template(self):
+        from dilib import selfcheck
+        from dilib.write_docx import DocxWriter
+        original = ('<w:tcW w:w="1000" w:type="dxa"/><w:vAlign w:val="center"/><w:gridSpan w:val="2"/>'
+                    '<w:vMerge w:val="restart"/><w:shd w:fill="EDB000"/>')
+        body = BODY.replace('<w:gridCol w:w="1000"/>', '<w:gridCol w:w="500"/>' * 2)
+        body = body.replace('<w:tcW w:w="1000" w:type="dxa"/>', original)
+        make_docx(self.src, {"word/document.xml": doc_xml(body)})
+        source = self.src.read_bytes()
+        self.assertIn("order-bad", selfcheck.check_file(self.src).codes(selfcheck.ERROR))
+        writer = DocxWriter(str(self.src), self.job, {}, str(self.draft))
+        writer.apply([], str(self.root))
+        self.assertNotIn("order-bad", selfcheck.check_file(self.draft).codes(selfcheck.ERROR))
+        self.assertEqual(source, self.src.read_bytes())
+        before = next(Package(self.src).xml("word/document.xml").iter(w("tcPr")))
+        after = next(Package(self.draft).xml("word/document.xml").iter(w("tcPr")))
+        self.assertEqual([e.tag for e in after], [w(n) for n in ("tcW","gridSpan","vMerge","shd","vAlign")])
+        self.assertEqual({e.tag:e.attrib for e in before}, {e.tag:e.attrib for e in after})
+
+    def test_foreign_cell_properties_stay_in_place_and_already_valid_parts_stay_byte_identical(self):
+        template = ('<w:tcW w:w="1000" w:type="dxa"/><w:vAlign w:val="bottom"/><w:shd w:fill="C0C0C0"/>'
+                    '<foreign:vAlign xmlns:foreign="urn:cell-layout" foreign:hint="left"/>'
+                    '<w:hideMark/><w:headers><w:header w:val="item"/></w:headers>')
+        make_docx(self.src, {"word/document.xml":doc_xml(BODY.replace('<w:tcW w:w="1000" w:type="dxa"/>', template))})
+        pkg = Package(self.src)
+        self.assertEqual(pkg.normalize_cell_properties(), 1)
+        pkg.save(self.draft)
+        fixed = Package(self.draft)
+        before = dict(fixed.parts)
+        self.assertEqual(fixed.normalize_cell_properties(), 0)
+        fixed.save(self.draft)
+        self.assertEqual(Package(self.draft).parts, before)
+        children = list(next(fixed.xml("word/document.xml").iter(w("tcPr"))))
+        self.assertEqual([e.tag for e in children], [w("tcW"),w("shd"),w("vAlign"),"{urn:cell-layout}vAlign",w("hideMark"),w("headers")])
+        self.assertEqual(children[3].get("{urn:cell-layout}hint"), "left")
+
     def test_redraft_preserves_reviewed_structure_without_a_reviewer_comment(self):
         new = self.draft.parent / "新版.docx"
         make_docx(self.pristine)

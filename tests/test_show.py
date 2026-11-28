@@ -60,8 +60,8 @@ class ShowTests(unittest.TestCase):
         self.assertEqual(result.count(value), 2)
         self.assertNotIn("row zero", result)
 
-    def test_single_reference_keeps_previous_output(self):
-        self.assertEqual(self.show("S1:P0"), (0, "P0: native first"))
+    def test_short_excerpts_also_use_data_boundaries(self):
+        self.assertEqual(self.show("S1:P0"), (0, '<<<SOURCE S1:P0 · 原文数据>>>\n"P0: native first"\n<<<END SOURCE>>>'))
 
     def test_page_uses_model_reading_order_and_exposes_ocr_provenance(self):
         rc, rendered = self.show("S1:page1")

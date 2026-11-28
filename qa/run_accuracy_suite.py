@@ -11,7 +11,7 @@ from accuracy_suite import TASK, score
 
 # Answers are limited to the known acquisition contract of these five invented fixtures.
 DECISIONS = {"来源核对": 2, "测量单位": 2, "测试工况核对": 2, "实测记录核对": 2,
-             "未注明条件": 1, "数据对应": 1, "数值合理性": 1}
+             "未注明条件": 1, "数据对应": 1, "数值合理性": 1, "值类型与极性": 1}
 
 
 def run(entry, inputs, outputs):

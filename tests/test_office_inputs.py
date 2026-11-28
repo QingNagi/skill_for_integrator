@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import test_selfcheck as fx
-from dilib import office, ooxml, plan_xlsx, read_docx, read_other
+from dilib import office, ooxml, program_manifest, read_docx, read_other
 from dilib.common import DIError
 
 S = read_other.S[1:-1]
@@ -195,6 +195,42 @@ class OfficeInputs(unittest.TestCase):
         for label in ("文本框", "页眉", "脚注", "修订", "域"):
             self.assertIn(label, notes)
 
+    def test_word_note_separators_alone_do_not_report_unread_notes(self):
+        path = self.root / "separators.docx"
+        parts = {}
+        for kind in ("footnote", "endnote"):
+            notes = []
+            for note_id, marker in [(-1, "separator"), (0, "continuationSeparator")]:
+                notes.append(f'<w:{kind} w:id="{note_id}" w:type="{marker}"><w:p><w:pPr>'
+                             '<w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
+                             f'<w:r><w:rPr><w:rStyle w:val="NoteReference"/></w:rPr><w:{kind}Ref/></w:r>'
+                             f'<w:r><w:{marker}/></w:r></w:p></w:{kind}>')
+            parts[f"word/{kind}s.xml"] = f'<w:{kind}s xmlns:w="{fx.W}">{"".join(notes)}</w:{kind}s>'
+        fx.make_docx(path, parts)
+        reader = read_docx.DocxReader(path)
+        self.assertEqual(reader.read()["read_warnings"], [])
+        # Inspecting the note inventory must not enlist these original parts for reserialization.
+        self.assertTrue(set(parts).isdisjoint(reader.pkg._xml))
+
+    def test_meaningful_or_unrecognized_notes_still_require_review(self):
+        path = self.root / "notes.docx"
+        for kind, label in (("footnote", "脚注"), ("endnote", "尾注")):
+            for name, child in (("text", "<w:t>Rated at 3 mV</w:t>"), ("field", '<w:fldChar w:fldCharType="begin"/>'),
+                                ("drawing", "<w:drawing/>"), ("unknown", "<w:customXml/>")):
+                with self.subTest(kind=kind, content=name):
+                    note = (f'<w:{kind}s xmlns:w="{fx.W}"><w:{kind} w:type="separator" w:id="-1">'
+                            f'<w:p><w:r><w:separator/>{child}</w:r></w:p></w:{kind}></w:{kind}s>')
+                    fx.make_docx(path, {f"word/{kind}s.xml": note})
+                    self.assertIn(label, str(read_docx.read_docx(path)["read_warnings"]))
+            for raw in ("<unrecognized/>", "<broken", f'<w:{kind}s xmlns:w="{fx.W}"><w:{kind} w:id="7">'
+                        f'<w:p><w:r><w:t>Note</w:t></w:r></w:p></w:{kind}></w:{kind}s>'):
+                with self.subTest(kind=kind, raw=raw):
+                    fx.make_docx(path, {f"word/{kind}s.xml": raw})
+                    self.assertIn(label, str(read_docx.read_docx(path)["read_warnings"]))
+            body = f'<w:p><w:r><w:{kind}Reference w:id="7"/></w:r></w:p>'
+            fx.make_docx(path, {"word/document.xml": fx.doc_xml(body)})
+            self.assertIn(label, str(read_docx.read_docx(path)["read_warnings"]))
+
     def test_unicode_measurement_limits_units_and_range_sign(self):
         from decimal import Decimal
         from dilib import testdata, verify
@@ -219,10 +255,10 @@ class OfficeInputs(unittest.TestCase):
                 with self.subTest(name=name, enc=enc):
                     self.assertEqual(read(path).get("encoding"), enc)
 
-    def test_oversize_zip_refused_by_document_and_both_workbook_readers(self):
+    def test_oversize_zip_refused_by_documents_sources_and_program_manifests(self):
         p = self.root / "sheet.xlsx"
         fx.make_xlsx(p)
         with patch.object(ooxml, "MAX_OFFICE_PART_BYTES", 10, create=True):
-            for fn in (read_other.read_xlsx, plan_xlsx.read_workbook, ooxml.Package):
+            for fn in (read_other.read_xlsx, lambda path: program_manifest.workbook_rows(path, None), ooxml.Package):
                 with self.subTest(fn=fn.__name__), self.assertRaisesRegex(DIError, "大小"):
                     fn(str(p))

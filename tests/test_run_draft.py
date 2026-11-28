@@ -77,6 +77,7 @@ class RunDraftTests(unittest.TestCase):
         self.assertEqual(rc, 3)
         result = json.loads(output.getvalue())
         self.assertEqual(result["status"], "needs_answers")
+        self.assertEqual(result["next_action"], "ask_user")
         self.assertTrue(result["questions"][0]["options"])
         self.assertLessEqual(len(result["questions"]), 4)
         self.assertEqual(Path(result["job"]), self.root / "交互")

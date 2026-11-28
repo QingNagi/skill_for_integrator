@@ -143,7 +143,22 @@ def footnotes(model, tid):
                 m = re.match(r"^\s*([a-z])\s*[.:：、)）]?\s*(.+)$", part.strip())
                 if m:
                     out[m.group(1)] = m.group(2).strip()
+    body = [b for b in model.m["blocks"] if not b.get("in") and (b["t"] != "p" or b.get("text","").strip())]
+    for i, block in enumerate(body):
+        if block["id"] not in ids or i + 1 >= len(body):
+            continue
+        note = body[i + 1]
+        match = re.match(r"^\s*注\s*[：:]\s*([a-z])\s+(.+)$", note.get("text", "")) if note["t"] == "p" else None
+        if match:
+            out.setdefault(match[1], match[2].strip())
     return out
+
+
+def split_symbol_mark(symbol, footnotes):
+    """Strip a leading plain-text footnote only when the corresponding note is present."""
+    if len(symbol) >= 2 and symbol[0] in footnotes and symbol[1].isupper():
+        return symbol[1:], symbol[0]
+    return symbol, ""
 
 
 def strip_marks(runs):

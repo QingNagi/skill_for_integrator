@@ -308,7 +308,7 @@ def cmd_answer(a):
     attachment = None
     sheet_metadata = {}
     if getattr(a, "evidence", None):
-        items, attachment = evidence.program_answers(qs, items, a.evidence)
+        items, attachment = evidence.program_answers(qs, items, a.evidence, job=job)
     elif getattr(a, "from_sheet", None):
         if items:
             raise DIError("--from-sheet 与命令行回答不能同时使用。")
@@ -355,7 +355,7 @@ def cmd_answer(a):
             rec["label"] = "自由回答：" + val
         if qid in sheet_metadata:
             rec["evidence"] = sheet_metadata[qid]
-        if attachment:
+        if attachment and qid in attachment["effects"]:
             rec["effect"] = attachment["effects"][qid]
             rec["evidence"] = {k: v for k, v in attachment.items() if k != "effects"}
         answers[q["key"]] = rec
@@ -582,6 +582,8 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
             "fills": len(report["fills"]), "unfilled": len(report["unfilled"]), "unverified": len(unv),
             "structure": "incomplete" if checked is None else "failed" if checked.has_errors() else "passed",
             "warnings": list(dict.fromkeys(report["warnings"] + warns))}
+    if not result["warnings"] and not any((unread, unv, result["stale"], result["unfilled"])) and result["structure"] == "passed":
+        result["next_action"] = "deliver_draft"
     if result["structure"] != "passed":
         result.update(status="blocked", reason="草稿已保存，结构自检失败或未完成，请核对审核报告。")
     return result

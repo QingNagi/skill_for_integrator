@@ -140,6 +140,9 @@ def detect_layout(sheet, rules):
         if sid is not None and c != lc:
             sample_cols[c] = sid
     if lc is None:
+        lc = next((c for c, name in enumerate(header) if norm_text(str(name or "")) in
+                   ("测试项", "测试名", "测试项目", "标签", "项目", "名称", "label", "item", "parameter")), None)
+    if lc is None:
         best, bc = -1, 0
         for c in range(len(header)):
             if c in sample_cols:
@@ -385,6 +388,10 @@ def build(parsed, targets, rules, aliases, answers):
     for t in targets:
         if t.get("sym"):
             syms.setdefault(norm_sym(t["sym"]), t["sym"])
+    aliases = {norm_sym(k): v for k, v in (aliases or {}).items()}
+    documented_aliases = {norm_sym(k): v for k, v in rules["aliases"].items()}
+    aliases.update({k: v["symbol"] for k, v in documented_aliases.items()})
+    tested_syms = {norm_sym(t["sym"]): t["sym"] for t in targets if t.get("sym") and not t.get("not_tested")}
     # ---- 条件后缀
     conds = {}
     for b in parsed["blocks"]:
@@ -411,7 +418,9 @@ def build(parsed, targets, rules, aliases, answers):
         keep = [mid]
     no_suffix = rules["no_suffix"]
     if no_suffix == "ask":
-        bare = [b["label"] for b in parsed["blocks"] if not b["cond"] and not b["declared_voltage"]]
+        bare = [b["label"] for b in parsed["blocks"] if not b["cond"] and not b["declared_voltage"]
+                and any(match_token(token, tested_syms, aliases, rules["delta_prefixes"])
+                        for token in re.split(rules["token_separator"], b["base"]) if token)]
         no_suffix = "keep"
         if isinstance(keep, list) and bare:
             key = "td:no_suffix"
@@ -450,9 +459,6 @@ def build(parsed, targets, rules, aliases, answers):
         multi = "range"
     rules["multi"] = multi
     # ---- 标签 -> 符号
-    aliases = {norm_sym(k): v for k, v in (aliases or {}).items()}
-    documented_aliases = {norm_sym(k): v for k, v in rules["aliases"].items()}
-    aliases.update({k: v["symbol"] for k, v in documented_aliases.items()})
     groups = {}
     for b in active:
         groups.setdefault(b["base"], []).append(b)
@@ -542,6 +548,33 @@ def build(parsed, targets, rules, aliases, answers):
             questions.append(q)
             ignored.append((base, "待核对标签与参数逐段对应"))
             continue
+        segments = ans.get("segments")
+        if segments is not None:
+            if len(blocks) != 1 or not isinstance(segments, list) or not segments:
+                ignored.append((base, "段序清单与来源块不一致"))
+                continue
+            original = blocks[0]
+            cursor = 1
+            slices = []
+            for segment in segments:
+                if not isinstance(segment, dict):
+                    break
+                end, sym = segment.get("end"), segment.get("symbol")
+                if (type(segment.get("start")) is not int or segment["start"] != cursor or type(end) is not int
+                        or not cursor <= end <= len(original["rows"]) or sym not in q["parameter_candidates"]
+                        or tested_targets[norm_sym(sym)].get("not_tested")):
+                    break
+                part = dict(original, rows=original["rows"][cursor-1:end], label_row=original["rows"][0] + 1,
+                            values={s: v[cursor-1:end] if len(v) == len(original["rows"]) else []
+                                    for s, v in original["values"].items()})
+                slices.append((sym, part))
+                cursor = end + 1
+            if len(slices) != len(segments) or cursor != len(original["rows"]) + 1:
+                ignored.append((base, "段序清单没有唯一连续覆盖原始读数"))
+                continue
+            for sym, part in slices:
+                assign.setdefault(sym, []).append((part, "按程序清单行范围分段", 1.0))
+            continue
         order = ans.get("map")
         if ans.get("free") and q.get("requires_program"):
             ignored.append((base, "段序未获测试程序清单证实"))
@@ -571,6 +604,7 @@ def build(parsed, targets, rules, aliases, answers):
             if key.startswith("td:" + name + ":") and isinstance(effect, dict) and not effect.get("_default"):
                 identity[name].update(effect.get(name) or {})
     required_review = []
+    condition_gaps = {}
     for t in targets:
         if not t.get("sym"):
             continue
@@ -618,9 +652,31 @@ def build(parsed, targets, rules, aliases, answers):
 
         context_missing = condition not in ("", "—", "-", "/") and any(not proves_condition(b) for b, _, _ in hits)
         column_type = t.get("column_type") or rules["column_types"].get(symbol)
+        interpretation = answers.get("td:interpret:" + symbol) or {}
+        if interpretation.get("_default"):
+            interpretation = {}
+        kind, sign = interpretation.get("kind"), interpretation.get("sign", "signed")
         row_fill, bad = {}, None
         all_binary = all(measurement_number(v) in (0, 1) for b, _, _ in hits for vs in b["values"].values() for v in vs)
         rate_flag = all_binary and bool(re.fullmatch(r"[kMG]?b(?:it)?(?:ps|/s)", unit or "", re.I))
+        binary_choice = bool(unit and all_binary and column_type == "measurement")
+        threshold_choice = bool(column_type == "measurement" and "阈值" in t.get("name", ""))
+        needs_interpretation = (binary_choice or threshold_choice) and not interpretation
+        if needs_interpretation:
+            options = [{"label":"暂不确认，留空", "effect":{"kind":"blank"}}]
+            if binary_choice:
+                options.extend({"label":"此参数填判定，%d 表示通过" % code, "effect":{"kind":"flags","pass_code":code}}
+                               for code in (1, 0))
+                if not rate_flag:
+                    options.append({"label":"已核对为原始测量数值", "effect":{"kind":"measurement"}})
+            else:
+                options.extend([{"label":"按实测值填写", "effect":{"kind":"measurement"}},
+                                {"label":"带符号的原始值与限值比较，填写判定", "effect":{"kind":"limits","sign":"signed"}},
+                                {"label":"原始数据为绝对值，按负值比较，填写判定", "effect":{"kind":"limits","sign":"negate"}}])
+            questions.append({"key":"td:interpret:" + symbol, "topic":"值类型与极性",
+                              "question":"参数 %s（%s）的原始读数应以哪种方式记入模板？请核对本单位记录约定。" % (symbol,t.get("name","")),
+                              "value_context": {k: t.get(k) for k in ("sym","unit","lo","hi","column_type")},
+                              "source_labels": sorted({b["label"] for b, _, _ in hits}), "options":options})
         for sid in parsed["samples"]:
             vals, ranges = [], []
             col = parsed["sample_cols"][sid]
@@ -637,6 +693,11 @@ def build(parsed, targets, rules, aliases, answers):
                 text, pst, status = "", "unknown", "unknown"
                 required_review.append("%s 样品%s (%s)：%s" % (symbol, sid, "；".join(ranges), msg))
             elif nums:
+                if kind == "flags" and interpretation.get("pass_code") in (0, 1) and all_binary:
+                    vans = {"mode":"flags", "pass_code":interpretation["pass_code"]}
+                    column_type = "judgment"
+                if kind == "limits" and sign == "negate":
+                    vans = {"mode":"negate"}
                 if rate_flag:
                     pst, msg = "implausible", "源数据为功能状态码，不能用作速率实测值"
                 if pst == "implausible" and not bad:
@@ -662,7 +723,7 @@ def build(parsed, targets, rules, aliases, answers):
                 if mode == "blank" or pst == "implausible":
                     text, status = "", "unknown"
                     how = "按回答留空" if mode == "blank" else "疑似状态码、单位或符号异常，待确认"
-                if text and status not in ("pass", "fail"):
+                if text and status not in ("pass", "fail") and not needs_interpretation and kind != "blank":
                     if unit_conflict:
                         msg = "源单位 %s 与目标单位 %s 不一致" % ("、".join(sorted(declared_units)), unit)
                         required_review.append("%s：%s（%s）" % (symbol, msg, "；".join(ranges)))
@@ -672,6 +733,8 @@ def build(parsed, targets, rules, aliases, answers):
                         text, pst, status, msg = "", "unknown", "unknown", "源表未注明单位，记录单位为 " + unit
                     elif unsupported or (lo is None and hi is None):
                         status, msg = "unknown", "规范界限缺失或未能解析，无法判定"
+            if (needs_interpretation or kind == "blank") and text:
+                text, status, pst, msg = "", "unknown", "unknown", "值类型或极性未确认"
             if status in ("pass", "fail") and column_type == "measurement":
                 text, status, pst, msg = "", "unknown", "unknown", "实测列不能写入功能判定"
             if nums and text and status not in ("pass", "fail"):
@@ -680,15 +743,29 @@ def build(parsed, targets, rules, aliases, answers):
                     return (lo is None or n >= lo) and (hi is None or n <= hi)
                 flips = [(n, rounded_n) for n, rounded_n in zip(nums, rounded) if passed(n) != passed(rounded_n)]
                 if flips:
-                    msg = "修约前后限值判定翻转：" + "、".join("%s→%s" % pair for pair in flips[:3])
+                    msg = "修约前后限值判定翻转：" + "、".join(
+                        "原始 %s（%s）→ 显示 %s（%s）" %
+                        (raw, "限内" if passed(raw) else "超限", shown, "限内" if passed(shown) else "超限")
+                        for raw, shown in flips[:3])
                     required_review.append("%s 样品%s (%s)：%s" % (symbol, sid, "；".join(ranges), msg))
                     if format_rules["comparison"] == "rounded":
                         text, status, pst = "", "unknown", "unknown"
+            if kind == "limits" and text and nums and not unsupported and (lo is not None or hi is not None):
+                status = "fail" if any((lo is not None and n < lo) or (hi is not None and n > hi) for n in nums) else "pass"
+                text = rules[status + "_text"]
+                how += "；逐个读数与规范限值比较后填判定"
             context_conflict = any(b.get("conditions") and not proves_condition(b) for b, _, _ in hits)
             if context_missing and context_conflict:
                 text, pst, status, msg = "", "unknown", "unknown", "来源工况与目标要求不一致：" + condition
                 required_review.append("%s 样品%s：%s" % (symbol, sid, msg))
-            elif context_missing and identity["conditions"].get(symbol) != condition:
+            elif context_missing and identity["conditions"].get(symbol) and norm_text(identity["conditions"][symbol]) != norm_text(condition):
+                actual_condition = identity["conditions"][symbol]
+                condition_note = "已核测试工况 %s；规范所列 %s 未全部由清单证明" % (actual_condition, condition)
+                msg = "；".join(filter(None,(msg, condition_note)))
+                if text:
+                    condition_gaps[symbol] = (actual_condition, condition)
+                    pst, status = ("out" if pst == "out" else "context"), "unknown"
+            elif context_missing and norm_text(identity["conditions"].get(symbol)) != norm_text(condition):
                 needed["conditions"][symbol] = condition
                 text, pst, status = "", "unknown", "unknown"
                 msg = (msg + "；" if msg else "") + "源表未证实记录所需工况：" + condition
@@ -698,11 +775,16 @@ def build(parsed, targets, rules, aliases, answers):
                 verdict[sid] = "unknown"
             row_fill[sid] = {"value": text, "how": how, "n": len(vals), "labels": sorted({b["label"] for b, _, _ in hits}),
                              "ranges": ranges, "range_labels": [b["label"] for b, _, _ in hits], "conf": min(sc for _, _, sc in hits), "hows": sorted({h for _, h, _ in hits}),
+                             "effective_column_type": "judgment" if kind in ("flags", "limits") else column_type,
+                             "actual_condition": identity["conditions"].get(symbol) if context_missing else condition,
                              "check": pst, "check_msg": msg, "raw": _fmt_list(vals),
                              "limits": [str(v) if v is not None else None for v in (lo, hi)]}
-            if vans.get("mode") == "flags" and status in ("pass", "fail"):
+            row_fill[sid]["label_rows"] = [b.get("label_row", b["rows"][0]+1) for b, _, _ in hits]
+            if kind == "limits" and text:
+                row_fill[sid].update(value_kind="limits", sign=sign)
+            if vans.get("mode") == "flags" and text:
                 row_fill[sid]["pass_code"] = vans["pass_code"]
-        if bad and not vans:
+        if bad and not vans and not binary_choice and not threshold_choice:
             if rate_flag and column_type == "measurement":
                 required_review.append("%s：0/1 为功能标志，本模板的实测列留空" % symbol)
             else:
@@ -721,7 +803,7 @@ def build(parsed, targets, rules, aliases, answers):
                                           {"label": "已核对，所列要求与本批试验一致", "effect": {name: missing}}]})
     # Keep the scope of a decision when its answer removes the question on the next plan.
     def affected_symbols(key):
-        if key.startswith(("td:val:", "td:merge:")):
+        if key.startswith(("td:val:", "td:merge:", "td:interpret:")):
             return [key.split(":", 2)[2]]
         if key.startswith(("td:units:", "td:conditions:")):
             kind = key.split(":")[1]
@@ -742,11 +824,13 @@ def build(parsed, targets, rules, aliases, answers):
                                   for c in match_token(tok, syms, aliases, rules["delta_prefixes"])))
     for q in questions:
         q["symbols"] = q.get("parameter_candidates") or affected_symbols(q["key"])
+        if q["key"].startswith(("td:units:", "td:conditions:")):
+            q["labels_by_symbol"] = {sym: sorted({b["label"] for b, _, _ in assign.get(sym, [])}) for sym in q["symbols"]}
         if q.get("parameter_candidates"):
             q["parameter_units"] = {s: unit_map.get(s, "") for s in q["parameter_candidates"]}
     dependencies = {key: affected_symbols(key) for key in answers}
     return {"dependencies": dependencies, "fills": fills, "questions": questions, "ignored": ignored, "unmatched": unmatched,
-            "verdict": verdict, "rules": rules, "samples": parsed["samples"], "review": required_review}
+            "verdict": verdict, "rules": rules, "samples": parsed["samples"], "review": required_review, "condition_gaps": condition_gaps}
 
 
 def _map_question(base, info, targets, syms_in, tested, confident):
@@ -789,7 +873,8 @@ def _map_question(base, info, targets, syms_in, tested, confident):
     prompt = "请提供测试程序清单核实各段归属。" if requires_program else "其他顺序可按数据段输入用逗号分隔的参数符号。"
     if requires_program:
         opts = [opts[0], {"label": "提供测试程序清单（answer --evidence）", "effect": {"await_evidence": True}}]
-    return {"parameter_candidates": pool, "segment_count": n, "source_label": base, "requires_program": requires_program,
+    return {"block_lengths": [len(b["rows"]) for b in info["blocks"]],
+            "source_labels": list(dict.fromkeys(b["label"] for b in info["blocks"])), "parameter_candidates": pool, "segment_count": n, "source_label": base, "requires_program": requires_program,
             "key": "td:map:" + base, "topic": "数据对应",
             "question": "测试项“%s”（%s）应填到哪个参数？%s%s" % (base, "；".join(segs), prompt, ("（" + "，".join(reason) + "）") if reason else ""),
             "options": opts, "recommended": 0}

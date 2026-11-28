@@ -33,7 +33,7 @@ jobs:
       - name: Verify the source CLI and record compatibility
         run: |
           python -B traced-template-fill/scripts/di.py --help
-          for suite in test_run_draft test_evidence_cli test_evidence_gates test_evidence_io test_word_roundtrip test_selfcheck; do
+          for suite in test_run_draft test_evidence_cli test_evidence_gates test_evidence_io test_program_manifest test_program_measurements test_show test_word_roundtrip test_selfcheck; do
             python -B -m unittest discover -s tests -p "$suite.py"
           done
           echo "Source CLI, evidence decisions, Word review and document checks passed on $(python --version)." >> "$GITHUB_STEP_SUMMARY"
