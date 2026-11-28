@@ -17,6 +17,7 @@ scripts/dilib/__init__.py
 scripts/dilib/_bootstrap.py
 scripts/dilib/batch_delivery.py
 scripts/dilib/batch_workflow.py
+scripts/dilib/handoff.py
 scripts/dilib/child_process.py
 scripts/dilib/cleanup.py
 scripts/dilib/cli.py
@@ -26,6 +27,7 @@ scripts/dilib/convert_office.ps1
 scripts/dilib/decisions.py
 scripts/dilib/draft_review.py
 scripts/dilib/engineering.py
+scripts/dilib/handoff_launcher.py
 scripts/dilib/environment.py
 scripts/dilib/evidence.py
 scripts/dilib/export_md.py

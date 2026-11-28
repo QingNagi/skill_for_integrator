@@ -147,6 +147,8 @@ for _, body in rows:
     assert result['status'] == 'draft_ready' and Path(result['draft']).is_file()
 PY
 
+python3 "$repo/qa/check_linux_handoff.py" "$entry" "$input" "$installed"
+
 if command -v soffice >/dev/null || command -v libreoffice >/dev/null || [[ -x /opt/libreoffice/program/soffice ]]; then
     bash "$entry" convert "$input/目标.docx" pdf > convert.log
     pdfs=(整合输出/转换_*/目标.pdf)
@@ -214,6 +216,8 @@ for line in Path(metrics).read_text(encoding='utf-8').splitlines():
 report = {
     'arch': arch, 'glibc': platform.libc_ver(), 'kernel': platform.release(),
     'payload_sha256': digest, 'libreoffice': office, 'parallel_batch_drafts': 2, 'clock': 'perf_counter_ns',
+    'independent_terminal_handoff': {'jobs': 2, 'same_installed_interpreter_and_entry': True, 'read_only_originals': True, 'cancelled_without_drafts': True,
+                                     'piped_input_and_hidden_output_refused': True},
     'cold_condition': 'new application cache per sample; OS disk cache not flushed',
     'timings_ms': {name: {'samples': values, 'median': statistics.median(values)}
                    for name, values in samples.items()},

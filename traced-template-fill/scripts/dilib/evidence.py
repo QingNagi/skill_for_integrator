@@ -197,7 +197,8 @@ def program_answers(qs, items, path, job=None):
         answers.append(qid + "=测试程序清单")
     if not {"来源", "测试号"} <= rows[0].keys() or not ({"单位", "条件", "段序"} & rows[0].keys()):
         raise DIError("程序清单须注明来源、测试号及单位、条件或段序。")
-    return answers, {"file": Path(path).name, "sha256": sha, "effects": effects, "rows": rows, "binding": binding}
+    return answers, {"file": Path(path).name, "path": str(Path(path).resolve()), "sha256": sha,
+                     "effects": effects, "rows": rows, "binding": binding}
 
 
 def manifest_answers(manifest, questions):
@@ -300,7 +301,8 @@ def sheet_submission(job, qs, path):
     for qid, pos in expected:
         if qid in chosen and (qid, pos) not in answered:
             raise DIError("%s 的决定覆盖整组，请核对每个位置并填写同一决定。"% qid)
-    metadata = {qid: {"file": Path(path).name, "sha256": sha, "notes": notes.get(qid, [])} for qid in chosen}
+    metadata = {qid: {"file": Path(path).name, "path": str(Path(path).resolve()), "sha256": sha,
+                      "notes": notes.get(qid, [])} for qid in chosen}
     return ["%s=%d" % item for item in chosen.items()], metadata
 
 

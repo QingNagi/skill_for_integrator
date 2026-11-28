@@ -21,6 +21,19 @@ CEX = "http://schemas.microsoft.com/office/word/2018/wordml/cex"
 
 
 class ReviewDecisionsTests(unittest.TestCase):
+    def test_reordered_instructions_are_not_a_new_batch_confirmation(self):
+        from dilib.decisions import needs_reviewer_reply
+        request = "把表格填入记录。按样品计算范围。仅处理本任务。"
+        self.assertTrue(needs_reviewer_reply("src:verify:S2", {"ok": True}, request,
+                                             "把表格填入记录。仅处理本任务。"))
+        self.assertFalse(needs_reviewer_reply("src:verify:S2", {"ok": True}, request,
+                                              "已核对，该表属于本批。"))
+
+    def test_draft_request_cannot_authorize_defaults(self):
+        for instruction in ("先生成带来源批注的草稿和报告。", "不要使用默认值", "请先询问是否采用推荐项。"):
+            self.invoke("draft", self.job.dir, "--defaults", "--user-quote", instruction, rc=2)
+        self.assertFalse(self.job.drafts())
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

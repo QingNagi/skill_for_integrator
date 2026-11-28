@@ -25,6 +25,7 @@ from .decisions import answer_binding, protected_question, record_decision, requ
 from .draft_review import check_with_office, pending, run_selfcheck, write_report
 from .input_paths import cmd_find, expand_pattern, join_paths, split_paths
 from .job import Job
+from .handoff import draft_lock
 from .workflow import ask_form, plan_result, planned_text, review_excerpts, review_references, review_summary, timed
 from .manual_ops import record_ops, validate_ops
 
@@ -338,13 +339,16 @@ def cmd_confirm(a):
     if not items:
         out("本轮没有登记受保护决定。")
         return
-    if os.name == "nt":
-        author = os.getlogin()
-    else:
-        import pwd
-        author = pwd.getpwuid(os.geteuid()).pw_name
+    author = terminal_account()
     submission = argparse.Namespace(job=job.dir, items=items, remember=False, reviewer=author, user_quote=" ".join(items))
     return cmd_answer(submission, confirmation=(questions, answers))
+
+
+def terminal_account():
+    if os.name == "nt":
+        return os.getlogin()
+    import pwd
+    return pwd.getpwuid(os.geteuid()).pw_name
 
 
 def cmd_answer(a, *, confirmation=None):
@@ -423,7 +427,7 @@ def cmd_answer(a, *, confirmation=None):
             rec["evidence"] = sheet_metadata[qid]
         if attachment and qid in attachment["effects"]:
             rec["effect"] = attachment["effects"][qid]
-            rec["evidence"] = {"file": attachment["file"], "sha256": attachment["sha256"]}
+            rec["evidence"] = {k: attachment[k] for k in ("file", "path", "sha256")}
             rec["from_manifest"] = True
         current = answers.get(q["key"], {})
         if (confirmation is not None and current.get("fp") == fp and current.get("rule_sha256", rule_sha) == rule_sha
@@ -537,8 +541,12 @@ def cmd_draft(a):
                           discard_edits=getattr(a, "discard_edits", False), user_quote=getattr(a, "user_quote", None))
 
 
+@draft_lock
 def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, discard_edits=False,
-                   stop_if_unmapped=False, user_quote=None, plan=None):
+                   stop_if_unmapped=False, user_quote=None, plan=None, _authority=None):
+    if Job(job.dir).data.get("handoff_batch") or os.path.isfile(job.p("handoff-owner.json")):
+        from .handoff import require_delivery
+        require_delivery(_authority, job, plan)
     from .profile import load as load_profile
     from .write_docx import DocxWriter
     flags = [flag for enabled, flag in ((defaults, "--defaults"), (discard_edits, "--discard-edits")) if enabled]
@@ -804,6 +812,8 @@ def cmd_run(a):
 # ----------------------------------------------------------------------- 批量
 def cmd_batch(a):
     workers = getattr(a, "jobs", 1)
+    if getattr(a, "handoff", False) and a.action not in ("run", "answer"):
+        raise DIError("--handoff 适用于 batch run 或 batch answer。")
     if workers < 1 or (workers != 1 and a.action != "draft"):
         raise DIError("--jobs 需要正整数，且仅用于 batch draft。")
     if a.defaults:
@@ -1054,6 +1064,11 @@ def main(argv=None):
     s.add_argument("--out")
     s.set_defaults(fn=cmd_convert)
 
+    from .handoff import cmd_deliver
+    s = sp.add_parser("deliver", help="在本地终端核对封存清单并交付审核草稿")
+    s.add_argument("manifest", help="交接目录中的 handoff.json")
+    s.set_defaults(fn=cmd_deliver)
+
     s = sp.add_parser("batch", help="批量：init/new/plan/answer/draft/final")
     s.add_argument("action", choices=["init", "new", "run", "plan", "answer", "draft", "final"])
     s.add_argument("manifest", nargs="?", help="清单csv/json（init/new）或批量任务json（其余）")
@@ -1073,6 +1088,7 @@ def main(argv=None):
     s.add_argument("--jobs", type=int, default=1, help="batch draft 同时处理的独立任务数，默认 1")
     s.add_argument("--require-signed", action="store_true", help="批量定稿要求受保护决定有署名确认")
     s.add_argument("--draft", action="store_true", help="为本批已答齐的项目生成草稿")
+    s.add_argument("--handoff", action="store_true", help="答齐后封存本批，交由审核人在独立终端启动交付")
     s.add_argument("--evidence", help="批量回答的共同程序清单，或 J1、J2 到独立证据路径的 JSON 目录")
     s.set_defaults(fn=cmd_batch)
 

@@ -137,7 +137,7 @@ class Planner(TablePlanningMixin):
         self.manual = manual_ops or []
         self.rules_override = rules_override or {}
         self.ops, self.questions, self.summary, self.report = [], [], [], {"fills": [], "unfilled": [], "ignored": [],
-                                                                            "warnings": []}
+                                                                            "warnings": [], "measurement_targets": {}}
         self.an = analyze(self.T)
         self.rules, self.rule_why = task_rules(self.task)
         self.rules.update(self.rules_override)

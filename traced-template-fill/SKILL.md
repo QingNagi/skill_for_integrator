@@ -38,6 +38,8 @@ metadata:
 
 **多模板**。把各组来件写成一个 JSON 数组，每组形如 `{"target":"甲/模板.docx","sources":["甲/规范.docx","甲/测试.xlsx"]}`。路径相对清单，原有 CSV 清单也可使用。执行 `DI batch run 清单.json --task "用户原话" --draft --json`。使用返回的批量任务文件续办，例如 `DI batch answer 批量任务.json B1=2 B5=1 --user-quote "用户实际确认" --evidence 适用的清单.csv --draft --json`。按适用范围合并选择，模板同名时用 `template` 路径匹配。收到 `deliver_drafts` 就把各份结果交给用户。[批量参数](references/commands.md)
 
+**用户本人启动出稿**。用户要求交接、独立出稿或硬性限制出稿后调用次数时，首次命令用 `DI batch run 清单.json --handoff --json --task "用户原话"`。按返回的问题收集回答，通过 `batch answer … --handoff --json` 续办。收到 `handoff_ready / handoff_to_user` 后，把 `launcher` 指向的“出稿”脚本路径交给用户，并结束对话。审核人在另一个交互窗口运行它，逐条确认屏幕上的决定。后续若有人提问，用新的一轮对话读取交付清单。
+
 出稿时已回查源数据、回读写入的 Word 单元格并检查文档结构。JSON 的 `verification` 说明实际检查数、差异和跳过范围。出现明确的结构故障或用户要求专门检查时使用 `doctor --selfcheck`。
 
 Python 宿主可用 `run_script` 调用同一入口。下例的 `entry` 是上面确定的启动器参数列表，其他参数来自本次任务。
@@ -62,7 +64,7 @@ JSON 模式下，待答、受阻和正常完成均返回 0。读取 JSON 决定�
 
 | Script | Purpose | Arguments |
 |---|---|---|
-| `scripts/di.py` | 离线业务和诊断命令，部署时通过平台入口调用 | `run`、`answer`、`show`、`draft`、`review`、`confirm`、`final`、`batch`、`doctor` |
+| `scripts/di.py` | 离线业务和诊断命令，部署时通过平台入口调用 | `run`、`answer`、`show`、`draft`、`review`、`confirm`、`final`、`batch`、`deliver`、`doctor` |
 
 ## Limitations · 能力边界
 

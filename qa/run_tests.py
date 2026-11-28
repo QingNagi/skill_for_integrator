@@ -15,10 +15,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--require-ocr", action="store_true", help="Check the installed PDF and bilingual OCR stack")
     args = parser.parse_args()
-    # Keep expected negative-test diagnostics and native child output in the same PowerShell log.
-    os.dup2(sys.stdout.fileno(), sys.stderr.fileno())
     sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    # On Windows stderr may be a console while stdout is a pipe. Keep both
+    # Python streams on the UTF-8 writer without changing native handle types.
+    sys.stderr = sys.stdout
     os.chdir(REPO)
     commit = os.environ.get("TTF_QA_COMMIT") or os.environ.get("GITHUB_SHA")
     if not commit and shutil.which("git") and (REPO / ".git").exists():

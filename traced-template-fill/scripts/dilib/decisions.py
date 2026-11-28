@@ -2,6 +2,7 @@
 import datetime
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -19,6 +20,14 @@ def protected_question(key):
     return key.startswith(("src:verify:", "src:spec:", "src:ocr:", "src:unread:")) or key.split(":")[:2] == ["td", "samplemap"]
 
 
+def copied_request(task, quote):
+    """Recognize both a continuous quotation and clauses copied from different parts of the task."""
+    original = "".join((task or "").casefold().split())
+    clauses = ["".join(part.casefold().split()).strip(".") for part in re.split(r"[。！？!?；;，,\n]+", quote or "")]
+    clauses = [s for s in clauses if s]
+    return bool(clauses) and all(clause in original for clause in clauses)
+
+
 def needs_reviewer_reply(key, effect, task, quote, *, requires_program=False):
     """A request to fill a form does not attest to the identities or conventions subsequently queried."""
     if not isinstance(effect, dict):
@@ -33,7 +42,7 @@ def needs_reviewer_reply(key, effect, task, quote, *, requires_program=False):
     if not quote:
         return convention or context or omit_segments
     plain = "".join(quote.split()).strip("。；;，,.")
-    if not plain or plain not in "".join((task or "").split()):
+    if not plain or not copied_request(task, quote):
         return False
     # Accept a pre-existing explicit review statement. A generic instruction is already in the job.
     if key.startswith("src:spec:"):
@@ -54,6 +63,14 @@ def needs_reviewer_reply(key, effect, task, quote, *, requires_program=False):
 def require_quote(quote, action):
     if not quote or not quote.strip():
         raise DIError('%s 需要 --user-quote "用户原话"；请先让用户本人确认。' % action)
+    if "--defaults" in action:
+        words = quote.casefold().strip()
+        affirmative = re.search(r"(?:按|采用|使用|接受|同意|允许|选用|用)(?:全部|所有|本次|这些|其余|剩余的?|的|系统|程序|建议的?)*(?:默认|推荐)"
+                                r"|\b(?:use|apply|accept|approve)\s+(?:(?:the|all|remaining)\s+)*(?:defaults?|recommended)\b", words)
+        qualified = re.search(r"(?:不(?:要|能|可|许)?|拒绝|禁止|别|是否|不能确定|请先询问)[^。；;\n]{0,12}(?:默认|推荐)"
+                              r"|\b(?:not|never|do not|don't|whether|ask if)\b[^.;\n]{0,28}\b(?:defaults?|recommended)\b", words)
+        if not affirmative or qualified:
+            raise DIError("按推荐项出稿须引用用户明确同意采用默认或推荐选项的原话；普通的出稿要求不足以确认待答问题。")
 
 
 def answer_binding(answer):

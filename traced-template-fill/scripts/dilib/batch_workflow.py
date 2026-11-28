@@ -42,7 +42,8 @@ def create_jobs(a, rows, path, state):
         job = Job.create(str(base / target), [str(base / s) for s in sources], out_root=str(path.parent),
                          task=row.get("任务") or row.get("task") or a.task or "",
                          profile=row.get("排版") or row.get("profile"), test_rules=str(base / rules) if rules else None,
-                         formats=formats if isinstance(formats, list) else list(filter(None, formats.split(","))))
+                         formats=formats if isinstance(formats, list) else list(filter(None, formats.split(","))),
+                         handoff_batch=path if state.get("handoff") else None)
         state["jobs"].append(job.dir)
         attached = row.get("证据") or row.get("evidence")
         if attached:
@@ -104,7 +105,7 @@ def changed_deliveries(jobs, state):
     return changed
 
 
-def advance(jobs, state, path, draft, blocked, replanned=()):
+def advance(jobs, state, path, draft, blocked, replanned=(), *, _authority=None):
     from . import cli
     pairs, results = [], []
     cache = state.setdefault("drafts", {})
@@ -119,7 +120,7 @@ def advance(jobs, state, path, draft, blocked, replanned=()):
             plan = job.read("plan.json") if job.dir in replanned else cli.do_plan(job, quiet=True)
             pairs.append((job, plan["questions"]))
             if draft and not pending(plan["questions"]):
-                result = cli.generate_draft(job, plan=plan, stop_if_unmapped=True)
+                result = cli.generate_draft(job, plan=plan, stop_if_unmapped=True, _authority=_authority)
                 if result["status"] == "draft_ready":
                     cache[job.dir] = {"result": result, "stamp": delivery_stamp(job), "sha256": output_digests(result)}
                     write_json(path, state)
@@ -280,6 +281,9 @@ def run(a):
             raise DIError("无法解析批量任务文件：" + str(path)) from exc
         if not isinstance(state, dict) or not isinstance(state.get("jobs"), list):
             raise DIError("请使用 batch run 或 batch new 建立的批量任务文件。")
+        if getattr(a, "handoff", False) and not state.get("handoff"):
+            from .handoff import enable
+            enable(path, state)
         if a.action in ("new", "run"):
             create_jobs(a, rows, path, state)
             out("批量任务文件：" + str(path))
@@ -287,6 +291,15 @@ def run(a):
         if a.action == "new":
             return {"status": "created", "batch": str(path), "jobs": state["jobs"], "next_action": "batch_plan"}
         blocked = changed_deliveries(jobs, state)
+        if state.get("handoff") and state.get("local_delivery"):
+            # An interrupted approval can be superseded explicitly before the first document is written.
+            if a.action == "plan" and not state.get("drafts") and not any(Path(j.p("草稿")).exists() for j in jobs):
+                for key in ("active_handoff", "local_delivery", "local_delivery_sha256"):
+                    state.pop(key, None)
+                write_json(path, state)
+            else:
+                from .handoff import resume_message
+                return resume_message(state, path)
         provided = attachments(a, jobs) if a.action == "answer" and a.evidence else {}
         for jd, attachment in state.get("registered_evidence", {}).items():
             src = Path(attachment["file"])
@@ -294,11 +307,15 @@ def run(a):
                 blocked[jd] = dict(status="blocked", job=jd, next_action="review_evidence",
                                    reason="已登记的项目证据文件缺失或变化。请核对后使用 --evidence 重新提交。")
         replanned, reasons = submit(a, path, state, jobs, blocked, provided) if a.action == "answer" else (set(), {})
-        if a.action == "answer" and not (a.json or a.draft):
+        if a.action == "answer" and not (a.json or a.draft or state.get("handoff")):
             out("已处理 %d 份任务的回答。" % len(replanned))
             return
-        result = advance(jobs, state, path, a.draft or a.action == "draft", blocked, replanned)
+        draft = not state.get("handoff") and (a.draft or a.action == "draft")
+        result = advance(jobs, state, path, draft, blocked, replanned)
         for row in result["jobs"]:
             if row["job"] in reasons:
                 row["reason"] = reasons[row["job"]]
+        if state.get("handoff"):
+            from .handoff import finish_plan
+            return finish_plan(path, state, jobs, result)
         return result

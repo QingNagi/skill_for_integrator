@@ -43,7 +43,8 @@ class Job:
 
     # ------------------------------------------------------------ 创建
     @classmethod
-    def create(cls, target, sources, task="", out_root=None, name=None, profile=None, formats=None, test_rules=None):
+    def create(cls, target, sources, task="", out_root=None, name=None, profile=None, formats=None, test_rules=None,
+               handoff_batch=None):
         target = os.path.abspath(target)
         if not os.path.isfile(target):
             raise DIError("请指定存在的目标文件：%s" % target)
@@ -76,9 +77,12 @@ class Job:
                 "target": {"path": target}, "sources": [{"alias": "S%d" % (i + 1), "path": p} for i, p in enumerate(srcs.values())],
                 "profile": profile or "default", "formats": formats or [], "cache": os.path.join(out_root, "_缓存")}
         job = cls(d, data=data)
+        if handoff_batch:
+            job.data["handoff_batch"] = str(handoff_batch)
         if test_rules:
             from .testdata import load_rules
             job.data["rules"] = load_rules(test_rules)
+            job.data["rules_source"] = os.path.abspath(test_rules)
         tm = job.target_model()
         job.data["template_comments"] = [[c.get("author", ""), c.get("text", "")] for c in tm.m.get("comments", [])]
         for a in job.data["sources"]:
