@@ -53,6 +53,23 @@ def write_report(job, plan, draft, ver, warns, used_defaults=False):
          "2. 带“⚠”的批注表示需要重点确认（近似匹配、按推荐默认处理、数值可疑等）。",
          "3. 可直接修改草稿内容，或在草稿中添加批注写修改意见；保存并关闭后告诉助手“确认定稿”或“按批注修改”。", "",
          "## 规划摘要"] + ["- " + s for s in plan["summary"]] + [""]
+    from . import __version__
+    runtime = ["- 生成草稿的技能版本：" + __version__]
+    provenance = plan["report"].get("rule_pack", {}).get("sha256")
+    if provenance:
+        runtime.append("- 本次规则 SHA-256：" + provenance)
+    for alias, model in job.source_models().items():
+        backend = model.m.get("pdf_backend")
+        if backend:
+            runtime.append("- %s PDF 读取器：%s %s" % (alias, backend, model.m.get("pdf_backend_version", "旧缓存未登记")))
+        if model.m.get("backend_note"):
+            runtime.insert(0, "> ⚠ %s 已降级读取。%s" % (alias, model.m["backend_note"]))
+    L[2:2] = runtime
+    if job.data.get("word_questions", {}).get(os.path.basename(draft)):
+        L += ["## 在 Word 中核对来源或样品",
+              "在草稿开头的“Word 核对”批注下，用自己的姓名直接回复“确认 N”，N 对应批注里的选项。"
+              "有明确提示时也可回复“确认”。定稿时会读取署名和原话，将决定保存到 decisions.jsonl。"
+              "所选答案影响填写时，请重新生成草稿，复核新值。仅标记已解决无法记录确认人。", ""]
     if os.path.isfile(job.p("decisions.jsonl")):
         L += ["本任务的关键确认原话和涉及的问题、草稿版本保存在同目录 decisions.jsonl。", ""]
     if answers:
@@ -68,6 +85,10 @@ def write_report(job, plan, draft, ver, warns, used_defaults=False):
     for f in rep["fills"]:
         L.append("| %s | %s | %s | %s | %s | %s |" % tuple(str(f.get(k, "")).replace("|", "\\|").replace("\n", " ")
                                                        for k in ("target", "value", "source", "how", "raw", "check")))
+    citations = [(f["target"], f["fact_ids"]) for f in rep["fills"] if f.get("fact_ids")]
+    if citations:
+        L += ["", "## 实测依据", "", "事实原文及适用范围见同目录的 facts.json。", ""]
+        L.extend("- %s：%s" % (target, "、".join(ids)) for target, ids in citations)
     stale = rep.get("stale", [])
     unv_src = rep.get("unverified_sources", [])
     if stale or unv_src:
@@ -82,5 +103,7 @@ def write_report(job, plan, draft, ver, warns, used_defaults=False):
         L += ["## 忽略的数据项"] + ["- " + x for x in rep["ignored"]] + [""]
     if rep["warnings"] or warns:
         L += ["## 警告"] + ["- " + x for x in rep["warnings"] + list(warns)] + [""]
+    from .pdf_ocr import snapshot_evidence
+    L.extend(snapshot_evidence(job, job.source_models()))
     with open(job.p("审核报告.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(L))

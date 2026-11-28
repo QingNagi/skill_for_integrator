@@ -10,7 +10,7 @@ import re
 from . import office
 from .common import DIError, bigrams, contains_score, ensure_dir, file_sha1, read_json, short, write_json
 
-MODEL_VERSION = 12
+MODEL_VERSION = 13
 DOC_EXT = {".docx", ".docm", ".dotx"}
 LEGACY_WORD = {".doc", ".wps", ".wpt", ".rtf", ".dot", ".odt", ".mht"}
 SHEET_EXT = {".xlsx", ".xlsm"}
@@ -47,7 +47,7 @@ def load_model(path, cache_dir):
     ocr = None
     if ext == ".pdf":
         from . import _bootstrap
-        ocr = _bootstrap.ocr_hint()
+        ocr = dict(_bootstrap.ocr_hint(), ocr_cache_dir=os.path.join(cache_dir, "ocr"))
     if m and m.get("_v") == MODEL_VERSION and (not ocr or m.get("_pdf_reader") == ocr["signature"]):
         return m
     media = ensure_dir(os.path.join(cache_dir, "media", key))
@@ -77,6 +77,11 @@ def load_model(path, cache_dir):
     elif wext == ".pdf":
         from .read_other import read_pdf
         m = read_pdf(wp, media, ocr)
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            m["pdf_backend_version"] = version(m["pdf_backend"])
+        except PackageNotFoundError:
+            m["pdf_backend_version"] = "版本元数据缺失"
         m["_pdf_reader"] = _bootstrap.parsed_signature(ocr, m.get('pdf_backend'))
     else:
         raise DIError("不支持的文件类型：%s" % ext)

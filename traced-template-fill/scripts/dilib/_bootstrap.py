@@ -165,13 +165,33 @@ def _vendor_packages():
     return full, packages
 
 
+def delivery_mode():
+    """Source installs use host libraries; kits keep their advertised dependency set."""
+    if os.environ.get("DI_NO_VENDOR"):
+        return "system"
+    if (_ROOT / "runtime/python").is_dir():
+        return "full"
+    marker = _ROOT / "vendor/pdf-mode.txt"
+    if marker.is_file():
+        mode = marker.read_text(encoding="ascii").strip()
+        if mode not in ("full", "lite"):
+            from .common import DIError
+            raise DIError("PDF 组件清单损坏，请恢复离线套装。")
+        return mode
+    return "source"
+
+
 def activate_vendor():
     """Load the exact private wheels into this interpreter, preserving a pypdf-only kit."""
     if os.environ.get("DI_NO_VENDOR"):
         return False
     if "activated" in _cache:
         return _cache["activated"]
-    _, packages = _vendor_packages()
+    full, packages = _vendor_packages()
+    mode = delivery_mode()
+    if mode == "full" and not full:
+        from .common import DIError
+        raise DIError("套装缺少匹配的 PDF 原生组件，请恢复离线套装。")
     default = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
     cache = _long(os.environ.get("DI_CACHE_DIR") or default / "traced-template-fill") / "pdf-wheels-v2"
     paths = []
@@ -180,6 +200,9 @@ def activate_vendor():
         for folder, spec in packages:
             paths.append(_unpack(folder / spec[0], spec, cache))
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+        if mode in ("full", "lite"):
+            from .common import DIError
+            raise DIError("套装的 PDF 组件未通过校验，请恢复离线套装：" + str(exc)) from exc
         _note("内置 PDF 依赖不可用：" + str(exc))
         return False
     sys.path[:0] = [p for p in paths if p not in sys.path]
@@ -276,5 +299,10 @@ def ocr_hint(probe=False):
             res.update(available=False, engine=None, hint=str(exc))
     parser = _parser_signature()
     res["pinned_reader"] = parser.startswith('pinned-')
-    res["signature"] = "pdf-ocr-v4:%s:%s:%s:%s" % (parser, OCR_LANGUAGE, OCR_DPI, signature)
+    from .pdf_ocr import scan_policy
+    res["scan_policy"] = scan_policy()
+    res["ocr_identity"] = signature
+    res["dpi"] = OCR_DPI
+    res["signature"] = "pdf-ocr-v5:%s:%s:%s:%s:%s" % (
+        parser, OCR_LANGUAGE, OCR_DPI, signature, json.dumps(res["scan_policy"], sort_keys=True))
     return res

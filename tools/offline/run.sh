@@ -8,6 +8,15 @@ fail() {
     exit 1
 }
 
+check_exec_mount() {
+    if command -v findmnt >/dev/null 2>&1; then
+        mount_options=$(findmnt -n -o VFS-OPTIONS -T "$1" 2>/dev/null) || return 0
+        case ",$mount_options," in
+            *,noexec,*) fail '运行时目录所在挂载为 noexec。请将 DI_RUNTIME_DIR 或 XDG_DATA_HOME 指向允许执行的目录。' ;;
+        esac
+    fi
+}
+
 kit=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 expected_arch='@ARCH@'
 [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = "$expected_arch" ] ||
@@ -43,7 +52,9 @@ ready() {
 if ready "$kit"; then
     installed=$kit
 else
-    if [ -n "${DI_CACHE_DIR:-}" ]; then
+    if [ -n "${DI_RUNTIME_DIR:-}" ]; then
+        cache="$DI_RUNTIME_DIR"
+    elif [ -n "${DI_CACHE_DIR:-}" ]; then
         cache="$DI_CACHE_DIR/offline"
     else
         data_home=${XDG_DATA_HOME:-"${HOME:?Set HOME, XDG_DATA_HOME or DI_CACHE_DIR}/.local/share"}
@@ -54,6 +65,7 @@ else
     installed="$cache/$digest"
     if ! ready "$installed"; then
         mkdir -p -- "$cache"
+        check_exec_mount "$cache"
         # A stopped process releases flock automatically. Recheck after waiting.
         (
             flock -x 9 || fail '首次部署需要 util-linux 的 flock'
@@ -74,7 +86,7 @@ else
             # user overrides. The user's environment applies to their actual command.
             env -u DI_OCR -u DI_NO_VENDOR DI_CACHE_DIR="$stage/skill/vendor/_unpacked" \
                 "$stage/skill/runtime/python/bin/python3" -E -s -B -X utf8 \
-                "$stage/skill/scripts/offline_check.py" >&2 || fail '离线运行时自检失败'
+                "$stage/skill/scripts/offline_check.py" >&2 || fail '离线运行时自检失败。若挂载为 noexec，请将 DI_RUNTIME_DIR 或 XDG_DATA_HOME 指向允许执行的目录。'
             printf '%s\n' "$digest" > "$stage/skill/.offline-payload.sha256"
             if [ -e "$installed" ]; then
                 backup=$(mktemp -d -- "$cache/.previous.XXXXXXXX")
@@ -97,6 +109,8 @@ else
                     fail '无法启用已校验的运行时'
                 fi
             else
+                "$stage/skill/runtime/python/bin/python3" -I -B "$stage/skill/scripts/dilib/runtime_maintenance.py" \
+                    "$stage/skill" "$installed" "$digest" || fail '无法登记私有运行时的初始文件状态'
                 mv -- "$stage/skill" "$installed"
             fi
         ) 9>"$cache/$digest.lock"

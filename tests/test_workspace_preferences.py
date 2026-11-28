@@ -29,6 +29,19 @@ class WorkspaceTests(unittest.TestCase):
             job = Job.create(str(target), [str(sources[0]), str(sources[0].parent), str(sources[1])], out_root=tmp)
             self.assertEqual([s['path'] for s in job.data['sources']], list(map(str, sources)))
 
+    def test_upgrade_migrates_older_installed_rules_to_user_recommendations(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            older, current = root / ("a" * 24), root / ("b" * 24)
+            for folder in (older, current):
+                folder.mkdir()
+                (folder / ".offline-payload.sha256").write_text(folder.name.ljust(64, "0"))
+            write_json(older / "rules/learned.json", {"answers": {"td:val:Z": {"label": "旧建议"}}})
+            job = SimpleNamespace(dir=str(root / "out/task"), data={"workspace": str(root / "proj")})
+            with patch.dict(os.environ, {"DI_USER_DATA_DIR": str(root / "user")}):
+                self.assertEqual(preferences.mappings(current, job)["td:val:Z"]["label"], "旧建议")
+                self.assertTrue((root / "user/learned.json").is_file())
+
     def test_project_overrides_user_and_old_bundled_rules(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

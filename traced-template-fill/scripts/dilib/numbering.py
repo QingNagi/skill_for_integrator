@@ -76,11 +76,25 @@ def format_num(n, fmt):
     return str(n)
 
 
+def _level_properties(level):
+    result = {}
+    for key, tag in (("start", "start"), ("fmt", "numFmt"), ("text", "lvlText"),
+                     ("pstyle", "pStyle"), ("restart", "lvlRestart")):
+        child = level.find(w(tag))
+        if child is not None:
+            value = child.get(W_VAL)
+            result[key] = int(value) if key in ("start", "restart") else value or ""
+    legal = level.find(w("isLgl"))
+    if legal is not None:
+        result["lgl"] = legal.get(W_VAL) not in ("0", "false", "off")
+    return result
+
+
 class Numbering:
     def __init__(self, pkg):
         self.abstract = {}      # absId -> {ilvl: dict}
         self.abs_link = {}      # absId -> numStyleLink
-        self.nums = {}          # numId -> (absId, {ilvl: startOverride})
+        self.nums = {}          # numId -> (absId, {ilvl: level overrides})
         self.style_num = {}     # styleId -> (numId, ilvl)
         self.style_outline = {}
         self.style_name = {}
@@ -88,7 +102,7 @@ class Numbering:
         self.style_type = {}
         self.style_jcs = {}
         self.counters = {}
-        self.used = set()
+        self.levels = {}
         self._load_styles(pkg)
         self._load_numbering(pkg)
 
@@ -167,20 +181,7 @@ class Numbering:
             for lv in an.findall(w("lvl")):
                 il = int(lv.get(w("ilvl")))
                 d = {"start": 1, "fmt": "decimal", "text": "", "lgl": False, "pstyle": None}
-                e = lv.find(w("start"))
-                if e is not None:
-                    d["start"] = int(e.get(W_VAL))
-                e = lv.find(w("numFmt"))
-                if e is not None:
-                    d["fmt"] = e.get(W_VAL)
-                e = lv.find(w("lvlText"))
-                if e is not None:
-                    d["text"] = e.get(W_VAL) or ""
-                if lv.find(w("isLgl")) is not None:
-                    d["lgl"] = True
-                e = lv.find(w("pStyle"))
-                if e is not None:
-                    d["pstyle"] = e.get(W_VAL)
+                d.update(_level_properties(lv))
                 lvls[il] = d
             self.abstract[aid] = lvls
             sl = an.find(w("numStyleLink"))
@@ -191,9 +192,12 @@ class Numbering:
             a = num.find(w("abstractNumId"))
             ov = {}
             for lo in num.findall(w("lvlOverride")):
+                il = int(lo.get(w("ilvl")))
+                level = lo.find(w("lvl"))
+                ov[il] = _level_properties(level) if level is not None else {}
                 so = lo.find(w("startOverride"))
                 if so is not None:
-                    ov[int(lo.get(w("ilvl")))] = int(so.get(W_VAL))
+                    ov[il]["start"] = int(so.get(W_VAL))
             self.nums[nid] = (a.get(W_VAL) if a is not None else None, ov)
 
     def _abs_of(self, numid, depth=0):
@@ -206,6 +210,14 @@ class Numbering:
             if n2 and n2 != numid:
                 return self._abs_of(n2, depth + 1) or aid
         return aid
+
+    def _levels(self, numid):
+        if numid not in self.levels:
+            levels = {il: dict(d) for il, d in self.abstract.get(self._abs_of(numid), {}).items()}
+            for il, overrides in self.nums[numid][1].items():
+                levels.setdefault(il, {"start": 1, "fmt": "decimal", "text": "", "lgl": False}).update(overrides)
+            self.levels[numid] = levels
+        return self.levels[numid]
 
     # ---------------------------------------------------------------- 求值
     def resolve(self, ppr, style_id):
@@ -228,31 +240,24 @@ class Numbering:
             return None
         if ilvl is None:
             # 样式与编号级别通过 lvl/pStyle 关联
-            aid = self._abs_of(numid)
             ilvl = 0
-            for il, d in (self.abstract.get(aid) or {}).items():
+            for il, d in self._levels(numid).items():
                 if d.get("pstyle") and d["pstyle"] == style_id:
                     ilvl = il
                     break
         return numid, ilvl
 
     def label(self, numid, ilvl):
-        aid = self._abs_of(numid)
-        lvls = self.abstract.get(aid)
-        if not lvls or ilvl not in lvls:
+        lvls = self._levels(numid)
+        if ilvl not in lvls:
             return ""
-        cnt = self.counters.setdefault(aid, [None] * 10)
-        ov = self.nums[numid][1]
-        if numid not in self.used:
-            self.used.add(numid)
-            for il, st in ov.items():
-                cnt[il] = st - 1
-                for d in range(il + 1, 10):
-                    cnt[d] = None
+        cnt = self.counters.setdefault(numid, {})
         lv = lvls[ilvl]
-        cnt[ilvl] = lv["start"] if cnt[ilvl] is None else cnt[ilvl] + 1
-        for d in range(ilvl + 1, 10):
-            cnt[d] = None
+        cnt[ilvl] = cnt.get(ilvl, lv["start"] - 1) + 1
+        for depth, definition in lvls.items():
+            trigger = definition.get("restart", depth)
+            if depth > ilvl and (trigger if 0 <= trigger <= depth else depth) == ilvl + 1:
+                cnt.pop(depth, None)
         if lv["fmt"] == "bullet":
             t = lv["text"]
             return _BULLET_MAP.get(t, t if t and ord(t[0]) < 0xE000 else "•")
@@ -261,7 +266,7 @@ class Numbering:
             ph = "%" + str(k + 1)
             if ph in text:
                 lk = lvls.get(k, {"start": 1, "fmt": "decimal"})
-                val = cnt[k] if cnt[k] is not None else lk["start"]
+                val = cnt.get(k, lk["start"])
                 fmt = "decimal" if lv["lgl"] else lk["fmt"]
                 text = text.replace(ph, format_num(val, fmt))
         return text

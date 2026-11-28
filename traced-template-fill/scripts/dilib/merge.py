@@ -61,7 +61,8 @@ def map_unit(uid, src, ours):
     mc = CELL_RE.match(uid)
     if mc:
         tid = mc.group(1)
-        same = src['tables'].get(tid) is not None and src['tables'].get(tid) == ours['tables'].get(tid)
+        same = (src['tables'].keys() == ours['tables'].keys() and tid in src['tables']
+                and src['tables'][tid] == ours['tables'][tid])
         return uid if same and uid in ours['text'] else None
     if src['paras'] == ours['paras']:
         return uid if uid in ours['text'] else None
@@ -74,7 +75,12 @@ def find_edits(base, th):
     '''返回 (edits, notes)。edits = [(base 单元ID, theirs 单元ID)]，即人改过文字的单元；
     notes = 无法逐项并入的结构性修改（增删行列、增删段落）的说明。'''
     edits, notes = [], []
-    for tid, dim in base['tables'].items():
+    tables = base['tables']
+    if tables.keys() != th['tables'].keys():
+        notes.append('表格数或编号发生变化（%s → %s），表格坐标不能逐格对应；请对照原审核稿核对增删和修改。'
+                     % ('、'.join(tables) or '无', '、'.join(th['tables']) or '无'))
+        tables = {}
+    for tid, dim in tables.items():
         got = th['tables'].get(tid)
         if got is None:
             notes.append('表格 %s 在上一版草稿里不见了，未并入，请人工核对' % tid)
@@ -96,7 +102,7 @@ def find_edits(base, th):
                 continue
             if tag == 'replace' and i2 - i1 == j2 - j1:
                 edits += [(base['paras'][i1 + k], th['paras'][j1 + k]) for k in range(i2 - i1)]
-            elif len(notes) < 8:
+            else:
                 notes.append('正文段落有增删（原 %d 段 → %d 段，如“%s”），未并入，请人工核对' % (i2 - i1, j2 - j1, short(' / '.join(lb[j1:j2]) or ' / '.join(la[i1:i2]), 40)))
     return edits, notes
 
@@ -398,6 +404,51 @@ def _complex_review(info, pkg):
                           w('sdt'), w('customXml'), w('tbl')} for el in info['el'].iter())
 
 
+def _recorded_replies(job, version, infos):
+    questions = {q['key']: q for q in job.data.get('word_questions', {}).get(version, [])}
+    if not questions:
+        return set()
+    by_id = {c['id']: c for c in infos}
+    archived = set()
+    for key, answer in (job.read('answers.json', {}) or {}).items():
+        if key not in questions or answer.get('word_draft') != version:
+            continue
+        root = by_id.get(answer.get('word_parent'))
+        reply = by_id.get(answer.get('word_reply'))
+        if not root or not reply or root['author'] != TOOL_AUTHOR or root['text'] != questions[key]['text']:
+            continue
+        if reply['parent'] != root['id'] or reply['text'] != answer['user_quote'] or reply['author'] != answer['confirmed_by']:
+            continue
+        if has_rel_attr(reply['el']) or any(el.tag in (w('drawing'), w('object'), w('pict'), w('tbl'))
+                                           for el in reply['el'].iter()):
+            continue
+        if not any(c['parent'] == reply['id'] for c in infos):
+            archived.add(reply['id'])
+            if all(c['id'] in archived for c in infos if c['parent'] == root['id']):
+                archived.add(root['id'])
+    return archived
+
+
+def _structural_revisions(reader):
+    """Revisions of a row, cell or paragraph mark have no comparable text of their own."""
+    from .finalize import REV_TAGS
+    pm = _pmap(reader.doc)
+    locations = {el: uid for uid, el in reader.el_by_id.items() if not isinstance(el, list)}
+    marks = {}
+    for el in reader.doc.iter():
+        par = pm.get(el)
+        if el.tag not in REV_TAGS or par is None or not par.tag.endswith('Pr'):
+            continue
+        owner = pm.get(par)
+        if owner is not None and owner.tag == w('tr'):
+            owner = owner.find(w('tc'))
+        while owner is not None and owner not in locations:
+            owner = pm.get(owner)
+        uid = locations.get(owner, '正文')
+        marks.setdefault(uid, []).append(ET.tostring(el))
+    return marks
+
+
 def _merge(job, prev, pristine, new, discard, res):
     from .finalize import comments_info
     base_rd, base = read_units(pristine)
@@ -409,9 +460,10 @@ def _merge(job, prev, pristine, new, discard, res):
         return
     ours_rd, ours = read_units(new)
     human_ids = {info['id'] for info, _ in hum}
-    complex_comments = {info['id']: info for info in comments_info(th_rd.pkg)
+    infos = comments_info(th_rd.pkg)
+    complex_comments = {info['id']: info for info in infos
                         if info['done'] or (info['id'] in human_ids and _complex_review(info, th_rd.pkg))}
-    if ((hum or complex_comments) and _unchanged_context(base_rd.pkg, ours_rd.pkg)
+    if (base_rd.pkg.parts != th_rd.pkg.parts and _unchanged_context(base_rd.pkg, ours_rd.pkg)
             and _reviewed_body_compatible(base_rd.pkg, th_rd.pkg, ours_rd.pkg)):
         # The old reviewed package contains the exact relationships, attachments,
         # anchors and extension namespaces written by Office. Keep it as a unit.
@@ -429,9 +481,16 @@ def _merge(job, prev, pristine, new, discard, res):
             if os.path.exists(tmp):
                 os.remove(tmp)
         res.update(kept=len(edits), comments=len(hum))
-        res['notes'].append('合并：已核对新版规划与原审核稿的正文位置和依赖，完整保留批注讨论及其附件。')
+        if hum or complex_comments or edits or snotes:
+            res['notes'].append('合并：已保留审核稿内的修改、批注及其附件。')
         return
+    archived = _recorded_replies(job, os.path.basename(prev), infos)
+    if archived:
+        res['notes'].append('Word 核对的原话和署名已登记在 decisions.jsonl，原讨论保存在 ' + os.path.basename(prev))
+        hum = [(info, unit) for info, unit in hum if info['id'] not in archived]
     for cid, info in complex_comments.items():
+        if cid in archived:
+            continue
         msg = ('原审核稿 %s 的批注 #%s [%s] %s 含有讨论状态、回复或复杂内容，'
                '新版规划已变化，未完整转移；请处理原审核稿中的讨论，或从原审核稿定稿。'
                % (os.path.basename(prev), cid, info['author'], short(info['text'], 60)))
@@ -490,8 +549,13 @@ def _merge(job, prev, pristine, new, discard, res):
                 os.remove(tmp)
     res['kept'], res['conflicts'], res['comments'] = kept, len(conflicts), ncom
     res['conflict_ids'] = conflicts
+    old_marks = _structural_revisions(base_rd)
+    reviewed_marks = _structural_revisions(th_rd)
+    for uid in sorted(old_marks.keys() | reviewed_marks.keys()):
+        if old_marks.get(uid) != reviewed_marks.get(uid):
+            snotes.append('%s 的行、单元格或段落属性修订已变化，请对照原审核稿 %s 核对。' % (uid, os.path.basename(prev)))
     for i, n in enumerate(snotes):
-        res['items'].append(_unread('merge:struct:%d' % i, n))
+        res['items'].append(_unread('merge:struct:%s:%d' % (os.path.basename(prev), i), n))
         res['notes'].append('合并：' + n)
     for g, uids in sorted(lost.items()):
         where = ('表格 %s' % g) if g != 'P' else '正文段落'
@@ -499,9 +563,24 @@ def _merge(job, prev, pristine, new, discard, res):
         res['items'].append(_unread('merge:lost:%s' % g, msg))
         res['notes'].append('合并：' + msg)
     for uid, txt in blocked:
-        res['items'].append({'cell': uid, 'text': txt, 'why': '上一版人工修改未并入', 'param': uid, 'sample': ''})
+        detail = '原审核稿 %s 的 %s 含有未转移的人工修改，请对照原件核对。' % (os.path.basename(prev), uid)
+        res['items'].append({'cell': uid, 'text': txt, 'why': '上一版人工修改未并入', 'param': uid, 'sample': '',
+                             'key': 'merge:content:%s:%s' % (os.path.basename(prev), uid), 'detail': detail})
     if blocked:
         res['notes'].append('合并：上一版草稿有 %d 处人工修改含图片或嵌套表格，没能并入新版：%s' % (len(blocked), '、'.join(u for u, _ in blocked[:4])))
+
+
+def _same_file_contents(left_path, right_path):
+    # Office may rewrite a file with an unchanged size and timestamp.
+    if os.path.getsize(left_path) != os.path.getsize(right_path):
+        return False
+    with open(left_path, 'rb') as left, open(right_path, 'rb') as right:
+        while True:
+            chunk = left.read(1024 * 1024)
+            if chunk != right.read(1024 * 1024):
+                return False
+            if not chunk:
+                return True
 
 
 def merge_previous(job, prev, new, discard=False):
@@ -516,7 +595,7 @@ def merge_previous(job, prev, new, discard=False):
         return res
     if not discard:
         for item in (job.data.get('unverified') or {}).get(os.path.basename(prev), []):
-            if item.get('key', '').startswith('merge:discussion:'):
+            if item.get('key', '').startswith('merge:'):
                 res['items'].append(dict(item))
                 res['notes'].append('合并：' + item['detail'])
     pristine = os.path.join(os.path.dirname(prev), '.原始', os.path.basename(prev))
@@ -532,6 +611,10 @@ def merge_previous(job, prev, new, discard=False):
         res['items'].append(_unread('merge:locked', msg))
         res['notes'].append('合并：' + msg)
     try:
+        if _same_file_contents(pristine, prev):
+            if discard:
+                res['discarded'] = (0, 0)
+            return res
         _merge(job, prev, pristine, new, discard, res)
     except Exception as e:      # 合并出错不能让 draft 崩溃，也不能当作“没有人工修改”：登记未核，定稿会拦截
         res['crashed'] = True

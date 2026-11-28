@@ -169,6 +169,14 @@ function Install-ValidatedSkill {
                     }
                 }
             } else {
+                if ($PrivateCache) {
+                    $scratch = Get-OfflineExecutionRoot $prepared
+                    $maintenance = Get-OfflineIoPath (Join-Path $scratch 'scripts\dilib\runtime_maintenance.py')
+                    $code = 0
+                    $python = Get-OfflineIoPath (Join-Path $scratch 'runtime\python\python.exe')
+                    Invoke-OfflinePython $python @('-I', '-B', $maintenance, $prepared, $Target, $Digest) ([ref]$code)
+                    if ($code -ne 0) { throw 'Could not register the fresh private runtime for maintenance.' }
+                }
                 [IO.File]::WriteAllText([IO.Path]::Combine($ioStage, $markerName), $Digest + "`r`n")
                 Complete-InstallStage $ioStage $ioTarget
             }

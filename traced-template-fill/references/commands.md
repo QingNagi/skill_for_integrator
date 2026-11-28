@@ -6,6 +6,7 @@
 |---|---|---|
 | `doctor` | 检查 Python、办公软件、PDF 库 | |
 | `doctor --selfcheck 文件` | 单独对 DOCX 或 XLSX 做结构自检 | 不需要 Office |
+| `doctor --prune` | 使用私有离线套装预览旧版运行时。保留当前、最近、已定制、使用中和无法验证的安装 | `--apply` 执行清理 |
 | `find 关键词…` | 模糊查找当前工作区或指定目录；精确查找指定工作区的所有同名文件 | `find 测量表.xlsx --exact --dir 项目目录`，可指定 `--depth` |
 | `run -t 目标 -s 来源 --task "要求"` | 建任务并规划。加 `--draft` 一并生成带来源批注的首稿和审核报告，遇到待答题即暂停。已产出的草稿路径、来源快照路径和核查数量见命令输出。 | `-s` 可重复，`--name`、`--out`、`--profile`、`--format` |
 | `new …` | 只建任务不规划（参数同 run） | `--plan` |
@@ -57,7 +58,7 @@ DI batch plan "<批量任务.json>"
 ```
 
 ## 兼容性
-- 读写核心只用 Python 标准库（3.8+），生成的 docx 采用 Word 自身的写法（批注、超链接、书签、表格），
+- 读写核心只用 Python 标准库（3.10+），生成的 docx 采用 Word 自身的写法（批注、超链接、书签、表格），
   已用 Word 2010 验证可打开与导出；WPS、LibreOffice、Word 2013 及以上版本尚未实机验证，只是批注、超链接、书签的结构按 Word 标准写法生成；在这些软件里首次使用请先 `draft --check` 或人工打开一份草稿确认批注链接能跳转。
 - 旧格式与导出：自动探测 MS Office（COM）→ WPS（KWps/KET COM）→ LibreOffice（soffice）；
   可用环境变量 `DI_OFFICE=word|wps|libreoffice` 指定。
@@ -66,3 +67,30 @@ DI batch plan "<批量任务.json>"
 关键问题的 `answer` 和批量等价操作，以及 `--defaults`、`--discard-edits`、`--accept-unverified`、`--remember` 均使用 `--user-quote "用户原话"` 记录依据。每个任务写入自己的 `decisions.jsonl`。
 
 `DI clean [--out 输出根]` 预览可清理的共享缓存；确认所有使用方已结束后加 `--apply`。快照与历史文稿仍保留。
+
+## 自动化调用与审核表
+
+在 `run --draft`、`answer --draft`、`draft` 和 `final` 后加 `--json`，标准输出只含一个 JSON 对象。成功为退出码 0。3 表示 `needs_answers`，直接展示 `questions` 中最多四道题，下一次调用可同时提交这批回答。4 表示 `blocked`，读取 `reason`。2 表示错误或部分导出失败。Python 调用用 `subprocess.run(args, check=False, capture_output=True, text=True)`，读完结果后再判断退出码。设置 `DI_TIMING=1` 可在标准错误中读取解析、规划、写入和校验各阶段的用时（秒）。
+
+- `DI questions <任务> --csv 待核清单.csv` 导出当前任务的可选决定。复核人可编辑决定和备注，以 `DI answer <任务> --from-sheet 待核清单.csv --reviewer 姓名 --user-quote "审核原话" --draft --json` 导入。保留原始位置、题号、选项和版本标识。
+- `DI answer <任务> Q3 --evidence 程序清单.csv --reviewer 姓名 --user-quote "审核原话" --draft --json` 可回答数据段归属、单位和工况。段序清单含“来源、标签、段序、测试号、参数、单位”。单位或工况清单含“来源、测试号、参数、单位”或“来源、测试号、参数、条件”。使用题目所指工作簿与工作表的来源标识。
+- 任务目录下的 `facts.json` 保存本次确认和来源。审核报告按位置引用事实。产品和程序版本可在测试规则中指定。用 `--remember` 明确确认过且适用范围和选项均匹配的决定可以跨任务复用。每一批都要核对批次身份。
+
+### 扫描与图文混排 PDF
+
+审核报告中的 OCR 行带原页裁切图，保存在 `草稿/源文件快照/OCR/`。识别引擎按词给出置信度。低于 80/100 的数字、单位、小数点和正负号会分别标记，复核时可点开对应原图。解析相同识别像素的工作共用本机 `_缓存/ocr/`。更换识别程序、模型、语言或分辨率会重新识别。
+
+可用以下环境变量调节一个任务对混排区域的判断。重新运行解析时会使用新设置。
+
+| 环境变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| `DI_OCR_NATIVE_CHARS` | 15 | 原生字符数低于该值时按稀疏文本页处理 |
+| `DI_OCR_SPARSE_MIN_AREA` | 0.04 | 稀疏文本页中触发 OCR 的图像最小面积占整页的比例 |
+| `DI_OCR_MIXED_MIN_AREA` | 0.25 | 混排页正文区域内，图像触发核对的最小面积占整页的比例 |
+| `DI_OCR_BODY_MARGIN` | 0.12 | 混排页顶部、底部分别排除的页高比例（0 到 0.49） |
+
+原生文字和达到面积阈值的图像在正文区域重叠时，审核报告会登记该页供人工核查。
+
+`batch draft 清单.json --jobs 2` 可让两项独立任务同时出草稿。清单有重复任务目录时会暂停。每个子任务产生独立 JSON 结果；若需要人工核对，会给出该任务的题目。
+
+`doctor --prune` 预览同一私有运行时缓存中可回收的版本。按命令提示显式应用。使用中、缺少可核验安装记录、包含本地改动以及当前和最近的一个版本均保留。

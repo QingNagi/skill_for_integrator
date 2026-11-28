@@ -18,7 +18,7 @@ def runtime_files(members):
     top = bundle.TOP + "/"
     return sorted(name[len(top):] for name in members if name.startswith(top) and not name.endswith("/")
                   and (name == top + "rules/test-data.json"
-                       or name.startswith(top + "scripts/") and name.endswith(".py")
+                       or name.startswith(top + "scripts/") and name.endswith((".py", ".ps1"))
                        or name.startswith(top + "runtime/python/") and Path(name).suffix.lower()
                        in {".exe", ".dll", ".pyd", ".zip", "._pth"}
                        or name == top + "runtime/ocr/tesseract.exe"

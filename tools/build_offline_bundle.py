@@ -46,7 +46,7 @@ def files(plat, vendor=None):
             raise ValueError("Missing or empty skill file: " + required)
     for pattern in ("SKILL.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "run.cmd", "run.sh",
                     "assets/offline-ocr.png", "profiles/*.json", "references/*.md", "rules/*.json",
-                    "scripts/**/*.py", "vendor/licenses/*.txt", "vendor/README.md", "vendor/SHA256SUMS",
+                    "scripts/**/*.py", "scripts/**/*.ps1", "vendor/licenses/*.txt", "vendor/README.md", "vendor/SHA256SUMS",
                     "vendor/*.lock.json"):
         for path in sorted(root.glob(pattern)):
             yield path, path.relative_to(root).as_posix()
@@ -66,6 +66,8 @@ def build(out, tag, plat, vendor=None):
         part = Path(staging) / 'package.zip'
         expected = {TOP + '/vendor/' + rel: spec[2] for rel, _, spec in wheel_specs(plat)}
         with zipfile.ZipFile(part, 'w') as archive:
+            if plat != "source":
+                archive.writestr(TOP + "/vendor/pdf-mode.txt", "full" if plat else "lite")
             for path, rel in files(plat, vendor):
                 method = zipfile.ZIP_STORED if rel.endswith('.whl') else zipfile.ZIP_DEFLATED
                 archive.write(path, TOP + '/' + rel, compress_type=method)

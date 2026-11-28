@@ -16,6 +16,7 @@ from urllib.parse import unquote
 
 from .environment import environment_lines
 from .common import TOOL_AUTHOR
+from .ooxml import validate_package_limits
 from .safe_xml import parse_xml
 
 ERROR, WARN, INFO = 'error', 'warn', 'info'
@@ -103,6 +104,7 @@ class Pkg(object):
 
     def open(self):
         self.zf = zipfile.ZipFile(self.path)
+        validate_package_limits(self.zf)
         self.infos = self.zf.infolist()
         self.names = [i.filename for i in self.infos]
         self.index = set(self.names)
@@ -694,6 +696,7 @@ def _snapshot_info(path):
         if ext in ('.docx', '.docm', '.dotx'):
             names = set()
             with zipfile.ZipFile(path) as z:
+                validate_package_limits(z)
                 for n in z.namelist():
                     if re.match('^word/(document|header[0-9]*|footer[0-9]*|footnotes|endnotes)[.]xml$', n):
                         with z.open(n) as fh:      # 显式关闭，否则 Windows 上快照文件被占用，并报 ResourceWarning
@@ -704,6 +707,7 @@ def _snapshot_info(path):
         elif ext in ('.xlsx', '.xlsm', '.xltx'):
             sheets = set()
             with zipfile.ZipFile(path) as z:
+                validate_package_limits(z)
                 root = parse_xml(z.read('xl/workbook.xml'))
             for el in root.iter(q(NS_X, 'sheet')):
                 if el.get('name'):

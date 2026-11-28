@@ -78,6 +78,8 @@ def install(payload, target, digest, required):
                 subprocess.run([python, "-B", "-X", "utf8", stage / args[0], *args[1:]], check=True,
                                env=env, stdout=subprocess.DEVNULL if len(args) > 1 else sys.stderr)
             if repair is None:
+                subprocess.run([python, "-I", "-B", stage / "scripts/dilib/runtime_maintenance.py",
+                                stage, target, digest], check=True)
                 (stage / marker).write_text(digest + "\n", encoding="ascii")
                 stage.rename(target)
             else:

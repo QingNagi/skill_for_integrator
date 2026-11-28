@@ -27,8 +27,7 @@ Claude Code 也可将文件夹放入用户目录下的 `.claude/skills/`，供�
 
 | Python 环境 | 可用能力 |
 |---|---|
-| 3.8 | DOCX、XLSX、文本处理 |
-| 3.9 及以上 | lite 包随附 pypdf，支持 PDF 文本层；源码安装时需自备兼容的依赖 |
+| 3.10 及以上 | DOCX、XLSX、文本处理。 lite 包随附 pypdf，支持 PDF 文本层；源码安装时需自备兼容的依赖 |
 | 自行配置完整 PDF 后端 | 解释器须满足所选 pdfplumber、pdfminer.six、pypdfium2、Pillow 等各自的版本和架构要求，另需 Tesseract 以及中英文模型 |
 | 三平台完整离线套装 | 自带 CPython 3.14.10 及中英文 OCR |
 
@@ -56,7 +55,7 @@ Claude Code 也可将文件夹放入用户目录下的 `.claude/skills/`，供�
 | 产物 | 内容 | 使用位置 |
 |---|---|---|
 | source ZIP | 可独立安装的技能，不含 wheel 或解释器 | 用于技能本体复核 |
-| lite ZIP | 技能与两个纯 Python wheel | 已有 Python 3.9+，需 PDF 文本提取 |
+| lite ZIP | 技能与两个纯 Python wheel | 已有 Python 3.10+，需 PDF 文本提取 |
 | 完整离线套装 | 技能、对应架构 Python、PDF 原生组件、中英文 OCR 模型及许可证 | 本地验收；项目许可与发布审批待定 |
 
 以下命令从仓库根目录运行，输出到仓库外的 `../release/`。依赖下载仅在构建机进行。校验、构建阶段可以从 `--vendor-dir` 或 `--from-dir` 指定的本地目录取原件。
@@ -78,3 +77,7 @@ python tools/build_linux_agent_kit.py --arch all --fetch-inputs --from-dir ../bu
 以上是 Windows 构建机的三平台交叉编译示例。部署到内网只需相应架构的完整包。维护者也可预置与清单匹配的 Tesseract 程序和原始依赖，再离线组装。[构建输入、原件摘要与工具链](traced-template-fill/vendor/README.md)
 
 同一份 Markdown 手册随完整包交付。对每个 ZIP 分别运行 Tier 1；本体通过的项目不能直接计入运行时的安全结论。SHA-256 用于核对收到的字节；部署方通过可信渠道取得摘要或签名后再核验。[第三方组件和许可](traced-template-fill/THIRD_PARTY_NOTICES.md) · [评审入口与证据](qa/README.md)
+
+## 数据流
+
+文档解析、OCR、草稿和来源快照留在本机。Agent 展示的原文、问题和工具输出会进入它配置的模型会话，涉及内网数据时应使用获准的内网端点。使用手册给出了缓存和任务证据的保留范围。[内网使用手册](tools/offline/README.md)

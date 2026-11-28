@@ -1,5 +1,6 @@
 """Project and user preferences, separate from the installed skill."""
 import os
+import re
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -22,7 +23,37 @@ def user_dir():
     return (Path(base) if base else Path.home() / ".config") / "traced-template-fill"
 
 
+def migrate_installed_rules(skill_dir):
+    current = Path(skill_dir).resolve()
+    if not (current / ".offline-payload.sha256").is_file() or not re.fullmatch(r"[0-9a-f]{24}|[0-9a-f]{64}", current.name):
+        return
+    folder = user_dir()
+    destination = folder / "learned.json"
+    if current.name in read_json(destination, {}).get("migrated_installs", []):
+        return
+    legacy = []
+    for install in current.parent.iterdir():
+        marker = install / ".offline-payload.sha256"
+        learned = install / "rules" / "learned.json"
+        if (install.resolve() != install or not re.fullmatch(r"[0-9a-f]{24}|[0-9a-f]{64}", install.name)
+                or not marker.is_file() or not learned.is_file() or learned.resolve() != learned):
+            continue
+        if marker.read_text(encoding="ascii").strip().lower().startswith(install.name):
+            legacy.append(learned)
+    with locked_preferences(folder):
+        records = read_json(destination, {})
+        if current.name in records.get("migrated_installs", []):
+            return
+        answers = records.setdefault("answers", {})
+        for path in sorted(legacy, key=lambda p: p.stat().st_mtime, reverse=True):
+            for key, value in read_json(path, {}).get("answers", {}).items():
+                answers.setdefault(key, value)
+        records.setdefault("migrated_installs", []).append(current.name)
+        write_json(destination, records)
+
+
 def mappings(skill_dir, job):
+    migrate_installed_rules(skill_dir)
     answers = {}
     for folder in (Path(skill_dir) / "rules", user_dir(), project_dir(job)):
         answers.update((read_json(folder / "learned.json", {}) or {}).get("answers", {}))

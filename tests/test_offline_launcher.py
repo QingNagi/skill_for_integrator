@@ -78,6 +78,7 @@ class LauncherTests(unittest.TestCase):
                 if (RUNTIME / file).is_file():
                     bundle.write(RUNTIME / file, "traced-template-fill/runtime/python/" + file)
             for name, contents in {
+                "scripts/dilib/runtime_maintenance.py": (SOURCE / "traced-template-fill/scripts/dilib/runtime_maintenance.py").read_text(encoding="utf-8"),
                 "scripts/di.py": FAKE_CLI, "scripts/dilib/cli.py": "# synthetic",
                 "scripts/dilib/draft_review.py": "# synthetic",
                 "scripts/dilib/office.py": "# synthetic office backend",

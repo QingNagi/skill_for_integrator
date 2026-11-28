@@ -6,21 +6,26 @@ import sys
 sys.dont_write_bytecode = True          # 不在技能目录生成 __pycache__，便于整体拷贝给其他机器/模型
 
 
-MIN_PYTHON = (3, 8)
+MIN_PYTHON = (3, 10)
 INTERRUPTED_EXIT = 130  # Standard shell exit status for SIGINT.
 
 
 def main(argv=None):
     if sys.version_info < MIN_PYTHON:
-        print("traced-template-fill 需要 Python 3.8 或更高版本。", file=sys.stderr)
+        print("traced-template-fill 需要 Python 3.10 或更高版本。", file=sys.stderr)
         return 2
     from dilib.cli import main as run_cli
+    from dilib.runtime_maintenance import RuntimeUnavailable, using_runtime
 
     try:
-        return run_cli(argv)  # argparse validates subcommands and required arguments.
+        with using_runtime():
+            return run_cli(argv)
     except KeyboardInterrupt:
         print("操作已中断。", file=sys.stderr)
         return INTERRUPTED_EXIT
+    except RuntimeUnavailable as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

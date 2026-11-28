@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import copy
+import datetime
 import difflib
+import io
 import os
 import re
 import shutil
+import zipfile
 
 from . import office
-from .common import TOOL_AUTHOR, DIError, ensure_dir, lock_file_of, short
+from .common import TOOL_AUTHOR, DIError, ReviewBlocked, ensure_dir, lock_file_of, short
 from .decisions import record_decision, require_quote
-from .ooxml import NS, W_P, W_R, W_T, Package, w
+from .ooxml import NS, W_P, W_R, W_T, Package, validate_package_limits, w
+from .safe_xml import parse_xml
 
 W14 = "http://schemas.microsoft.com/office/word/2010/wordml"
 W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
@@ -27,6 +31,7 @@ REV_REMOVE = {w("del"), w("moveFrom"), w("moveFromRangeStart"), w("moveFromRange
               w("moveToRangeEnd")}
 REV_PROPS = {w("rPrChange"), w("pPrChange"), w("sectPrChange"), w("tblPrChange"), w("trPrChange"), w("tcPrChange"),
              w("tblGridChange"), w("numberingChange"), w("cellIns"), w("cellDel"), w("cellMerge")}
+REV_TAGS = REV_REMOVE | REV_UNWRAP | REV_PROPS
 CONTENT_PARTS = re.compile(r"^word/(document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$")
 
 
@@ -56,6 +61,63 @@ def comments_info(pkg):
 
 def _parent_map(root):
     return {c: p for p in root.iter() for c in p}
+
+
+def import_word_answers(job, pkg, infos, version_name, input_fp):
+    """Read only direct, signed replies to the exact choices registered at draft creation."""
+    questions = job.data.get("word_questions", {}).get(version_name, [])
+    if not questions:
+        return
+    body = pkg.xml("word/document.xml")
+    anchored = {e.get(w("id")) for e in body.iter(w("commentReference"))}
+    answers = job.read("answers.json", {}) or {}
+    changes = {}
+    redraw = []
+    for q in questions:
+        if not input_fp or q["input_fp"] != input_fp:
+            continue
+        roots = [c for c in infos if c["author"] == TOOL_AUTHOR and c["id"] in anchored and
+                 c["parent"] is None and c["text"] == q["text"]]
+        if len(roots) != 1:
+            continue
+        root = roots[0]
+        replies = [c for c in infos if c["parent"] == root["id"] and c["author"].strip() and c["author"].strip() != TOOL_AUTHOR]
+        selected = []
+        for reply in replies:
+            match = re.fullmatch(r"确认(?:\s*([1-9]\d*))?[。！!]?", reply["text"].strip())
+            if not match:
+                continue
+            index = int(match.group(1)) - 1 if match.group(1) else q["bare"]
+            if index is None or index >= len(q["options"]):
+                raise ReviewBlocked("Word 核对 %s 的回复未指定有效选项，请核对后回复“确认 N”。" % q["id"])
+            selected.append((index, reply))
+        if not selected:
+            continue
+        if len({idx for idx, _ in selected}) != 1 or len(selected) != len(replies):
+            raise ReviewBlocked("Word 核对 %s 有多个不同回复，请统一决定后再次定稿。" % q["id"])
+        idx, reply = selected[-1]
+        option = q["options"][idx]
+        previous = answers.get(q["key"], {})
+        if previous.get("fp") == input_fp and not previous.get("default"):
+            if previous.get("effect") != option["effect"]:
+                raise ReviewBlocked("Word 核对 %s 与当前确认答案冲突，请核对并重新生成草稿。" % q["id"])
+        else:
+            changes[q["key"]] = {"choice": [idx], "label": option["label"], "effect": option["effect"],
+                                 "fp": input_fp, "confirmed_by": reply["author"], "user_quote": reply["text"],
+                                 "answered_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+                                 "word_draft": version_name, "word_parent": root["id"], "word_reply": reply["id"]}
+        # A positive source or sample mapping can release previously withheld
+        # measurements, even if it was presented as a recommended default.
+        if option["effect"] != q["applied"] or idx == q["bare"] or option["effect"].get("ok"):
+            redraw.append(q["id"])
+    if changes:
+        for key, rec in changes.items():
+            record_decision(job, "Word 核对", rec["user_quote"], draft=version_name, key=key,
+                            option=rec["label"], fp=input_fp, author=rec["confirmed_by"],
+                            comment=rec["word_parent"], reply=rec["word_reply"])
+        job.write("answers.json", dict(answers, **changes))
+    if redraw:
+        raise ReviewBlocked("Word 核对 %s 已登记，测量计划须重新生成草稿后再定稿。" % "、".join(redraw))
 
 
 def _preserve_replies(infos, ids, anchors):
@@ -134,6 +196,16 @@ def remove_comments(pkg, ids, infos):
         for el in list(root):
             if el.tag == "{%s}commentExtensible" % W16CEX and el.get("{%s}durableId" % W16CEX, "").upper() in durable:
                 root.remove(el)
+    if pkg.has("word/people.xml"):
+        removed_authors = {c["author"] for c in infos if c["id"] in ids}
+        removed_authors -= {c["author"] for c in infos if c["id"] not in ids}
+        people = pkg.xml("word/people.xml")
+        for person in people.findall("{%s}person" % W15):
+            if person.get("{%s}author" % W15) in removed_authors:
+                people.remove(person)
+    removed_refs = {value for c in infos if c["id"] in ids for el in c["el"].iter()
+                    for key, value in el.attrib.items() if key.startswith("{%s}" % NS["r"])}
+    prune_comment_rels(pkg, removed_refs)
     return len(ids)
 
 
@@ -143,40 +215,53 @@ def accept_revisions(pkg):
         if not CONTENT_PARTS.match(name):
             continue
         root = pkg.xml(name)
-        changed = True
-        while changed:
-            changed = False
+        if not any(el.tag in REV_TAGS for el in root.iter()):
+            continue
+        # A deleted paragraph mark joins text to the following paragraph.
+        # A structural boundary requires Word's review and remains a blocker.
+        pm = _parent_map(root)
+        unresolved = set()
+        for para in reversed(list(root.iter(W_P))):
+            mark = para.find("/".join((w("pPr"), w("rPr"), w("del"))))
+            if mark is None:
+                continue
+            container = pm[para]
+            idx = list(container).index(para) + 1
+            if idx == len(container) or container[idx].tag != W_P:
+                unresolved.add(mark)
+                continue
+            following = container[idx]
+            pos = int(following.find(w("pPr")) is not None)
+            for child in para:
+                if child.tag != w("pPr"):
+                    following.insert(pos, child)
+                    pos += 1
+            container.remove(para)
+            n += 1
+        # Table deletion marks are children of a property element. Consume
+        # their owning row/cell before removing individual revision marks.
+        for element, marker in (("tr", "trPr/del"), ("tc", "tcPr/cellDel")):
             pm = _parent_map(root)
-            for el in list(root.iter()):
-                if el.tag in REV_REMOVE or el.tag in REV_PROPS:
-                    par = pm.get(el)
-                    if par is not None and el in list(par):
-                        par.remove(el)
-                        n += 1
-                        changed = True
-                elif el.tag in REV_UNWRAP:
-                    par = pm.get(el)
-                    if par is None or el not in list(par):
-                        continue
-                    if par.tag in (w("rPr"), w("trPr")):     # 段落标记/行的插入标记
-                        par.remove(el)
-                    else:
-                        idx = list(par).index(el)
-                        for k, ch in enumerate(list(el)):
-                            par.insert(idx + k, ch)
-                        par.remove(el)
+            path = "/".join(w(k) for k in marker.split("/"))
+            for node in list(root.iter(w(element))):
+                if node.find(path) is not None:
+                    pm[node].remove(node)
                     n += 1
-                    changed = True
-            # 已删除的表格行
-            pm = _parent_map(root)
-            for tr in list(root.iter(w("tr"))):
-                trpr = tr.find(w("trPr"))
-                if trpr is not None and trpr.find(w("del")) is not None:
-                    pm[tr].remove(tr)
-                    n += 1
-                    changed = True
-            if changed:
-                break
+        pm = _parent_map(root)
+        for el in reversed(list(root.iter())):
+            par = pm.get(el)
+            if par is None or el in unresolved:
+                continue
+            if el.tag in REV_REMOVE or el.tag in REV_PROPS:
+                par.remove(el)
+            elif el.tag in REV_UNWRAP:
+                index = list(par).index(el)
+                par.remove(el)
+                for offset, child in enumerate(el):
+                    par.insert(index + offset, child)
+            else:
+                continue
+            n += 1
     return n
 
 
@@ -222,10 +307,11 @@ LOCAL_PATH = re.compile(
 MARKERS = ('待补充', '⚠', '原有值', '本批未核', '按推荐默认')
 
 
-def prune_comment_rels(pkg):
-    '''批注删除后，comments.xml.rels 里不再被引用的外部链接（指向“源文件快照”）要一并清掉，否则成品里仍带着内部相对路径。'''
+def prune_comment_rels(pkg, removed_refs):
+    '''清理已删除批注专用的链接和附件。其余部件和隐式关系原样保留。'''
+    from .sanitize import _rels_owner, drop_part
     rn = pkg.rels_name('word/comments.xml')
-    if rn not in pkg.parts:
+    if not removed_refs or rn not in pkg.parts:
         return 0
     rel = pkg.rels('word/comments.xml')
     used = set()
@@ -233,11 +319,24 @@ def prune_comment_rels(pkg):
         rel_namespace = '{%s}' % NS['r']
         for el in pkg.xml('word/comments.xml').iter():
             used.update(value for name, value in el.attrib.items() if name.startswith(rel_namespace))
-    gone = [el for el in list(rel.root) if el.get('Id') not in used]
+    gone = [el for el in list(rel.root) if el.get('Id') in removed_refs - used]
+    attachments = set()
     for el in gone:
+        if el.get('TargetMode') != 'External':
+            part = pkg.resolve('word/comments.xml', el.get('Target', ''))
+            if part.startswith(('word/media/', 'word/embeddings/')):
+                attachments.add(part)
         rel.root.remove(el)
     if gone:
         rel.dirty = True
+    if attachments:
+        for rn in [n for n in pkg.parts if n.endswith('.rels')]:
+            owner = _rels_owner(rn)
+            for _, _, target, mode in pkg.rels(owner).items():
+                if mode != 'External' and target:
+                    attachments.discard(pkg.resolve(owner, target))
+        for part in attachments:
+            drop_part(pkg, part)
     return len(gone)
 
 
@@ -264,9 +363,10 @@ def recipient_check(path):
         nh = sum(1 for _ in root.iter(w('vanish')))
         if nh:
             warn.append('%s 含 %d 处隐藏文字，外发前确认' % (base, nh))
-        nr = sum(1 for e in root.iter() if e.tag in (w('ins'), w('del'), w('moveFrom'), w('moveTo')))
-        if nr:
-            block.append('%s 仍有 %d 处未接受的修订' % (base, nr))
+        revisions = [e for e in root.iter() if e.tag in REV_TAGS or e.get(w('author'))]
+        if revisions:
+            authors = sorted({e.get(w('author')) for e in revisions if e.get(w('author'))})
+            block.append('%s 仍有 %d 处未接受的修订，修订者：%s' % (base, len(revisions), '、'.join(authors) or '未署名'))
     infos = comments_info(pkg)
     tool = [c for c in infos if c['author'] == TOOL_AUTHOR]
     if tool:
@@ -288,13 +388,38 @@ def recipient_check(path):
                 warn.append('含外部链接 %s' % short(t, 50))
             else:
                 block.append('%s 含指向本机/内部的外部链接：%s' % (posixpath.basename(part), short(t, 50)))
-    core = pkg.parts.get('docProps/core.xml', b'').decode('utf-8', 'replace')
-    for tag, label in (('dc:creator', '作者'), ('cp:lastModifiedBy', '最后修改者')):
-        m = re.search('<%s[^>]*>([^<]+)</%s>' % (tag, tag), core)
-        if m:
-            warn.append('文档属性里的%s：%s（外发前确认是否可以带出）' % (label, m.group(1)))
-    if pkg.has('customXml/item1.xml'):
+    if pkg.has('docProps/core.xml'):
+        core = pkg.xml('docProps/core.xml')
+        for tag, label in (('{http://purl.org/dc/elements/1.1/}creator', '作者'),
+                           ('{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}lastModifiedBy', '最后修改者')):
+            val = core.findtext(tag)
+            if val:
+                warn.append('文档属性里的%s：%s（外发前确认是否可以带出）' % (label, val))
+    if pkg.has('docProps/custom.xml'):
+        for prop in pkg.xml('docProps/custom.xml'):
+            if prop.get('name'):
+                warn.append('自定义文档属性：' + prop.get('name'))
+    if pkg.has('word/settings.xml'):
+        for var in pkg.xml('word/settings.xml').iter(w('docVar')):
+            warn.append('文档变量：' + (var.get(w('name')) or '未命名'))
+    if any(re.fullmatch(r'customXml/item\d+\.xml', n) for n in pkg.parts):
         warn.append('含 customXml 部件（可能带有内部元数据）')
+    sheet_tag = '{%s}sheet' % NS['x']
+    for name in sorted(pkg.parts):
+        if not name.startswith('word/embeddings/') or not name.lower().endswith(('.xlsx', '.xlsm', '.xlsb', '.xls')):
+            continue
+        if name.lower().endswith(('.xlsb', '.xls')):
+            warn.append('嵌入工作簿 %s 的隐藏工作表尚未检查' % name)
+            continue
+        try:
+            with zipfile.ZipFile(io.BytesIO(pkg.parts[name])) as workbook:
+                validate_package_limits(workbook)
+                workbook_root = parse_xml(workbook.read('xl/workbook.xml'))
+            for sheet in workbook_root.iter(sheet_tag):
+                if sheet.get('state') in ('hidden', 'veryHidden'):
+                    warn.append('嵌入工作簿 %s 含隐藏工作表：%s' % (name, sheet.get('name', '')))
+        except (ValueError, KeyError, OSError, RuntimeError, zipfile.BadZipFile, SyntaxError, DIError) as exc:
+            warn.append('嵌入工作簿 %s 的隐藏工作表检查失败：%s' % (name, exc))
     return block, warn
 
 
@@ -303,18 +428,26 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
     if accept_unverified:
         require_quote(user_quote, "final --accept-unverified")
     if lock_file_of(draft):
-        raise DIError("草稿似乎仍在 Word/WPS 中打开（存在 ~$ 锁文件）。请先保存并关闭草稿后再定稿：%s" % draft)
+        raise ReviewBlocked("草稿似乎仍在 Word/WPS 中打开（存在 ~$ 锁文件）。请先保存并关闭草稿后再定稿：%s" % draft)
     registered = job.data.get('unverified') or {}
     version_name = os.path.basename(draft)
     if registered and version_name not in registered:
         if len(registered) != 1:
-            raise DIError('无法确定这份审核副本对应的草稿版本。请将副本命名为所审核版本的原文件名，再用 --draft 指定。')
+            raise ReviewBlocked('无法确定这份审核副本对应的草稿版本。请将副本命名为所审核版本的原文件名，再用 --draft 指定。')
         version_name = next(iter(registered))
     draft_fp = job.data.get('draft_inputs', {}).get(version_name)
     if draft_fp and draft_fp != job.fingerprint(files_only=True):
-        raise DIError('审核草稿使用的模板或源文件已变化。请重新生成草稿并核对后再定稿。')
+        raise ReviewBlocked('审核草稿使用的模板或源文件已变化。请重新生成草稿并核对后再定稿。')
+    recorded = job.data.get('draft_decisions', {}).get(version_name)
+    if recorded:
+        from .evidence import decision_digest
+        defaults = {item['key']: item['effect'] for item in registered.get(version_name, [])
+                    if item.get('kind') == 'default' and 'effect' in item}
+        if recorded != decision_digest(job, effective_defaults=defaults):
+            raise ReviewBlocked('审核草稿使用的决定或填写规则已变化。请重新生成草稿并核对后再定稿。')
     pkg = Package(draft)
     infos = comments_info(pkg)
+    import_word_answers(job, pkg, infos, version_name, draft_fp)
     tmpl = {(a, t) for a, t in job.data.get("template_comments", [])}
     tool = {c["id"] for c in infos if c["author"] == TOOL_AUTHOR}
     template = {c["id"] for c in infos if (c["author"], c["text"]) in tmpl}
@@ -332,14 +465,13 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
     if template and template_comments == "ask":
         lines.append("草稿仍有 %d 条模板原有批注。请选择 --template-comments keep（保留）或 drop（删除）。" % len(template))
     if lines:
-        raise DIError("\n".join(lines))
+        raise ReviewBlocked("\n".join(lines))
     rm = set(tool)
     if reviewer_comments == "drop":
         rm |= {c["id"] for c in reviewer}
     if template_comments == "drop":
         rm |= template
     remove_comments(pkg, rm, infos)
-    prune_comment_rels(pkg)
     nrev = accept_revisions(pkg)
     out_dir = ensure_dir(job.p("终稿"))
     final_docx = os.path.join(out_dir, "%s_终稿.docx" % job.stem)
@@ -408,7 +540,7 @@ def finalize(job, draft, out_formats=None, reviewer_comments="ask", strip_templa
                 for h, v in cats.items():
                     f.write(NL + '## %s（%d 项）' % (h, len(v)) + NL + NL.join('- ' + x for x in v) + NL)
             lines = ['%s（%d 项）：%s%s' % (h, len(v), '；'.join(short(x, 40) for x in v[:2]), '…' if len(v) > 2 else '') for h, v in cats.items()]
-            raise DIError('终稿未通过外发检查，没有生成正式稿（草稿已保留）。共 %d 类 %d 项：' % (len(cats), len(blockers)) + NL + '  - ' + (NL + '  - ').join(lines) + NL + '完整清单见 ' + full + NL + '处理后重新 final；确认可以带着这些问题发出，再加 --accept-unverified --user-quote "用户原话"（会登记到 终稿遗留项.md）。')
+            raise ReviewBlocked('终稿未通过外发检查，没有生成正式稿（草稿已保留）。共 %d 类 %d 项：' % (len(cats), len(blockers)) + NL + '  - ' + (NL + '  - ').join(lines) + NL + '完整清单见 ' + full + NL + '处理后重新 final；确认可以带着这些问题发出，再加 --accept-unverified --user-quote "用户原话"（会登记到 终稿遗留项.md）。')
         accepted = blockers
         with open(legacy, 'w', encoding='utf-8') as f:
             f.write('# 终稿遗留项（带着这些问题定稿；仅内部查看，不要外发）' + NL + NL

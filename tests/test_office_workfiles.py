@@ -78,12 +78,13 @@ class WordWorkfileTests(unittest.TestCase):
                 self.assertTrue(work.is_dir())
                 self.assertEqual(kwargs["env"]["TMP"], str(work))
                 self.assertEqual(os.environ["TMP"], str(invalid))
-                self.assertTrue((work / "run.ps1").is_file())
+                self.assertEqual(Path(command[command.index("-File") + 1]), office._PS_SCRIPT)
                 self.assertEqual(Path(command[-4]).parent, work)
                 self.assertEqual(len(Path(command[-4]).read_text(encoding="utf-8-sig").splitlines()), 2)
                 for output in outputs:
                     output.write_bytes(b"example")
                 Path(command[-3]).write_text("".join("OK\t%s\n" % output for output in outputs), encoding="utf-8")
+                return office.subprocess.CompletedProcess(command, 0)
 
             with patch.dict(os.environ, TMP=str(invalid), TEMP=str(invalid)), \
                     patch.object(office, "_engines", return_value=[("com", "Word.Application")]), \

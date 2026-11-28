@@ -38,6 +38,10 @@ class DIError(Exception):
     """可预期的错误：只打印消息，不打印堆栈。"""
 
 
+class ReviewBlocked(DIError):
+    """The requested document needs a reviewer decision or corrected input."""
+
+
 # ---------------------------------------------------------------- 文件
 def read_json(path, default=None):
     if not os.path.exists(path):
@@ -195,6 +199,14 @@ def runs_text(runs):
 _NUM_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
 
 
+_NUMERIC_GLYPHS = str.maketrans("−－–＋～µ", "---+~μ")
+
+
+def numeric_text(value):
+    """Normalize measurement notation while preserving unit case and source text."""
+    return str(value).strip().translate(_NUMERIC_GLYPHS)
+
+
 def to_number(v):
     if isinstance(v, bool):
         return None
@@ -202,7 +214,7 @@ def to_number(v):
         return float(v)
     if v is None:
         return None
-    s = str(v).strip().replace("，", ",")
+    s = numeric_text(v).replace("，", ",")
     if _NUM_RE.match(s):
         return float(s)
     return None

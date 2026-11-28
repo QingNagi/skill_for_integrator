@@ -39,7 +39,9 @@ function Get-PrivateSkillPath {
     $local = $env:LOCALAPPDATA
     if (-not $local) { $local = [Environment]::GetFolderPath('LocalApplicationData') }
     if (-not $local) { throw 'Cannot locate the local application data directory for this user.' }
-    $parent = if ($env:DI_CACHE_DIR) {
+    $parent = if ($env:DI_RUNTIME_DIR) {
+        [IO.Path]::GetFullPath($env:DI_RUNTIME_DIR)
+    } elseif ($env:DI_CACHE_DIR) {
         [IO.Path]::GetFullPath((Join-Path $env:DI_CACHE_DIR 'offline'))
     } else { [IO.Path]::GetFullPath((Join-Path $local 'traced-template-fill\offline')) }
     # Keep native DLL and OCR paths short. The marker stores the full digest.

@@ -18,6 +18,25 @@ on:
 permissions:
   contents: read
 jobs:
+  source-core:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Verify the source CLI and record compatibility
+        run: |
+          python -B traced-template-fill/scripts/di.py --help
+          for suite in test_run_draft test_evidence_cli test_evidence_gates test_evidence_io test_word_roundtrip test_selfcheck; do
+            python -B -m unittest discover -s tests -p "$suite.py"
+          done
+          echo "Source CLI, evidence decisions, Word review and document checks passed on $(python --version)." >> "$GITHUB_STEP_SUMMARY"
   offline:
     strategy:
       fail-fast: false

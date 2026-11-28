@@ -10,7 +10,7 @@
 | pypdf、typing_extensions | 6.21.4、4.16.0 | 纯文本后备。BSD-3-Clause 与 PSF-2.0。lite 包包含这两项 |
 | charset-normalizer、pycparser | 3.5.3、3.12 | 文本编码与 C 类型解析。MIT 与 BSD-3-Clause |
 | cryptography、cffi | 50.0.2、2.1.1 | 加密 PDF 所需组件。Apache-2.0 或 BSD-3-Clause，以及 MIT-0；原生依赖声明见 licenses/ |
-| Tesseract、Leptonica | 5.5.5、1.87.0 | 本地 OCR 和像素读取。Apache-2.0 与 BSD-2-Clause |
+| Tesseract、Leptonica | 5.5.5、1.87.0+git.c493a776 | 本地 OCR 和像素读取。Apache-2.0 与 BSD-2-Clause |
 | tessdata_fast | 87416418657359cb625c412a48b6e1d6d41c29bd | chi_sim、eng 语言模型。Apache-2.0 |
 
 pypdfium2 和 Pillow 的上游 wheel 含有完整的第三方声明，以及上游多许可项目的可选条款。FreeType 在本发行包中按 FreeType License 分发。Python wheel 保持原样，PDFium 的第三方声明在其 wheel 的 *.dist-info/licenses/BUILD_LICENSES/ 目录。FreeType、Independent JPEG Group、OpenSSL、libffi 和 OCR 编译运行库的声明见 licenses/Native-runtime-notices.txt 和同目录的许可文件。
@@ -31,4 +31,4 @@ python tools/build_ocr_runtime.py --platform manylinux_aarch64 --zig PATH_TO_ZIG
 
 构建脚本从固定标签获取并校验 Tesseract 与 Leptonica 源码。构建机 Python 需安装 Pillow 13.0.0，将九张内嵌 TIFF 字体图转换为 OCR 引擎支持的 PBM，逐像素核对后用 Zig 0.14.1 交叉编译。也可预置已校验的两个源码压缩包至 .build/ocr-build/。模型和解释器由对应平台打包工具准备。wheel 与 OCR 程序分别放在 .build/vendor/py/、.build/vendor/wheels/ 和 .build/vendor/ocr/。打包工具校验发布清单，拒绝摘要不符的输入。
 
-[PDFium 绑定的许可说明](https://pypdfium2.readthedocs.io/en/stable/readme.html#licensing) · [Tesseract](https://github.com/tesseract-ocr/tesseract/tree/5.5.5) · [Leptonica](https://github.com/DanBloomberg/leptonica/tree/1.87.0) · [tessdata_fast 模型](https://github.com/tesseract-ocr/tessdata_fast/tree/87416418657359cb625c412a48b6e1d6d41c29bd)
+[PDFium 绑定的许可说明](https://pypdfium2.readthedocs.io/en/stable/readme.html#licensing) · [Tesseract](https://github.com/tesseract-ocr/tesseract/tree/5.5.5) · [Leptonica](https://github.com/DanBloomberg/leptonica/tree/c493a776e6bc6cfb1d8d15152a0b74f3d15b33fd) · [tessdata_fast 模型](https://github.com/tesseract-ocr/tessdata_fast/tree/87416418657359cb625c412a48b6e1d6d41c29bd)

@@ -61,7 +61,9 @@ def _office_lines():
 def environment_lines():
     '''doctor 汇总：Python、办公软件、PDF 库、OCR 后端、vendor 状态。返回行列表。'''
     py = sys.version_info
-    lines = ['Python %s（%s）%s' % (sys.version.split()[0], sys.executable, '' if py >= (3, 8) else '  [严重] 低于 3.8，本工具不支持')]
+    lines = ['Python %s（%s）%s' % (sys.version.split()[0], sys.executable, '' if py >= (3, 10) else '  [严重] 低于 3.10，本工具不支持')]
+    from . import __version__
+    lines.insert(0, 'traced-template-fill ' + __version__)
     lines += _office_lines()
     try:
         from . import _bootstrap as bs
@@ -92,5 +94,5 @@ def environment_lines():
         lines.append('xlrd（.xls 读取，可选）：%s' % ('有' if importlib.util.find_spec('xlrd') else '无，.xls 会改用办公软件转换'))
     except Exception:
         pass
-    lines.append('核心功能（docx/xlsx/csv/md/txt 读写、批注、链接、结构自检）只需 Python 3.8+ 标准库。')
+    lines.append('核心功能（docx/xlsx/csv/md/txt 读写、批注、链接、结构自检）只需 Python 3.10+ 标准库。')
     return lines

@@ -1,5 +1,6 @@
 """CycloneDX inventory of the interpreter, wheels, OCR executable, sources and models."""
 from email.parser import BytesParser
+import hashlib
 import json
 from pathlib import Path
 import zipfile
@@ -50,6 +51,14 @@ def runtime_bom(platform, python_version, url, size, sha, python_license, vendor
                        any(word in n.lower() for word in ("license", "copying", "copyright")) and not n.endswith("/")]
             if not notices:
                 raise ValueError("Wheel has no license notices: " + filename)
+            if package == "pypdfium2":
+                info = json.loads(archive.read("pypdfium2_raw/version.json"))
+                native_version = ".".join(str(info[k]) for k in ("major", "minor", "build", "patch"))
+                lib, = (n for n in archive.namelist() if n.startswith("pypdfium2_raw/") and n.endswith((".dll", ".so")))
+                native = archive.read(lib)
+                member_path = "vendor/" + rel + "!/"
+                parts.append(component("library", "PDFium", native_version, hashlib.sha256(native).hexdigest(),
+                                       len(native), member_path + lib, "; ".join(member_path + n for n in notices)))
         location = "vendor/" + rel
         item = component("library", package, metadata["Version"], digest, size, location,
                          location + "!/" + notices[0], vendor_tools.MIRRORS["pypi"] + path + "/" + filename,

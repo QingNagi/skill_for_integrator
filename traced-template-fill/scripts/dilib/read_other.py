@@ -2,14 +2,17 @@
 """xlsx / xls / csv / md / txt / pdf -> 内容模型。"""
 from __future__ import annotations
 
+import codecs
 import csv
 import datetime
 import io
 import os
+import posixpath
 import re
 import zipfile
 from decimal import Decimal, InvalidOperation
 
+from .ooxml import validate_package_limits
 from .safe_xml import parse_xml
 
 from .common import DIError, short
@@ -47,10 +50,15 @@ _DATE_FMT_IDS = set(range(14, 23)) | {45, 46, 47, 27, 28, 29, 30, 31, 32, 33, 34
                                        56, 57, 58}
 
 
-def _excel_date(v):
+def _excel_date(v, date1904=False):
     try:
-        base = datetime.datetime(1899, 12, 30)
-        d = base + datetime.timedelta(days=float(v))
+        serial = float(v)
+        if date1904:
+            base = datetime.datetime(1904, 1, 1)
+        else:
+            # The 1900 system includes the fictitious leap day after serial 59.
+            base = datetime.datetime(1899, 12, 31) if 0 < serial < 60 else datetime.datetime(1899, 12, 30)
+        d = base + datetime.timedelta(days=serial)
         if d.hour == 0 and d.minute == 0 and d.second == 0:
             return d.strftime("%Y-%m-%d")
         return d.strftime("%Y-%m-%d %H:%M:%S")
@@ -60,6 +68,7 @@ def _excel_date(v):
 
 def read_xlsx(path):
     with zipfile.ZipFile(path) as z:
+        validate_package_limits(z)
         return _read_xlsx(path, z)
 
 
@@ -75,7 +84,7 @@ def _read_xlsx(path, z):
     ss = []
     if "xl/sharedStrings.xml" in names:
         for si in parse_xml(z.read("xl/sharedStrings.xml")).findall(S + "si"):
-            ss.append("".join(t.text or "" for t in si.iter(S + "t") if not _in_rph(si, t)))
+            ss.append(si_text(si))
     date_styles = set()
     decimal_styles = {}
     if "xl/styles.xml" in names:
@@ -102,35 +111,64 @@ def _read_xlsx(path, z):
                     decimal_styles[i] = fixed[fid]
     wb = parse_xml(z.read("xl/workbook.xml"))
     rels = parse_xml(z.read("xl/_rels/workbook.xml.rels"))
-    rmap = {r.get("Id"): r.get("Target") for r in rels}
-    sheets = []
+    rmap = {r.get("Id"): r for r in rels if r.get("TargetMode") != "External"}
+    props = wb.find(S + "workbookPr")
+    date1904 = props is not None and props.get("date1904") in ("true", "1")
+    sheets, warnings, unread = [], [], []
     for sh in wb.find(S + "sheets"):
         name = sh.get("name")
-        tgt = rmap.get(sh.get(RNS + "id"), "")
-        part = tgt[1:] if tgt.startswith("/") else "xl/" + tgt
+        if sh.get("state", "visible") != "visible":
+            warnings.append("已跳过隐藏工作表 %s" % name)
+            continue
+        relation = rmap.get(sh.get(RNS + "id"))
+        if relation is None:
+            unread.append({"location": name, "why": "未找到工作表的内部关系"})
+            continue
+        if relation.get("Type") and not relation.get("Type").endswith("/worksheet"):
+            warnings.append("已跳过非数据工作表 %s" % name)
+            continue
+        part = posixpath.normpath(posixpath.join("/xl", relation.get("Target") or "")).lstrip("/")
         if part not in names:
+            unread.append({"location": name, "why": "未找到工作表部件"})
             continue
         x = parse_xml(z.read(part))
+        if x.tag != S + "worksheet":
+            warnings.append("已跳过非数据工作表 %s" % name)
+            continue
         cells = {}
         numeric_text = {}
         maxr = maxc = -1
+        hidden_cols = [(int(col.get("min")), int(col.get("max"))) for col in x.iter(S + "col")
+                       if col.get("hidden") in ("1", "true")]
+        hidden_rows = []
+        row_number = 0
         for row in x.iter(S + "row"):
+            row_number = int(row.get("r") or row_number + 1)
+            if row.get("hidden") in ("1", "true"):
+                hidden_rows.append(row_number)
+                continue
+            c_ = -1
             for c in row.findall(S + "c"):
-                ref = c.get("r")
+                ref = c.get("r") or "%s%d" % (col_letter(c_ + 1), row_number)
                 r_, c_ = split_ref(ref)
+                if any(lo <= c_ + 1 <= hi for lo, hi in hidden_cols):
+                    continue
                 t = c.get("t")
                 v = c.find(S + "v")
                 val = v.text if v is not None else None
+                if val is None and c.find(S + "f") is not None:
+                    unread.append({"location": name + "!" + ref, "why": "公式缺少缓存结果"})
+                    continue
                 if t == "s" and val is not None:
                     val = ss[int(val)]
                 elif t == "inlineStr":
-                    val = "".join(tt.text or "" for tt in c.iter(S + "t"))
+                    val = si_text(c.find(S + "is"))
                 elif t == "b":
                     val = "TRUE" if val == "1" else "FALSE"
                 elif t in (None, "n") and val is not None:
                     style = int(c.get("s", "0"))
                     if style in date_styles:
-                        val = _excel_date(val)
+                        val = _excel_date(val, date1904)
                     else:
                         try:
                             original = val
@@ -153,14 +191,28 @@ def _read_xlsx(path, z):
         mc = x.find(S + "mergeCells")
         if mc is not None:
             merges = [m.get("ref") for m in mc]
+        if hidden_rows or hidden_cols:
+            warnings.append("%s 已跳过 %d 个隐藏行和 %d 段隐藏列" % (name, len(hidden_rows), len(hidden_cols)))
+        if (maxr + 1) * (maxc + 1) > 4_000_000:
+            raise DIError("工作表 %s 的有效区域过大；请提供较小的可见数据区域" % name)
         rows = [[cells.get((r, c)) for c in range(maxc + 1)] for r in range(maxr + 1)]
         sheets.append({"name": name, "nrows": maxr + 1, "ncols": maxc + 1, "rows": rows, "merges": merges,
-                       "numeric_text": numeric_text, "charts": _xlsx_charts(z, part, names)})
-    return {"type": "xlsx", "title": os.path.splitext(os.path.basename(path))[0], "sheets": sheets}
+                       "hidden_rows": hidden_rows, "numeric_text": numeric_text, "charts": _xlsx_charts(z, part, names)})
+    return {"type": "xlsx", "title": os.path.splitext(os.path.basename(path))[0], "sheets": sheets,
+            "unread": unread, "read_warnings": warnings}
 
 
-def _in_rph(si, t):
-    return False
+def si_text(si):
+    """Read displayed shared/inline text without adding phonetic annotations."""
+    if si is None:
+        return ""
+    out = []
+    for child in si:
+        if child.tag == S + "t":
+            out.append(child.text or "")
+        elif child.tag == S + "r":
+            out.append(child.findtext(S + "t", ""))
+    return "".join(out)
 
 
 def _xlsx_charts(z, sheet_part, names):
@@ -202,17 +254,29 @@ def _chart_xml(data):
 def read_xls(path):
     """旧版 .xls：优先 xlrd，否则由调用方先转换为 xlsx。"""
     import xlrd  # noqa
-    book = xlrd.open_workbook(path)
-    sheets = []
+    book = xlrd.open_workbook(path, formatting_info=True)
+    sheets, warnings = [], []
     for sh in book.sheets():
+        if sh.visibility:
+            warnings.append("已跳过隐藏工作表 %s" % sh.name)
+            continue
+        hidden_rows = {r for r, info in sh.rowinfo_map.items() if info.hidden}
+        hidden_cols = {c for c, info in sh.colinfo_map.items() if info.hidden}
+        if hidden_rows or hidden_cols:
+            warnings.append("%s 已跳过 %d 个隐藏行和 %d 个隐藏列" % (sh.name, len(hidden_rows), len(hidden_cols)))
+        if sh.nrows * sh.ncols > 4_000_000:
+            raise DIError("工作表 %s 的有效区域过大；请提供较小的可见数据区域" % sh.name)
         rows = []
         for r in range(sh.nrows):
             row = []
             for c in range(sh.ncols):
+                if r in hidden_rows or c in hidden_cols:
+                    row.append(None)
+                    continue
                 cell = sh.cell(r, c)
                 v = cell.value
                 if cell.ctype == xlrd.XL_CELL_DATE:
-                    v = _excel_date(v)
+                    v = _excel_date(v, bool(book.datemode))
                 elif cell.ctype == xlrd.XL_CELL_NUMBER and float(v).is_integer():
                     v = int(v)
                 elif v == "":
@@ -221,19 +285,26 @@ def read_xls(path):
             rows.append(row)
         merges = ["%s%d:%s%d" % (col_letter(c0), r0 + 1, col_letter(c1 - 1), r1) for r0, r1, c0, c1 in sh.merged_cells]
         sheets.append({"name": sh.name, "nrows": sh.nrows, "ncols": sh.ncols, "rows": rows, "merges": merges,
-                       "charts": []})
-    return {"type": "xlsx", "title": os.path.splitext(os.path.basename(path))[0], "sheets": sheets}
+                       "hidden_rows": sorted(r + 1 for r in hidden_rows), "charts": []})
+    return {"type": "xlsx", "title": os.path.splitext(os.path.basename(path))[0], "sheets": sheets,
+            "read_warnings": warnings}
+
+
+def _decode_export(path):
+    with open(path, "rb") as stream:
+        raw = stream.read()
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig"), "utf-8-sig"
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1"), "latin-1"
 
 
 def read_csv(path):
-    with open(path, "rb") as stream:
-        raw = stream.read()
-    for enc in ("utf-8-sig", "gb18030", "latin-1"):
-        try:
-            text = raw.decode(enc)
-            break
-        except UnicodeDecodeError:
-            continue
+    text, encoding = _decode_export(path)
     dialect = csv.excel
     try:
         dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|")
@@ -260,7 +331,7 @@ def read_csv(path):
     ncols = max((len(r) for r in rows), default=0)
     rows = [r + [None] * (ncols - len(r)) for r in rows]
     return {"type": "xlsx", "title": os.path.splitext(os.path.basename(path))[0],
-            "sheets": [{"name": "Sheet1", "nrows": len(rows), "ncols": ncols, "rows": rows, "merges": [], "charts": [],
+            "encoding": encoding, "sheets": [{"name": "Sheet1", "nrows": len(rows), "ncols": ncols, "rows": rows, "merges": [], "charts": [],
                         "numeric_text": numeric_text}]}
 
 
@@ -434,18 +505,10 @@ def read_markdown(path, text=None):
 
 
 def read_txt(path):
-    with open(path, "rb") as stream:
-        raw = stream.read()
-    for enc in ("utf-8-sig", "gb18030"):
-        try:
-            text = raw.decode(enc)
-            break
-        except UnicodeDecodeError:
-            continue
-    else:
-        text = raw.decode("latin-1")
+    text, encoding = _decode_export(path)
     m = read_markdown(path, text=text)
     m["type"] = "txt"
+    m["encoding"] = encoding
     return m
 
 
@@ -456,6 +519,8 @@ def read_pdf(path, media_dir=None, ocr=None):
     _bootstrap.activate_vendor()
     options = ocr if ocr is not None else _bootstrap.ocr_hint()
     try:
+        if _bootstrap.delivery_mode() == "lite":
+            raise ImportError("精简包仅提供文本读取器")
         return read_layout(path, media_dir, options)
     except Exception as exc:
         # An unreadable PDF catalog may still be recoverable by the independent reader.

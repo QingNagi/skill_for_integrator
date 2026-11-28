@@ -1,5 +1,7 @@
 import contextlib
 import io
+import json
+import os
 import tempfile
 import unittest
 import zipfile
@@ -65,6 +67,47 @@ class RunDraftTests(unittest.TestCase):
         self.assertIn("Q1", output)
         self.assertFalse((self.root / "缺依据/草稿").exists())
         self.assertFalse((self.root / "缺依据/answers.json").exists())
+
+    def test_json_run_returns_actionable_questions_and_separate_timing(self):
+        self.source_section("运输包装")
+        output, diagnostics = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(diagnostics), patch.dict(os.environ, {"DI_TIMING": "1"}):
+            rc = cli.main(["run", "-t", str(self.target), "-s", str(self.source),
+                           "--out", str(self.root), "--name", "交互", "--draft", "--json"])
+        self.assertEqual(rc, 3)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["status"], "needs_answers")
+        self.assertTrue(result["questions"][0]["options"])
+        self.assertLessEqual(len(result["questions"]), 4)
+        self.assertEqual(Path(result["job"]), self.root / "交互")
+        self.assertIn("plan", diagnostics.getvalue())
+
+    def test_answer_and_draft_share_the_new_plan(self):
+        self.source_section("运输包装")
+        self.run_job("待答", "--draft")
+        job = self.root / "待答"
+        q = json.loads((job / "questions.json").read_text(encoding="utf-8"))[0]
+        with patch.object(cli, "do_plan", wraps=cli.do_plan) as planner, contextlib.redirect_stdout(io.StringIO()) as output:
+            rc = cli.main(["answer", str(job), q["id"] + "=1", "--draft", "--json"])
+        self.assertEqual(planner.call_count, 1)
+        result = json.loads(output.getvalue())
+        self.assertIn(rc, (0, 3, 4))
+        if result["status"] == "draft_ready":
+            self.assertTrue(Path(result["draft"]).is_file())
+        elif rc == 3:
+            self.assertTrue(result["questions"])
+        else:
+            self.assertEqual(rc, 4)
+
+    def test_from_designated_document_is_not_a_requested_heading(self):
+        self.source_section("项目背景")
+        body = '<w:p>' + self.heading + '<w:commentRangeStart w:id="0"/><w:r><w:t>说明</w:t></w:r><w:commentRangeEnd w:id="0"/></w:p><w:p/>'
+        make_docx(self.target, {"word/document.xml": doc_xml(body),
+                               "word/comments.xml": COMMENTS.replace("note", "请从指定任务书摘入项目背景。")})
+        self.run_job("自然批注", "--draft")
+        plan = json.loads((self.root / "自然批注/plan.json").read_text(encoding="utf-8"))
+        self.assertFalse(plan["questions"])
+        self.assertTrue(list((self.root / "自然批注/草稿").glob("*.docx")))
 
     def test_template_without_an_actionable_mapping_is_not_delivered_as_filled(self):
         self.source_section("项目背景")

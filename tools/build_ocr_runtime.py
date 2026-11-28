@@ -3,6 +3,7 @@ import argparse
 import base64
 import hashlib
 import io
+import json
 from pathlib import Path
 import re
 import shutil
@@ -15,19 +16,16 @@ REPO = Path(__file__).resolve().parents[1]
 CACHE = REPO / ".build" / "ocr-build"
 TARGETS = {"win_amd64": "x86_64-windows-gnu", "manylinux_x86_64": "x86_64-linux-musl",
            "manylinux_aarch64": "aarch64-linux-musl"}
-SOURCES = {
-    "tesseract": ("5.5.5", "tesseract-ocr/tesseract", "b02cf6f37cfc95be5bf7e4b2d39e51997b1ac41f7beb4e2bd16777bb67561c79"),
-    "leptonica": ("1.87.0", "DanBloomberg/leptonica", "fa2b40c5caea96d1bb93a97486262aed8731b69ce25a84a6bf5d25323e33f631"),
-}
+SOURCES = json.loads((REPO / "traced-template-fill/vendor/ocr.lock.json").read_text(encoding="utf-8"))["sources"]
 
 
 def sources(name):
-    version, repo, digest = SOURCES[name]
-    filename = name + "-" + version
+    spec = SOURCES[name]
+    url, digest = spec["url"], spec["sha256"]
+    filename = name + "-" + url.rsplit("/", 1)[1]
     path = CACHE / (filename + ".tar.gz")
     if not path.exists():
         CACHE.mkdir(parents=True, exist_ok=True)
-        url = "https://codeload.github.com/" + repo + "/tar.gz/refs/tags/" + version
         with urllib.request.urlopen(url, timeout=90) as stream, path.open("wb") as out:
             shutil.copyfileobj(stream, out)
     if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
@@ -95,7 +93,7 @@ def build(platform, zig, vendor):
     generated = CACHE / platform / "include"
     (generated / "tesseract").mkdir(parents=True, exist_ok=True)
     (generated / "endianness.h").write_text("#define L_LITTLE_ENDIAN 1\n", encoding="ascii")
-    ver = SOURCES["tesseract"][0]
+    ver = SOURCES["tesseract"]["version"]
     version = (tess / "include/tesseract/version.h.in").read_text()
     for key, val in zip(("MAJOR", "MINOR", "MICRO"), ver.split(".")):
         version = version.replace("@GENERIC_" + key + "_VERSION@", val)

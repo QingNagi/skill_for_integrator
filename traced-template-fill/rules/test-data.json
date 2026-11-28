@@ -1,8 +1,18 @@
 {
   "cond_pattern": "_(Vnorm|Vnom|Vtyp|Vmin|Vmax)$",
+  "condition_names": {"Vnorm": ["中间电压", "标称电压"], "Vmin": ["最小电压", "最低电压"], "Vmax": ["最大电压", "最高电压"]},
   "preferred_conditions": ["Vnorm", "Vnom", "Vtyp"],
   "qualifier_pattern": "^(IN|OUT|CH|CHN|CHANNEL|PIN|P|N)\\d+$|^\\d+$|^\\d+(\\.\\d+)?(MV|V|MA|UA|NA|MHZ|KHZ|GHZ|MBPS|GBPS|PS|NS|US|C)$|^\\d+V\\d+$|^(N|P|PH|NH|PL|NL|H|L|HI|LO|HIGH|LOW|VCC|VDD|GND|VSS|AC|DC|DIFF|SE|SEARCH|VICMLOW|VICMHIGH|VICM|MIN|MAX|NORM|NOM|TYP|POS|NEG|RISE|FALL|TEST|T\\d+)$",
   "token_separator": "[_\\s]+",
   "delta_prefixes": ["DOT", "DELTA", "DLT"],
+  "version": "2",
+  "product": "",
+  "program_version": "",
+  "segment_order": {},
+  "aliases": {},
+  "column_types": {},
+  "polarity": {},
+  "rounding": "half_even",
+  "comparison": "full",
   "split_compound": true
 }

@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 
 from . import tablemap, testdata
-from .common import contains_model_code, fmt_number, norm_text, short, to_number
+from .common import contains_model_code, fmt_number, norm_text, numeric_text, short, to_number
 from .read_other import col_index as col_idx, measurement_value
 
 _NUM = r'[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?'
@@ -79,7 +79,7 @@ def _candidates(nums, negate=False):
 
 def _numeric_tokens(text, sep):
     '''把“最小~最大”拆成数字串；不是数字（如状态文字）返回 None。'''
-    t = text.strip()
+    t = numeric_text(text)
     parts = None
     for s in (sep, '~', '～', '至'):
         if s and s != '-' and s in t:
@@ -191,12 +191,12 @@ def _testdata(plan, models, rules, res, target=None):
             why = None if ok and expected == value else '状态码或记录结论与所选的状态定义不符'
         elif 'limits' in f and raws:
             lo, hi = map(testdata.parse_limit, f['limits'])
-            if '取负号' in how:
+            if '取负号' in how or '取绝对值' in how:
                 nums = [testdata.measurement_number(v) for v in raws]
                 if any(n is None for n in nums):
                     _bad(res, tgt, '取负号的源区域混有非数值读数')
                     continue
-                raws = [n.copy_negate() for n in nums]
+                raws = [n.copy_abs() if '取绝对值' in how else n.copy_negate() for n in nums]
             fmt = dict(rules, **rules.get('symbol_formats', {}).get(f.get('symbol'), {}))
             expected, _, _, _ = testdata.aggregate(raws, fmt, mode=f.get('aggregation'), lo=lo, hi=hi)
             why = None if value == expected else '按采用的取值方式、精度与限值复算为“%s”' % expected

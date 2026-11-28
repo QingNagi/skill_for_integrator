@@ -193,6 +193,7 @@ class DocxWriter:
         self.n_img = 0
         self.warnings = []
         self.comment_buf = {}        # 锚点 -> 合并的批注
+        self.word_questions = []
 
     def _load(self, path):
         self.rd = DocxReader(path)
@@ -707,6 +708,26 @@ class DocxWriter:
         p_end.append(ET.Element(w("commentRangeEnd"), {w("id"): str(cid)}))
         rr = ET.SubElement(p_end, W_R)
         ET.SubElement(rr, w("commentReference"), {w("id"): str(cid)})
+        return str(cid)
+
+    def prepare_word_questions(self, questions):
+        """Register the actual choices for this draft in the job, outside the editable document."""
+        self.word_questions = []
+        for q in questions:
+            if not q.get("defaulted") or q.get("multi") or not q["key"].startswith(("src:verify:", "src:spec:", "td:samplemap")):
+                continue
+            options = q["options"]
+            positive = [i for i, option in enumerate(options) if option["effect"].get("ok") or
+                        (q["key"].startswith("td:samplemap") and i and option["effect"].get("samplemap"))]
+            bare = positive[0] if len(positive) == 1 else None
+            lines = ["【Word 核对 %s】%s" % (q["id"], q["question"])]
+            lines.extend("%d. %s" % (i, option["label"]) for i, option in enumerate(options, 1))
+            lines.append("审核人请直接回复“确认 N”，N 为选项序号。")
+            if bare is not None:
+                lines.append("单独回复“确认”表示选择第 %d 项。" % (bare + 1))
+            self.word_questions.append({"id": q["id"], "key": q["key"], "text": "\n".join(lines),
+                                        "options": options, "bare": bare, "input_fp": q["input_fp"],
+                                        "applied": options[q.get("recommended", 0)]["effect"]})
 
     def comment_op(self, op):
         anc = op["anchor"]
@@ -768,6 +789,14 @@ class DocxWriter:
                 self.warnings.append("操作 %s(%s) 失败：%s" % (o["op"], o.get("cell") or o.get("anchor") or "", e))
         for buf in self.comment_buf.values():
             self.add_comment(buf["p0"], buf["p1"], buf["text"], buf["links"], buf["warn"])
+        if self.word_questions:
+            anchor = next(self.body.iter(W_P), None)
+            if anchor is None:
+                self.warnings.append("草稿没有可放置 Word 核对批注的段落，请通过 answer 回答。")
+            else:
+                for q in self.word_questions:
+                    self.add_comment(anchor, anchor, q["text"], [], warn=True)
+                self.job.data.setdefault("word_questions", {})[os.path.basename(self.draft_path)] = self.word_questions
         self.number_captions()
         self.snap.build()
         self.pkg.save(self.draft_path)

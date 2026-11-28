@@ -18,12 +18,27 @@ from .numbering import Numbering
 from .text_patterns import CAPTION_RE, HEAD_PATTERNS
 from .ooxml import (Package, W, W_P, W_PPR, W_R, W_RPR, W_T, W_TBL, W_TC, W_TR, W_VAL, iter_skip_fallback, qn, w)
 
-SYMBOL_MAP = {
-    "F0B7": "•", "F0A3": "≤", "F0B3": "≥", "F0B1": "±", "F0D7": "×", "F070": "π", "F06D": "μ", "F057": "Ω",
-    "F0B0": "°", "F044": "Δ", "F0BB": "≈", "F0B9": "≠", "F0AE": "→", "F0AC": "←", "F0A5": "∞", "F0D6": "√",
-    "F0E5": "∑", "F06C": "λ", "F061": "α", "F062": "β", "F067": "γ", "F064": "δ", "F071": "θ", "F074": "τ",
-    "F0A8": "◆", "F0FC": "√", "F06E": "■", "F075": "◆",
-}
+# Symbol and Wingdings reuse the same private-use codepoints for different glyphs.
+from .metafile import _SYMBOL
+
+_WINGDINGS = {0x6C: "●", 0x6E: "■", 0x71: "❑", 0x75: "◆", 0x76: "❖",
+              0xA7: "▪", 0xD8: "➢", 0xFC: "✓", 0xFD: "☒", 0xFE: "☑"}
+
+
+def _symbol(element):
+    font = (element.get(w("font")) or "").strip().casefold()
+    try:
+        point = int(element.get(w("char"), ""), 16)
+    except ValueError:
+        return None
+    private = 0xE000 <= point <= 0xF8FF
+    if font in ("symbol", "wingdings") and (point <= 0xFF or 0xF000 <= point <= 0xF0FF):
+        table = _SYMBOL if font == "symbol" else _WINGDINGS
+        return table.get(point & 0xFF)
+    if not private and 0x20 <= point <= 0x10FFFF and not 0xD800 <= point <= 0xDFFF:
+        return chr(point)
+    return None
+
 
 A_BLIP = qn("a:blip")
 V_IMAGEDATA = qn("v:imagedata")
@@ -33,6 +48,17 @@ V_SHAPE = qn("v:shape")
 R_EMBED = qn("r:embed")
 R_LINK = qn("r:link")
 R_ID = qn("r:id")
+
+
+_SKIP_PARA = {w("del"), w("moveFrom"), w("txbxContent"), qn("mc:Fallback")}
+
+
+def _paragraph_elements(paragraph):
+    stack = [paragraph]
+    while stack:
+        node = stack.pop()
+        yield node
+        stack.extend(child for child in reversed(node) if child.tag not in _SKIP_PARA)
 
 
 def _rpr_flags(rpr):
@@ -77,11 +103,14 @@ class DocxReader:
         self._open_comments = set()
         self.np = self.nt = 0
         self.nfig = 0
+        self.unread = []
+        self.read_warnings = []
 
     # ------------------------------------------------------------ 公共入口
     def read(self):
         self._read_comments()
         body = self.doc.find(w("body"))
+        self._structure_notes(body)
         self._walk_container(body, "", top=True)
         self._post_captions()
         sections = self._build_sections()
@@ -94,11 +123,23 @@ class DocxReader:
         for b in self.blocks:
             b.pop("_sid", None)
         return {
-            "type": "docx", "title": title,
+            "type": "docx", "title": title, "unread": self.unread, "read_warnings": self.read_warnings,
             "blocks": self.blocks, "sections": sections, "figures": self.figures,
             "comments": comments,
             "stats": {"paras": self.np, "tables": self.nt, "figures": self.nfig},
         }
+
+    def _structure_notes(self, body):
+        for name, label in (("header", "页眉"), ("footer", "页脚"), ("footnotes", "脚注"), ("endnotes", "尾注")):
+            parts = [part for part in self.pkg.order if re.fullmatch("word/" + name + r"\d*\.xml", part)]
+            if parts:
+                self.read_warnings.append("%s部件未作为正文取值：%s" % (label, "、".join(parts)))
+        types = {w("txbxContent"): "文本框内容未作为正文取值", qn("m:oMath"): "公式只提取文字，未重建公式结构",
+                 w("fldChar"): "域只读取文档已保存的显示结果", w("fldSimple"): "域只读取文档已保存的显示结果",
+                 w("ins"): "修订按接受后的正文读取", w("del"): "修订按接受后的正文读取",
+                 w("moveFrom"): "修订按接受后的正文读取", w("moveTo"): "修订按接受后的正文读取"}
+        notes = dict.fromkeys(types[e.tag] for e in body.iter() if e.tag in types)
+        self.read_warnings.extend(notes)
 
     # ------------------------------------------------------------ 批注
     def _read_comments(self):
@@ -122,7 +163,7 @@ class DocxReader:
                 sc = el.find(w("sdtContent"))
                 if sc is not None:
                     yield from self._children(sc)
-            elif t in (w("customXml"), w("smartTag")):
+            elif t in (w("customXml"), w("smartTag"), w("ins"), w("moveTo")):
                 yield from self._children(el)
             elif t in (w("commentRangeStart"), w("commentRangeEnd")):
                 yield el
@@ -157,9 +198,8 @@ class DocxReader:
     def _para_runs(self, p):
         """返回 [[text, flags], ...]，处理符号、制表、换行、域结果、批注锚点文本。"""
         runs = []
-        fld_depth = 0
         in_instr = []
-        for e in iter_skip_fallback(p):
+        for e in _paragraph_elements(p):
             t = e.tag
             if t == w("commentRangeStart"):
                 cid = e.get(w("id"))
@@ -195,8 +235,11 @@ class DocxReader:
                     elif ct == w("noBreakHyphen"):
                         txt = "-"
                     elif ct == w("sym"):
-                        code = (c.get(w("char")) or "").upper()
-                        txt = SYMBOL_MAP.get(code) or SYMBOL_MAP.get("F0" + code[-2:]) or "?"
+                        txt = _symbol(c)
+                        if txt is None:
+                            self.unread.append({"location": self._cur_bid,
+                                                "why": "无法映射字体 %s 的符号 %s" % (c.get(w("font")), c.get(w("char")))})
+                            txt = "�"
                     elif ct in (w("drawing"), w("object"), w("pict")):
                         # 行内图片/公式对象：记为 [矢量文字, "@图片ID"]，复制时还原为图片
                         for iid, vt in self._inline_images(c):
@@ -252,6 +295,8 @@ class DocxReader:
         for e in p.iter():
             if e.tag == W_T and e.text:
                 out.append(e.text)
+            elif e.tag == w("sym"):
+                out.append(_symbol(e) or "�")
             elif e.tag == w("tab"):
                 out.append("\t")
         return out

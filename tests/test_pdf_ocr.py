@@ -38,9 +38,9 @@ class PdfOcrTests(unittest.TestCase):
         shown = content.render_block(model, 'P0')
         self.assertIn('⚠', shown)
         self.assertIn('-0.125（64.5', shown)
-        self.assertIn('低置信文字 mV（60.0', shown)
+        self.assertIn('低置信单位 mV（60.0', shown)
         self.assertTrue(shown.endswith('-0.125 1.250 mV'))
-        self.assertIn('低置信文字 mV', content.search({'S1': model}, 'mV')[0][-1])
+        self.assertIn('低置信单位 mV', content.search({'S1': model}, 'mV')[0][-1])
 
     def test_native_engine_lists_both_models_with_clean_font_initialization(self):
         options = _bootstrap.ocr_hint()

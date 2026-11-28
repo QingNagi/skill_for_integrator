@@ -8,7 +8,9 @@ import tempfile
 from xml.etree.ElementTree import ParseError
 import zipfile
 
+from .common import DIError
 from .ooxml import w
+from .ooxml import validate_package_limits
 from .safe_xml import parse_xml
 
 
@@ -133,6 +135,7 @@ def _local_legacy_document(source):
 
 def _valid_docx(path):
     with zipfile.ZipFile(path) as package:
+        validate_package_limits(package)
         if any(name.rsplit("/", 1)[-1].lower() == "vbaproject.bin" for name in package.namelist()):
             return False
         with package.open("[Content_Types].xml") as stream:
@@ -177,5 +180,5 @@ def try_convert_doc(src, dst):
                 return False
             os.replace(staged, destination)
         return True
-    except (OSError, subprocess.TimeoutExpired, zipfile.BadZipFile, ParseError, KeyError, RuntimeError):
+    except (DIError, OSError, subprocess.TimeoutExpired, zipfile.BadZipFile, ParseError, KeyError, RuntimeError):
         return False

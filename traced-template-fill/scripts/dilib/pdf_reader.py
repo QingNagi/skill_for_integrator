@@ -1,12 +1,13 @@
 """Layout extraction with pdfplumber; render only requested raster regions with PDFium."""
 from bisect import bisect_right
 from contextlib import ExitStack
+import hashlib
 import math
 import os
 import re
 from statistics import median
 
-from .pdf_ocr import recognize_image
+from .pdf_ocr import recognize_image, recognize_region, review_groups, save_png, scan_policy
 from .read_other import _pdf_common_post, _span_runs, cjk_space
 
 
@@ -187,19 +188,21 @@ def _ordered_page(items):
     return paragraphs
 
 
-def _scan_region(box, visible, chars):
+def _scan_region(box, visible, chars, policy):
     native_count = sum(len(c['text'].strip()) for c in chars)
     if not native_count:
         return True
     x0, top, x1, bottom = visible
     height = bottom - top
-    if native_count < 15:
-        return (box[2] - box[0]) * (box[3] - box[1]) >= (x1 - x0) * height * 0.04
-    body = (x0, top + height * 0.12, x1, bottom - height * 0.12)
+    if native_count < policy["native_chars"]:
+        return (box[2] - box[0]) * (box[3] - box[1]) >= (x1 - x0) * height * policy["sparse_area"]
+    body = (x0, top + height * policy["body_margin"], x1, bottom - height * policy["body_margin"])
     interior = _intersect(box, body)
-    if not interior or (interior[2] - interior[0]) * (interior[3] - interior[1]) < (x1 - x0) * height * 0.25:
+    if not interior or (interior[2] - interior[0]) * (interior[3] - interior[1]) < (x1 - x0) * height * policy["mixed_area"]:
         return False
-    return not any(c['text'].strip() and _contains(interior, c) for c in chars)
+    if any(c['text'].strip() and _contains(interior, c) for c in chars):
+        return None
+    return True
 
 
 class _Renderer:
@@ -248,13 +251,15 @@ def _raster_items(page, pno, options, renderer, media_dir, first_id, errors):
             # long and short sides to estimate a source-resolution ceiling.
             pw, ph = sorted(pic['srcsize'])
             w, h = sorted((raw[2] - raw[0], raw[3] - raw[1]))
-            dpi = min(300, 72 * pw / w, 72 * ph / h)
+            dpi = min(options.get('dpi', 300), 72 * pw / w, 72 * ph / h)
             regions[clipped] = max(regions.get(clipped, 0), dpi)
     for index, (box, dpi) in enumerate(regions.items()):
         iid = 'I%d' % (first_id + index)
         info = {'id': iid, 'ext': 'png', 'page': pno, 'bbox': _coords(box)}
         items.append({'t': 'img', 'info': info, 'bbox': info['bbox']})
-        needed = _scan_region(box, visible, chars)
+        needed = _scan_region(box, visible, chars, options["scan_policy"])
+        if needed is None:
+            errors.append("原生文字与大幅图像重叠，图内是否另有数据待核")
         enabled = needed and options['available']
         if needed and not enabled:
             errors.append(options['hint'])
@@ -265,8 +270,9 @@ def _raster_items(page, pno, options, renderer, media_dir, first_id, errors):
             try:
                 if media_dir:
                     os.makedirs(media_dir, exist_ok=True)
-                    dest = os.path.join(media_dir, iid + '.png')
-                    image.save(dest, format='PNG')
+                    signature = hashlib.sha256(image.tobytes()).hexdigest()[:16]
+                    dest = os.path.join(media_dir, '%s-%dx%d-%s.png' % (iid, image.width, image.height, signature))
+                    save_png(image, dest)
                     info['file'] = dest
                 if enabled:
                     from PIL import ImageDraw
@@ -278,10 +284,15 @@ def _raster_items(page, pno, options, renderer, media_dir, first_id, errors):
                         if overlap:
                             draw.rectangle([(sx * (overlap[0] - box[0]), sy * (overlap[1] - box[1])),
                                             (sx * (overlap[2] - box[0]), sy * (overlap[3] - box[1]))], fill='white')
-                    lines = recognize_image(image, dict(options, dpi=max(1, round(min(sx, sy) * 72))))
+                    lines = recognize_region(image, dict(options, dpi=max(1, round(min(sx, sy) * 72))), recognize_image)
                     if not lines:
                         errors.append('OCR 未能从扫描区域识别出文字')
                     for line in lines:
+                        if media_dir:
+                            x0, y0, x1, y1 = line['bbox']
+                            pixels = [max(0, x0 - 4), max(0, y0 - 4), min(image.width, x1 + 4), min(image.height, y1 + 4)]
+                            if pixels[0] < pixels[2] and pixels[1] < pixels[3]:
+                                line['ocr_region'] = {'image': iid, 'pixels': pixels}
                         for target in [line] + line.get('words', []):
                             x0, top, x1, bottom = target['bbox']
                             target['bbox'] = _coords((box[0] + x0 / sx, box[1] + top / sy,
@@ -297,7 +308,7 @@ def _raster_items(page, pno, options, renderer, media_dir, first_id, errors):
 def _compare_cover_title(blocks, title):
     """Offer independent metadata when it differs only inside weak nonnumeric cover words."""
     cover = next((b for b in blocks if b['page'] == 1 and b.get('text')), {})
-    weak = {(w['text'], w['confidence']) for w in cover.get('text_warnings', [])}
+    weak = {(w['text'], w['confidence']) for w in dict(review_groups(cover))['文字']}
     if not weak or not title or len(title) > 200:
         return
     metadata = ''.join(title.split())
@@ -319,6 +330,8 @@ def _compare_cover_title(blocks, title):
 
 def read_layout(path, media_dir, options):
     import pdfplumber
+    if 'scan_policy' not in options:
+        options = dict(options, scan_policy=scan_policy())
     blocks, figures, images, unread, recognized = [], [], {}, [], []
     np_ = nt = 0
     with ExitStack() as stack:

@@ -49,16 +49,17 @@ class ReviewDecisionsTests(unittest.TestCase):
               '<w15:commentEx w15:paraId="0000000B" w15:paraIdParent="0000000A"/>'
               '<w15:commentEx w15:paraId="0000000C" w15:paraIdParent="0000000B"/></w15:commentsEx>') % W15
         ids = '<c:commentsIds xmlns:c="%s">' % CID
-        ext = '<e:commentsExtensible xmlns:e="%s" xmlns:test="urn:test">' % CEX
+        ext = ('<e:commentsExtensible xmlns:e="%s" xmlns:test="urn:test" '
+               'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="test">') % CEX
         for i in range(3):
             ids += '<c:commentId c:paraId="%08X" c:durableId="%08X"/>' % (10+i, 100+i)
             ext += '<e:commentExtensible e:durableId="%08X" test:foreign="00000064"/>' % (100+i)
         ct, rels = CT, DOC_RELS
-        for year, part, data in [(2011, "commentsExtended", ex), (2016, "commentsIds", ids + "</c:commentsIds>"),
-                                  (2018, "commentsExtensible", ext + "</e:commentsExtensible>")]:
+        for version, part, data in [("2011", "commentsExtended", ex), ("2016/09", "commentsIds", ids + "</c:commentsIds>"),
+                                    ("2018/08", "commentsExtensible", ext + "</e:commentsExtensible>")]:
             mods["word/%s.xml" % part] = data
-            ct = ct.replace("</Types>", '<Override PartName="/word/%s.xml" ContentType="application/vnd.ms-word.%s+xml"/></Types>' % (part, part))
-            rels = rels.replace("</Relationships>", '<Relationship Id="r%s" Target="%s.xml" Type="http://schemas.microsoft.com/office/%s/relationships/%s"/></Relationships>' % (year, part, year, part))
+            ct = ct.replace("</Types>", '<Override PartName="/word/%s.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.%s+xml"/></Types>' % (part, part))
+            rels = rels.replace("</Relationships>", '<Relationship Id="r%s" Target="%s.xml" Type="http://schemas.microsoft.com/office/%s/relationships/%s"/></Relationships>' % (part, part, version, part))
         mods.update({"[Content_Types].xml": ct, "word/_rels/document.xml.rels": rels})
         make_docx(self.draft, mods)
 

@@ -170,3 +170,15 @@ Windows x64 上使用包内 CPython 3.14.10 跑过简体中文与英文扫描页
 在限制写用户目录的沙箱中，把 `DI_CACHE_DIR` 设为项目内可写的绝对目录再运行启动器。Windows 使用 `$env:DI_CACHE_DIR = Join-Path $PWD '.doc-integrator/runtime-cache'`；Linux 使用 `export DI_CACHE_DIR="$PWD/.doc-integrator/runtime-cache"`。每次任务使用同一位置。应用控制拒绝启动解释器或原生库时，按单位流程核准该版本。
 
 定稿时，已有模板批注用 `--template-comments keep|drop` 选定去留，审核人批注用 `--reviewer-comments keep|drop` 单独选择。两类都存在时，可以一次说明两项决定。来源、样品对应和四个影响草稿、终稿或长期规则的选项用 `--user-quote "用户原话"` 随命令登记。
+
+## 在内网交给 Agent 操作
+
+启动会话前进入本次项目目录，把模板与来源的完整路径交给 Agent。首次运行会在用户目录部署 Python、PDF 库及中英文 OCR。可用 `DI_RUNTIME_DIR` 指定存放不同版本运行时的目录，例如 `$env:DI_RUNTIME_DIR = Join-Path $PWD '.doc-integrator/runtime'` 或 `export DI_RUNTIME_DIR="$PWD/.doc-integrator/runtime"`。它优先于原有 `DI_CACHE_DIR` 的安装位置。安装成功后，同一版本直接复用。
+
+用套装启动器运行 `doctor --prune` 可预览旧版本，运行 `doctor --prune --apply` 才执行清理。当前版、最近安装的其他可验证版本、使用中的版本及改过规则、配置或其他文件的版本会保留。旧套装未登记安装时文件状态，也会保留。Linux 上若挂载为 `noexec`，可将 `DI_RUNTIME_DIR` 或 `XDG_DATA_HOME` 指向允许执行的文件系统后重新启动。
+
+使用 `run --draft --json` 建立任务。若有待答题，Agent 直接展示返回的问题。回答后用 `answer --draft --json` 一步继续。多项核对可经 `questions --csv` 导出和 `answer --from-sheet` 回填；产品测试程序可经 `answer --evidence` 提供来源并登记文件摘要。操作格式见技能中的 `references/commands.md`。
+
+文件解析、OCR、缓存、草稿及来源快照均在本机处理。Agent 调用 `show --full`、展示问题或向模型转述时，当前片段会进入其配置的模型服务。机密数据应使用已获准的内网模型端点。缓存清理预览使用 `clean`，确认清理用 `clean --apply`；草稿、来源快照和审核事实仍保存在任务目录，可按项目留存要求单独管理。
+
+同批次有多份独立任务时可用 `batch draft 清单.json --jobs 2`；旧缓存的空间检查用 `doctor --prune` 预览。Linux 若提示文件系统以 noexec 挂载，请把 `DI_RUNTIME_DIR` 指到允许当前用户执行文件的位置。

@@ -1,8 +1,8 @@
 """按来源表、记录行和实测数据规划表格填充。"""
 import re
 
-from . import tablemap, testdata
-from .common import contains_model_code, norm_text, short
+from . import identity, tablemap, testdata
+from .common import norm_text, short
 
 
 class TablePlanningMixin:
@@ -52,6 +52,32 @@ class TablePlanningMixin:
             if not rows:
                 rows = self.rows_from_existing(t, rg, tcols)
             self.fill_testdata(t, rg, tcols, rows)
+
+    def affected_spec_rows(self, t, rg):
+        """Resolve prospective positions without creating write operations from an unconfirmed specification."""
+        existing = self.rows_from_existing(t, rg, rg["cols"])
+        ranked = self.rank_tables(rg["cols"])
+        if not ranked or ranked[0][0] < 0.5 or (len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 0.15):
+            return existing
+        _, alias, tid = ranked[0]
+        model = self.src[alias]
+        roles = {tablemap.role_of(c["path"])[0]: c["c"] for c in tablemap.table_columns(model, tid)}
+        foot = tablemap.footnotes(model, tid)
+        logical, _ = tablemap.logical_rows(model, tid)
+        prospective = []
+        excluded, required = set(), set()
+        for i, src_row in enumerate(logical):
+            cells = src_row["cells"]
+            symbol = cells.get(roles.get("symbol"), ("", []))[0] or testdata.extract_symbol(cells.get(roles.get("name"), ("", []))[0])
+            marks = [m for _, runs in cells.values() for m in tablemap.strip_marks(runs)[1]]
+            exempt = any(re.search(r"不测试|不检验|设计保证|不考核", foot.get(m, "")) for m in marks)
+            (excluded if exempt else required).add(testdata.norm_sym(symbol))
+            prospective.append({"row": rg["rows"][0] + i, "sym": symbol, "not_tested": exempt})
+        if existing:
+            for r in existing:
+                r["not_tested"] = testdata.norm_sym(r.get("sym", "")) in (excluded - required)
+            return existing
+        return prospective
 
     def fill_from_table(self, t, rg, tcols, alias, tid):
         md = self.src[alias]
@@ -199,13 +225,15 @@ class TablePlanningMixin:
             return
         alias = None
         ans = self.answer_effect("td:source")
-        if ans and ans.get("alias"):
+        if ans and not ans.get("_default") and ans.get("alias") in sheets:
             alias = ans["alias"]
         elif len(sheets) > 1:
             q = {"key": "td:source", "topic": "数据来源", "question": "提供了多个表格文件，哪个是本次的测试数据？",
                  "options": [{"label": "%s %s" % (a, m.m["name"]), "effect": {"alias": a}} for a, m in sheets.items()]}
             self.ask(q)
-            alias = next(iter(sheets))
+            self.add_impact(q, self.measurement_cells(t, rows, sid_col))
+            self.mark_stale(t, rows, sid_col, set())
+            return
         else:
             alias = next(iter(sheets))
         md = self.src[alias]
@@ -229,11 +257,24 @@ class TablePlanningMixin:
                 self.mark_stale(t, rows, sid_col, set())
                 return
             sheet = chosen
-        self.verify_data_source(alias, md, sheet)
+        if self.verify_data_source(alias, md, sheet) is False:
+            cells = self.measurement_cells(t, rows, sid_col)
+            for q in self.questions:
+                if q["key"].startswith("src:spec:") or q["key"] == "src:verify:" + alias:
+                    self.add_impact(q, cells)
+            self.mark_stale(t, rows, sid_col, set())
+            self.report["unfilled"].append("%s：%d 个实测位置等待规范或批次确认" % (rg["id"], len(cells)))
+            return
         scope = ":" + alias + ":" + rg["id"] + ":" + sheet["name"]
+        sheet_scope = ":" + alias + ":" + sheet["name"]
+        shared_questions = {"td:cond", "td:multi", "td:no_suffix"}
+
+        def question_key(short_key):
+            return short_key + (sheet_scope if short_key in shared_questions else scope)
+
         rules = dict(self.rules)
         for k in ("cond_keep", "multi"):
-            eff = self.answer_effect("td:" + ("cond" if k == "cond_keep" else "multi") + scope)
+            eff = self.answer_effect(question_key("td:" + ("cond" if k == "cond_keep" else "multi")))
             if eff and eff.get("rules"):
                 rules.update(eff["rules"])
         parsed = testdata.parse_sheet(sheet, rules)
@@ -256,6 +297,8 @@ class TablePlanningMixin:
             if not eff:
                 self.ask({"key": key, "topic": "样品对应", "question": "来源样品号 %s 与目标 %s 不一致。" %
                           ("、".join(ds) or "无", "、".join(recs)), "options": options})
+            if not eff:
+                self.add_impact(next(q for q in self.questions if q["key"] == key), self.measurement_cells(t, rows, sid_col))
             sm = common if not eff or eff.get("_default") else eff.get("samplemap") or {}
             if not isinstance(sm, dict) or not set(sm) <= set(ds) or not set(sm.values()) <= set(recs) or len(set(sm.values())) != len(sm):
                 sm = {}
@@ -269,7 +312,9 @@ class TablePlanningMixin:
             for b in parsed["blocks"]:
                 b["values"] = {sm[s]: v for s, v in b["values"].items() if s in sm}
             self.report["warnings"].append("样品号对应：" + "，".join("数据%s→记录%s" % kv for kv in sm.items()))
-        targets = [{"row": r["row"], "sym": r.get("sym"), "name": r.get("name", ""), "lo": r.get("lo"), "hi": r.get("hi"),
+        judgment_cols = all(any(re.search(r"判定|结论|合格性", part) for part in c["path"])
+                            for c in tcols if tablemap.role_of(c["path"])[0] == "sample")
+        targets = [{"column_type": rules.get("column_types", {}).get(r.get("sym"), "judgment" if judgment_cols else "measurement"), "row": r["row"], "sym": r.get("sym"), "name": r.get("name", ""), "lo": r.get("lo"), "hi": r.get("hi"),
                     "unit": r.get("unit", ""), "cond": r.get("cond", ""), "not_tested": r.get("not_tested")} for r in rows]
         ans_map = {}
         for k, v in self.answers.items():
@@ -277,11 +322,43 @@ class TablePlanningMixin:
                 e = self.answer_effect(k)
                 if e is not None:
                     ans_map[k[:-len(scope)]] = e
+        for key in shared_questions:
+            effect = self.answer_effect(question_key(key))
+            if effect is not None:
+                ans_map[key] = effect
         res = testdata.build(parsed, targets, rules, self.aliases, ans_map)
+        cells = self.measurement_cells(t, rows, sid_col)
+        template_identity = identity.document_identity(self.T) if hasattr(self.T, "m") else identity.identity_fields([])
+        book_fields = identity.sheet_identity(md, sheet, template_identity)
+        blocks_by_base = {}
+        for block in parsed["blocks"]:
+            blocks_by_base.setdefault(block["base"], []).append(block)
         for q in res["questions"]:
-            self.ask(dict(q, key=q["key"] + scope))
-        if res["review"]:
-            self.review_measurements("td:review" + scope, "；".join(res["review"]))
+            key = question_key(q["key"])
+            question = next((existing for existing in self.questions if existing["key"] == key), None)
+            if question is None:
+                question = self.ask(dict(q, key=key, source_scope=alias + ":" + sheet["name"],
+                                         source_models=sorted(book_fields["model"] | template_identity["model"])))
+            affected = [dict(c) for c in cells if c["symbol"] in q["symbols"] and c["sample"] in parsed["sample_cols"]]
+            for c in affected:
+                col = parsed["sample_cols"][c["sample"]]
+                blocks = blocks_by_base.get(q.get("source_label"), [])
+                if blocks:
+                    c["source"] = "; ".join("%s:%s!%s%d:%s%d" % (alias, sheet["name"], col, b["rows"][0] + 1,
+                                                                  col, b["rows"][-1] + 1) for b in blocks)
+                    c["candidate"] = " / ".join(", ".join(map(str, b["values"].get(c["sample"], []))) for b in blocks)
+                else:
+                    row_num = int(c["target"].rsplit(".R", 1)[1].split(".")[0])
+                    item = res["fills"].get(row_num, {}).get(c["sample"], {})
+                    c["source"] = "; ".join(alias + ":" + r for r in item.get("ranges", []))
+                    c["candidate"] = item.get("raw", "")
+            self.add_impact(question, affected)
+        review = [s for s in res["review"] if "修约前后限值判定翻转" not in s]
+        for detail in res["review"]:
+            if "修约前后限值判定翻转" in detail:
+                self.block_source("verify:rounding:" + detail, "修约前后限值判定", detail)
+        if review:
+            self.review_measurements("td:review" + scope, "；".join(review))
         missing_samples = [s for s in res["samples"] if s not in sid_col]
         self.summary.append("[测试数据] %s %s：样品%s（第%d行为样品号，%s列为测试项）；条件=%s；多值=%s；已对应 %d 个参数；忽略 %d 项%s" % (
             alias, md.m["name"], "、".join(s + "#" for s in res["samples"]), parsed["header_row"], parsed["label_col"],
@@ -293,10 +370,19 @@ class TablePlanningMixin:
             self.report["ignored"] += ["%s（%s）" % (b, why) for b, why in res["ignored"]]
         if res["unmatched"]:
             self.report["unfilled"].append("无测试数据的参数：" + "、".join(res["unmatched"]))
-        shift_r, shift_n = self.row_shift.get(t["id"], (10 ** 9, 0))
         filled = set()
         merged_lab = []
         sym_of = {r["row"]: (r.get("sym") or r.get("name") or "") for r in rows}
+        target_by_row = {r["row"]: r for r in targets}
+        template = getattr(self.T, "m", {})
+        src_scope = {"source": alias, "sha1": md.m.get("sha1"), "sheet": sheet["name"]}
+        spec_scope = {"template": template.get("sha1"), "specifications": {
+            a: doc.m.get("sha1") for a, doc in self.doc_sources().items()}}
+        book_identity = {k: sorted(v) for k, v in book_fields.items()}
+        model_evidence = {"template": sorted(template_identity["model"]), "measurements": sorted(book_fields["model"]),
+                          "specifications": {a: sorted(identity.document_identity(doc)["model"]) for a, doc in self.doc_sources().items()}}
+        label_context = {b["label"]: {"suffix": b["cond"], "units": b["units"], "conditions": b["conditions"]}
+                         for b in parsed["blocks"]}
         for row, fill in res["fills"].items():
             first_cell = None
             links, notes, warn = [], set(), False
@@ -316,7 +402,21 @@ class TablePlanningMixin:
                 entries = self.report["fills"] if cell["value"] else self.report.setdefault("held_measurements", [])
                 if not cell["value"]:
                     self.report["unfilled"].append("%s %s 样品%s：%s" % (cid, sym_of[row], sid, cell["check_msg"] or cell["how"]))
-                entries.append({"target": cid, "value": cell["value"], "source": "%s:%s" % (alias, ";".join(cell["ranges"])),
+                dependencies = [key for key in self.answers if key == "src:verify:" + alias or key.startswith("src:spec:")
+                                or key in ("td:source", "td:samplemap" + scope, "td:sheet:" + alias + ":" + rg["id"])]
+                dependencies += [question_key(k) for k, symbols in res["dependencies"].items() if sym_of[row] in symbols]
+                target_row = target_by_row[row]
+                context = {label: label_context[label] for label in cell["labels"]}
+                observations = {
+                    "批次身份": {"scope": src_scope, "value": book_identity, "evidence": "来源表头、工作表名和本批来源核对"},
+                    "规范适用": {"scope": spec_scope, "value": model_evidence, "evidence": {"target_region": rg["id"]}},
+                    "样品对应": {"scope": src_scope, "value": [source_sample[sid], sid], "evidence": {"header_row": parsed["header_row"], "target": rg["id"]}},
+                    "测试条件": {"scope": src_scope, "value": target_row.get("cond"), "evidence": context},
+                    "参数归属": {"scope": src_scope, "value": sym_of[row], "evidence": {"labels": cell["labels"], "method": cell["hows"]}},
+                    "值类型与极性": {"scope": spec_scope, "value": target_row["column_type"], "evidence": {"source": src_scope, "unit": target_row.get("unit"),
+                              "polarity": "negate" if "取负号" in cell["how"] else rules.get("polarity", {}).get(sym_of[row], "signed"), "method": cell["how"]}}}
+
+                entries.append({"decision_keys": dependencies, "observations": observations, "target": cid, "value": cell["value"], "source": "%s:%s" % (alias, ";".join(cell["ranges"])),
                                              "how": "%s；%s" % ("/".join(cell["hows"]), cell["how"]), "raw": cell["raw"],
                                              "check": cell["check_msg"], "limits": cell["limits"],
                                              "aggregation": res["rules"]["multi"], "symbol": sym_of[row],
@@ -347,6 +447,20 @@ class TablePlanningMixin:
                 self.ops.append({"id": self.oid(), "op": "comment", "anchor": cid,
                                  "text": "【实测】未填：%s；数据文件中无此项" % ("；".join(r.get("foot") or ["规范注明不测试"])), "links": []})
         self.record_verdict(alias, rg['id'], rows, columns, res)
+
+    @staticmethod
+    def measurement_cells(t, rows, columns):
+        return [{"target": "%s.R%d.C%d" % (t["id"], r["row"], c), "symbol": r.get("sym", ""), "sample": sid}
+                for r in rows if not r.get("not_tested") for sid, c in columns.items()]
+
+    @staticmethod
+    def add_impact(question, cells):
+        by_target = {c["target"]: c for c in question.get("affected_cells", [])}
+        by_target.update((c["target"], c) for c in cells)
+        question["affected_cells"] = list(by_target.values())
+        question["impact_count"] = len(by_target)
+        question["question"] = question["question"].split("（影响 ")[0] + "（影响 %d 格，如 %s）" % (
+            len(by_target), "、".join(list(by_target)[:3]))
 
     def review_measurements(self, key, detail):
         self.report["unfilled"].append(detail)
@@ -527,25 +641,57 @@ class TablePlanningMixin:
             if old:
                 self.ops.append({'id': self.oid(), 'op': 'comment', 'anchor': first, 'warn': True, 'links': [], 'text': '⚠【原有值，本批未核】%s %s：这是模板/上一批留下的值，本批数据里没有对应结果；没有覆盖，也没有清除。请核对是否仍适用，不适用请清除或改正' % (r.get('sym') or r.get('name') or '', '；'.join(old))})
 
+    def spec_evidence(self, data_models=()):
+        target = getattr(self, "T", None)
+        target_codes = identity.document_identity(target)["model"] if target and hasattr(target, "m") else set()
+        docs = self.doc_sources()
+        spec_codes = set().union(*(identity.document_identity(model)["model"] for model in docs.values()))
+        data_codes = set(data_models)
+        codes = target_codes | spec_codes | data_codes
+        key = "src:spec:" + ",".join(sorted(codes) or ["未标明"])
+        incomplete = bool(docs and (not target_codes or not spec_codes))
+        if len(codes) <= 1 and not incomplete:
+            return True
+        effect = self.answer_effect(key) or {}
+        if effect.get("applicable") is True and not effect.get("_default"):
+            return True
+        detail = "模板型号 %s，规范型号 %s，测试记录型号 %s。请核对所供规范是否适用于本任务。" % (
+            "、".join(sorted(target_codes)) or "未标明", "、".join(sorted(spec_codes)) or "未标明",
+            "、".join(sorted(data_codes)) or "未标明")
+        self.ask({"key": key, "topic": "规范适用", "question": detail,
+                  "options": [{"label": "暂未核对，留空", "effect": {"applicable": False}},
+                              {"label": "已核对，本任务适用所供规范", "effect": {"applicable": True}}]})
+        self.block_source(key, "规范型号", detail)
+        return False
+
+    def block_source(self, key, name, detail):
+        blocked = self.report.setdefault("unverified_sources", [])
+        if not any(item.get("key") == key for item in blocked):
+            blocked.append({"kind": "source", "key": key, "name": name, "detail": detail})
+            self.report["warnings"].append("⚠ " + detail)
+
     def verify_data_source(self, alias, md, sheet):
-        '''填写前先核对来源：数据文件的文件名/内容里能不能找到型号。数字对得上不能证明来源对——找不到就问，并在定稿前拦截。'''
+        target = getattr(self, "T", None)
+        template = identity.document_identity(target) if target and hasattr(target, "m") else identity.identity_fields([])
+        book = identity.sheet_identity(md, sheet, template)
         codes = self.expected_model_codes(self.doc_sources())
         if not codes:
-            return
-        strings = [v for row in sheet["rows"][:300] for v in row if isinstance(v, str)]
-        hay = md.m.get("name", "") + " " + " ".join(strings)
-        if len(codes) == 1 and contains_model_code(hay, codes[0]):
-            return
-        key = "src:verify:" + alias + ":" + ",".join(sorted(codes))
-        detail = ("在 %s 的文件名与所查工作表前 300 行中未找到完整型号 %s" % (md.m["name"], codes[0])
-                  if len(codes) == 1 else "本任务有多个候选型号 %s，须核实 %s 的产品与批次" % ("、".join(codes), md.m["name"]))
-        eff = self.answer_effect(key)
-        if eff is None:
-            opts = [{"label": "暂未核对，定稿前核对来源", "effect": {"ok": False}}]
-            opts.extend({"label": "已核对原始记录，该文件属于本批 " + code, "effect": {"ok": True, "model": code}} for code in codes)
-            self.ask({"key": key, "topic": "来源核对", "question": detail + "。请对照原始试验记录核对。",
-                      "options": opts, "recommended": 0})
-        if isinstance(eff, dict) and eff.get("ok") and eff.get("model") in codes and not eff.get("_default"):
-            return
-        self.report.setdefault("unverified_sources", []).append({"kind": "source", "key": key, "name": md.m["name"], "detail": detail})
-        self.report["warnings"].append("⚠ " + detail)
+            codes = sorted(set().union(*(identity.document_identity(model)["model"] for model in self.doc_sources().values())))
+        spec_ok = self.spec_evidence(book["model"])
+        model_matches = (not codes or set(codes) == book["model"])
+        dates_match = not template["date"] or not book["date"] or template["date"] == book["date"]
+        if len(template["batch"]) == 1 and template["batch"] == book["batch"] and model_matches and dates_match:
+            return spec_ok
+        key = "src:verify:" + alias
+        effect = self.answer_effect(key) or {}
+        if effect.get("ok") is True and not effect.get("_default"):
+            return spec_ok
+        describe = lambda values: "、".join(sorted(values)) or "未标明"
+        detail = "%s：模板批号 %s，测试记录批号 %s；任务型号 %s，记录型号 %s；测试日期 %s / %s。请核对本批原始记录。" % (
+            md.m["name"], describe(template["batch"]), describe(book["batch"]), describe(codes),
+            describe(book["model"]), describe(template["date"]), describe(book["date"]))
+        self.ask({"key": key, "topic": "来源核对", "question": detail,
+                  "options": [{"label": "缺少本批记录，实测值暂留空", "effect": {"ok": False}},
+                              {"label": "已核对原始记录，所用测试数据属于本批", "effect": {"ok": True}}]})
+        self.block_source(key, md.m["name"], detail)
+        return False

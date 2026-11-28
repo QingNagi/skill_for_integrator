@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from collections import ChainMap
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 import os
 import shutil
@@ -21,69 +21,9 @@ EXCEL_FMT = {"xlsx": 51, "xls": 56, "pdf": 57, "csv": 6}
 WORD_INPUT = {".doc", ".docx", ".wps", ".wpt", ".rtf", ".dot", ".dotx", ".docm", ".odt", ".mht", ".htm", ".html"}
 EXCEL_INPUT = {".xls", ".xlsx", ".xlsm", ".et", ".ett", ".ods", ".xlsb"}
 
-_PS_SCRIPT = r'''
-$ErrorActionPreference = 'Stop'
-$jobs = Get-Content -LiteralPath $args[0] -Encoding UTF8
-$resultFile = $args[1]; $progid = $args[2]; $kind = $args[3]
-$results = @()
-$app = $null
-try {
-  $app = New-Object -ComObject $progid
-  try { $app.Visible = $false } catch {}
-  try { $app.DisplayAlerts = 0 } catch {}
-  if ($progid -in @('Word.Application', 'Excel.Application')) { $app.AutomationSecurity = 3 }
-  foreach ($line in $jobs) {
-    if (-not $line -or -not $line.Trim()) { continue }
-    $p = $line.Split("`t"); [string]$src = $p[0]; [string]$dst = $p[1]; [int]$fmt = [int]$p[2]
-    try {
-      if ($kind -eq 'word') {
-        if ($progid -eq 'Word.Application') {
-          $doc = $app.Documents.OpenNoRepairDialog($src, $false, $true, $false)
-        } else { $doc = $app.Documents.Open($src, $false, $true, $false) }
-        $done = $false
-        if ($fmt -eq 17) { try { $doc.ExportAsFixedFormat($dst, 17); $done = $true } catch {} }
-        if (-not $done) { try { $doc.SaveAs([ref]$dst, [ref]$fmt); $done = $true } catch {} }
-        if (-not $done) { try { $doc.SaveAs($dst, $fmt); $done = $true } catch {} }
-        if (-not $done) { $doc.SaveAs2($dst, $fmt) }
-        try { $doc.Close([ref]0) } catch { $doc.Close() }
-      } else {
-        $wb = $app.Workbooks.Open($src, 0, $true)
-        if ($fmt -eq 57) { $wb.ExportAsFixedFormat(0, $dst) } else { $wb.SaveAs($dst, $fmt) }
-        $wb.Close($false)
-      }
-      $results += "OK`t$dst"
-    } catch { $results += "ERR`t$dst`t" + $_.Exception.Message }
-  }
-} catch { $results += "FATAL`t`t" + $_.Exception.Message }
-finally {
-  if ($app) { try { $app.Quit() } catch {}; try { [void][Runtime.Interopservices.Marshal]::ReleaseComObject($app) } catch {} }
-}
-[IO.File]::WriteAllLines($resultFile, [string[]]$results, (New-Object Text.UTF8Encoding($true)))
-'''
+_PS_SCRIPT = Path(__file__).with_name("convert_office.ps1")
 
-_PS_IMG = r'''
-Add-Type -AssemblyName System.Drawing
-$jobs = Get-Content -LiteralPath $args[0] -Encoding UTF8
-$results = @()
-foreach ($line in $jobs) {
-  if (-not $line -or -not $line.Trim()) { continue }
-  $p = $line.Split("`t"); [string]$src = $p[0]; [string]$dst = $p[1]; [double]$scale = [double]$p[2]
-  try {
-    $img = [System.Drawing.Image]::FromFile($src)
-    $w = [int]([Math]::Max(1, $img.Width * $scale)); $h = [int]([Math]::Max(1, $img.Height * $scale))
-    if ($w -gt 3000) { $h = [int]($h * 3000 / $w); $w = 3000 }
-    $bmp = New-Object System.Drawing.Bitmap $w, $h
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.Clear([System.Drawing.Color]::White)
-    $g.SmoothingMode = 'HighQuality'
-    $g.DrawImage($img, 0, 0, $w, $h)
-    $bmp.Save($dst, [System.Drawing.Imaging.ImageFormat]::Png)
-    $g.Dispose(); $bmp.Dispose(); $img.Dispose()
-    $results += "OK`t$dst"
-  } catch { $results += "ERR`t$dst`t" + $_.Exception.Message }
-}
-[IO.File]::WriteAllLines($args[1], [string[]]$results, (New-Object Text.UTF8Encoding($true)))
-'''
+_PS_IMG = Path(__file__).with_name("metafile_to_png.ps1")
 
 
 def _reg_has(progid):
@@ -209,17 +149,16 @@ def word_workfile_error():
 
 def _run_ps(script, args, timeout=600):
     tmpdir = os.path.dirname(os.path.abspath(args[1]))
-    sp = os.path.join(tmpdir, "run.ps1")
-    with open(sp, "w", encoding="utf-8-sig") as f:      # 必须带 BOM，否则 PowerShell 5 按 GBK 读取
-        f.write(script)
     ps = detect()["powershell"]
     if not ps:
         raise DIError("找不到已安装的 PowerShell")
-    cmd = [ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", sp] + list(args)
+    cmd = [ps, "-NoProfile", "-NonInteractive", "-File", str(script)] + list(args)
     try:
         child_env = ChainMap({"TEMP": tmpdir, "TMP": tmpdir}, os.environ)
-        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=child_env,
+        run = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, env=child_env,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if run.returncode:
+            raise DIError("PowerShell 转换脚本未完成（退出码 %d），请检查脚本执行策略或使用 LibreOffice" % run.returncode)
     except subprocess.TimeoutExpired:
         raise DIError("办公软件转换超时（可能有弹窗或文件被占用）")
 
@@ -281,7 +220,16 @@ def _lo_convert(soffice, src, dst_fmt, dst):
         with _lo_workspace(destination.parent) as work:
             stage = Path(work, "output")
             stage.mkdir()
-            profile = Path(work, "profile").as_uri()
+            profile_dir = Path(work, "profile")
+            user = profile_dir / "user"
+            user.mkdir(parents=True)
+            (user / "registrymodifications.xcu").write_text(
+                '<oor:items xmlns:oor="http://openoffice.org/2001/registry">'
+                '<item oor:path="/org.openoffice.Office.Common/Security/Scripting">'
+                '<prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop>'
+                '<prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop>'
+                '</item></oor:items>', encoding="utf-8")
+            profile = profile_dir.as_uri()
             cmd = [soffice, "-env:UserInstallation=" + profile, "--headless", "--norestore",
                    "--convert-to", filt, "--outdir", str(stage), str(source)]
             env = ChainMap({"TEMP": work, "TMP": work, "TMPDIR": work}, os.environ)
@@ -298,6 +246,96 @@ def _lo_convert(soffice, src, dst_fmt, dst):
     except OSError as exc:
         return "LibreOffice 转换失败：%s" % exc
     return None
+
+
+def _hold_excel_source(src, handles):
+    """Keep the inspected file readable but deny writes and replacement until Excel closes it."""
+    if os.name != "nt":
+        return
+    import ctypes as ct
+    from ctypes import wintypes as wt
+    kernel = ct.WinDLL("kernel32", use_last_error=True)
+    open_file = kernel.CreateFileW
+    open_file.argtypes = (wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.LPVOID, wt.DWORD, wt.DWORD, wt.HANDLE)
+    open_file.restype = wt.HANDLE
+    handle = open_file(str(Path(src).absolute()), 0x80000000, 1, None, 3, 0, None)
+    if handle == wt.HANDLE(-1).value:
+        raise ct.WinError(ct.get_last_error())
+    kernel.CloseHandle.argtypes = (wt.HANDLE,)
+    handles.callback(kernel.CloseHandle, handle)
+
+
+def _checked_com_batch(progid, kind, pairs, errors):
+    if kind != "excel":
+        return _com_batch(progid, kind, pairs)
+    eligible = []
+    with ExitStack() as handles:
+        for src, dst, fmt in pairs:
+            try:
+                _hold_excel_source(src, handles)
+            except OSError as exc:
+                errors[dst] = "无法锁定待核对的工作簿：%s" % exc
+                continue
+            if _com_workbook(src):
+                eligible.append((src, dst, fmt))
+            else:
+                errors[dst] = "无法排除 Excel 4.0 宏；需要 LibreOffice 转换或提供无宏 XLSX"
+        return _com_batch(progid, kind, eligible) if eligible else {}
+
+
+def _com_workbook(src):
+    """Excel's ForceDisable excludes XLM. Route opaque and macro-sheet inputs to LibreOffice."""
+    import posixpath
+    import re
+    import zipfile
+    from xml.etree.ElementTree import ParseError
+    from .ooxml import validate_package_limits
+    from .safe_xml import parse_xml
+
+    if Path(src).suffix.lower() == ".xls":
+        from .legacy_excel import ordinary_xls
+        return ordinary_xls(src)
+    if Path(src).suffix.lower() not in (".xlsx", ".xlsm"):
+        return False
+    try:
+        with zipfile.ZipFile(src) as archive:
+            validate_package_limits(archive)
+            types = parse_xml(archive.read("[Content_Types].xml"))
+            content_types = {n.get("PartName"): n.get("ContentType", "").lower() for n in types}
+            if content_types.get("/xl/workbook.xml") not in (
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+                    "application/vnd.ms-excel.sheet.macroenabled.main+xml"):
+                return False
+            if any("macrosheet" in n.get("ContentType", "").lower() for n in types):
+                return False
+            wb = parse_xml(archive.read("xl/workbook.xml"))
+            rels = parse_xml(archive.read("xl/_rels/workbook.xml.rels"))
+            ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+            rid = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+            # A static range is sufficient for ordinary names and print areas. Leave
+            # procedural names and expressions that need evaluation to the fallback.
+            cell = r"(?:\$?[A-Z]{1,3}\$?[1-9][0-9]*|\$?[A-Z]{1,3}|\$?[1-9][0-9]*)"
+            static_range = re.compile(r"(?:'(?:[^']|'')+'|[\w.]+)!" + cell + "(?::" + cell + ")?", re.I)
+            for name in wb.iter(ns + "definedName"):
+                if (name.get("xlm") in ("true", "1") or name.get("function") in ("true", "1")
+                        or name.get("name", "").lower().split(".")[-1] in ("auto_open", "auto_close", "auto_activate", "auto_deactivate")
+                        or not all(static_range.fullmatch(ref.strip()) for ref in (name.text or "").split(","))):
+                    return False
+            relations = {r.get("Id"): r for r in rels if r.get("TargetMode") != "External"}
+            sheets = wb.findall(ns + "sheets/" + ns + "sheet")
+            members = set(archive.namelist())
+            for sheet in sheets:
+                relation = relations.get(sheet.get(rid))
+                if relation is None:
+                    return False
+                kind = relation.get("Type", "").rsplit("/", 1)[-1]
+                part = posixpath.normpath(posixpath.join("/xl", relation.get("Target", "")))
+                if (kind not in ("worksheet", "chartsheet") or part[1:] not in members
+                        or content_types.get(part) != "application/vnd.openxmlformats-officedocument.spreadsheetml." + kind + "+xml"):
+                    return False
+            return bool(sheets)
+    except (DIError, OSError, RuntimeError, zipfile.BadZipFile, ParseError, KeyError, ValueError):
+        return False
 
 
 def convert_many(items):
@@ -340,7 +378,7 @@ def convert_many(items):
                 fmap = WORD_FMT if kind == "word" else EXCEL_FMT
                 pairs = [(s, d, fmap[f]) for s, d, f in pending if f in fmap]
                 try:
-                    res = _com_batch(val, kind, pairs)
+                    res = _checked_com_batch(val, kind, pairs, errors)
                 except (DIError, OSError) as exc:
                     res = {"*": str(exc)}
                 still = []

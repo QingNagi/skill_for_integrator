@@ -5,14 +5,16 @@
       "url": "https://codeload.github.com/tesseract-ocr/tesseract/tar.gz/refs/tags/5.5.5",
       "sha256": "b02cf6f37cfc95be5bf7e4b2d39e51997b1ac41f7beb4e2bd16777bb67561c79",
       "license": "Apache-2.0",
-      "notice": "vendor/licenses/Tesseract-LICENSE.txt"
+      "notice": "vendor/licenses/Tesseract-LICENSE.txt",
+      "commit": "4292f6890aa86ef64eba32090358f40f69dd6d28"
     },
     "leptonica": {
-      "version": "1.87.0",
-      "url": "https://codeload.github.com/DanBloomberg/leptonica/tar.gz/refs/tags/1.87.0",
-      "sha256": "fa2b40c5caea96d1bb93a97486262aed8731b69ce25a84a6bf5d25323e33f631",
+      "version": "1.87.0+git.c493a776",
+      "url": "https://codeload.github.com/DanBloomberg/leptonica/tar.gz/c493a776e6bc6cfb1d8d15152a0b74f3d15b33fd",
+      "sha256": "ba9d6f1524176a869f537dac57c614650695a05228999297431b98f7611770b9",
       "license": "BSD-2-Clause",
-      "notice": "vendor/licenses/Leptonica-LICENSE.txt"
+      "notice": "vendor/licenses/Leptonica-LICENSE.txt",
+      "commit": "c493a776e6bc6cfb1d8d15152a0b74f3d15b33fd"
     },
     "zig-toolchain": {
       "version": "0.14.1",
@@ -35,18 +37,18 @@
   "binaries": {
     "manylinux_aarch64": {
       "name": "tesseract",
-      "size": 5196200,
-      "sha256": "2d2e09705fc52e9295a90fb75f0dcfeecfd0725dd8e470e0b935e107a8c4916a"
+      "size": 5201912,
+      "sha256": "1445b04b92a27fd9c4cd529307846dcea4ed475ff5b2a42137ade7c0700bb8fe"
     },
     "manylinux_x86_64": {
       "name": "tesseract",
-      "size": 5218064,
-      "sha256": "ce6e4770d1cf273a37a1b1a38eeff4fcb45c19ba5fc0bc27538a148d0de37dee"
+      "size": 5223376,
+      "sha256": "05289d05288e6d16f6f67314baa5ddd0ac9a2f8a5ddc4a4dbb5665a7c406975a"
     },
     "win_amd64": {
       "name": "tesseract.exe",
-      "size": 5651456,
-      "sha256": "aca7b94dc1b922ad3e9d2ad2f584d7c558f659cefb7de651a8ac09c6f000247d"
+      "size": 5661696,
+      "sha256": "604aef84cab43b697cf5dc8129314ca306602c9017dfda17246f3de98d433018"
     }
   }
 }

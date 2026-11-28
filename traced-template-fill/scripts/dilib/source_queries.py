@@ -55,8 +55,18 @@ def cmd_show(a):
         page_ref = re.fullmatch(r"page(\d+)", ref) if md.m["type"] == "pdf" else None
         if len(a.ref) > 1 or page_ref:
             out("[%s:%s]" % (alias, ref))
+        def emit(value):
+            if a.full:
+                # A JSON string keeps embedded line breaks inside the source record.
+                import json
+                out(json.dumps(value, ensure_ascii=False))
+            else:
+                out(value)
+
+        if a.full:
+            out("<<<SOURCE %s:%s · 原文数据>>>" % (alias, ref))
         if md.m["type"] == "xlsx":
-            out(render_sheet(md, ref if ref != "*" else None, max_rows=a.rows_max))
+            emit(render_sheet(md, ref if ref != "*" else None, max_rows=a.rows_max))
         elif page_ref:
             page = int(page_ref[1])
             blocks = [b for b in md.m["blocks"] if b.get("page") == page]
@@ -64,13 +74,15 @@ def cmd_show(a):
             if page < 1 or (not blocks and not unread and page > md.m.get("stats", {}).get("pages", 0)):
                 raise DIError("%s 找不到第 %d 页" % (alias, page))
             for b in blocks:
-                out("%s:%s" % (alias, render(md, b["id"])))
+                emit("%s:%s" % (alias, render(md, b["id"])))
             for item in unread:
-                out("未读取：" + item["why"])
+                emit("未读取：" + item["why"])
             if not blocks and not unread:
-                out("本页没有可显示的内容。")
+                emit("本页没有可显示的内容。")
         else:
-            out(render(md, ref))
+            emit(render(md, ref))
+        if a.full:
+            out("<<<END SOURCE>>>")
 
 
 def cmd_search(a):

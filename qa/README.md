@@ -4,7 +4,7 @@
 
 source 只含业务代码和资源；lite 增加纯 Python wheel；完整包包含解释器、原生 PDF 组件和 OCR 模型。请按实际产物分别复核。历史 Windows 发布包包含 PyMuPDF，复核该历史包时可在评审机使用项目修复版 SkillSpector。安装命令、同包对照结果及仍需复核的发现见 [PyMuPDF 归档扫描修复](skillspector-zip/README.md)。
 
-在评审机的 PowerShell 7.2 或更新版本中，从仓库根目录调用 `qa/run-tier1.ps1`。评审机需有 SkillEvaluator、SkillSpector 和 Gitleaks。已验证 SkillEvaluator 1.2.1、Gitleaks 8.30.1、上游 SkillSpector 2.13.6 / 2.13.7 和本项目的修复版。入口支持指定工具绝对路径。未指定扫描器时，优先使用安装在用户目录的项目修复版，再查找 PATH。静态评审使用 `--no-llm`。
+在评审机的 PowerShell 7.2 或更新版本中，从仓库根目录调用 `qa/run-tier1.ps1`。评审机需有 SkillEvaluator、SkillSpector 和 Gitleaks。已验证 SkillEvaluator 1.2.1、Gitleaks 8.30.1、上游 SkillSpector 2.13.6 / 2.13.7 和本项目的修复版。入口支持指定工具绝对路径。未指定扫描器时使用 PATH 中的 skillspector。正式评审应指定官方发行版的绝对路径，记录版本。历史归档补丁可通过 -SkillSpector 显式选择作诊断。静态评审使用 `--no-llm`。
 
 ## 评审发布 ZIP
 

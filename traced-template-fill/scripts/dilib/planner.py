@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import re
 
+from . import identity, tablemap
 from .plan_tables import TablePlanningMixin
 from .common import contains_model_code, contains_score, norm_text, short, sim
 from .read_docx import HEAD_PATTERNS
@@ -193,12 +194,34 @@ class Planner(TablePlanningMixin):
     def run(self):
         if self.rule_why:
             self.summary.append("从任务描述识别的规则：" + "；".join(self.rule_why))
-        for t in self.an.get("tables", []):
-            for rg in t["regions"]:
+        regions = [(t, rg) for t in self.an.get("tables", []) for rg in t["regions"]]
+        measurements = [(t, rg) for t, rg in regions
+                        if any(tablemap.role_of(c["path"])[0] == "sample" for c in rg["cols"])]
+        books = self.sheet_sources()
+        selection = self.answer_effect("td:source") or {}
+        if selection.get("alias") in books and not selection.get("_default"):
+            books = {selection["alias"]: books[selection["alias"]]}
+        data_codes = set()
+        if len(books) == 1 and measurements:
+            for book in books.values():
+                for sheet in book.m.get("sheets", []):
+                    data_codes.update(identity.sheet_identity(book, sheet, identity.document_identity(self.T))["model"])
+        if measurements and not self.spec_evidence(data_codes):
+            q = next(q for q in self.questions if q["key"].startswith("src:spec:"))
+            for t, rg in measurements:
+                samples = {tablemap.role_of(c["path"])[1]: c["c"] for c in rg["cols"]
+                           if tablemap.role_of(c["path"])[0] == "sample"}
+                rows = self.affected_spec_rows(t, rg)
+                if rows:
+                    self.add_impact(q, self.measurement_cells(t, rows, samples))
+                self.mark_stale(t, rows, samples, set())
+            self.report["unfilled"].append("规范型号适用性待确认，已暂停按规范和测试记录填写。")
+        else:
+            for t, rg in regions:
                 self.plan_region(t, rg)
-        self.plan_sections()
-        self.plan_fields()
-        self.apply_manual()
+            self.plan_sections()
+            self.plan_fields()
+            self.apply_manual()
         self.check_unread()
         self.check_ocr()
         self.report['stale'] = self.stale
@@ -207,18 +230,23 @@ class Planner(TablePlanningMixin):
 
     def check_unread(self):
         '''源文件里有没读到的内容（扫描页/无文本层等）：“没找到”不等于“没有”，必须问清并登记，定稿前拦截。'''
+        self.report['warnings'].extend('模板：%s' % note for note in self.T.m.get('read_warnings', []))
+        self.report['warnings'].extend('模板 %s：%s' % (item['location'], item['why'])
+                                       for item in self.T.m.get('unread', []) if item.get('location'))
         for alias, md in self.src.items():
             if md.m.get('backend_note'):
                 self.report['warnings'].append('%s：%s' % (md.m['name'], md.m['backend_note']))
+            self.report['warnings'].extend('%s：%s' % (md.m['name'], note) for note in md.m.get('read_warnings', []))
             un = md.m.get('unread') or []
             if not un:
                 continue
             key = 'src:unread:' + alias
-            pages = '、'.join(str(u.get('page', '?')) for u in un[:12])
-            detail = '%s 有 %d 处内容没有读取到（第 %s 页：%s），这些部分的“没找到”不能当作“没有”' % (md.m['name'], len(un), pages, un[0].get('why', ''))
+            locations = '、'.join(u.get('location') or '第 %s 页' % u.get('page', '?') for u in un[:12])
+            detail = '%s 有 %d 处内容没有读取到（%s：%s），这些部分的“没找到”不能当作“没有”' % (
+                md.m['name'], len(un), locations, un[0].get('why', ''))
             eff = self.answer_effect(key)
             if eff is None:
-                self.ask({'key': key, 'topic': '未读取内容', 'question': detail + '。如何处理？', 'options': [{'label': '先不当作没有：我会提供可识别的版本（文本版PDF/docx）后重跑', 'effect': {'ok': False}}, {'label': '我已人工核对过这些页面，目标不需要其中的内容', 'effect': {'ok': True}}], 'recommended': 0})
+                self.ask({'key': key, 'topic': '未读取内容', 'question': detail + '。如何处理？', 'options': [{'label': '先不当作没有：我会提供可读取的版本后重跑', 'effect': {'ok': False}}, {'label': '我已人工核对过这些位置，目标不需要其中的内容', 'effect': {'ok': True}}], 'recommended': 0})
                 eff = {'ok': False}
             if not (isinstance(eff, dict) and eff.get('ok') and not eff.get('_default')):
                 self.report.setdefault('unverified_sources', []).append({'kind': 'unread', 'key': key, 'name': md.m['name'], 'detail': detail})
@@ -450,7 +478,11 @@ class Planner(TablePlanningMixin):
             nxt = hits[i + 1][0] if i + 1 < len(hits) else len(text)
             seg = text[e:nxt]
             if i == 0:
-                seg = text[:s] + " " + seg
+                prefix = text[:s].strip()
+                if not re.fullmatch(r"(?:请)?(?:从|按|根据|参考|参照)?(?:指定|所给|提供|所附)?(?:的)?", prefix):
+                    seg = prefix + " " + seg
+            seg = re.sub(r"^\s*(?:里|中)?(?:摘入|摘录|摘抄|提取|引用)\s*", "", seg)
+            seg = seg.strip(" 。；;：:“”\"")
             alias = None
             best = 0
             for a in docs:

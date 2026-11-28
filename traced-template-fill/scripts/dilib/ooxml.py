@@ -198,15 +198,32 @@ class Rels:
                 self.pkg.order.append(self.name)
 
 
+# Bound inflated Office input before any part is decompressed (including testzip).
+MAX_OFFICE_MEMBERS = 10000
+MAX_OFFICE_PART_BYTES = 128 * 1024 * 1024
+MAX_OFFICE_TOTAL_BYTES = 512 * 1024 * 1024
+
+
+def validate_package_limits(archive):
+    from .common import DIError
+    members = archive.infolist()
+    if len(members) > MAX_OFFICE_MEMBERS:
+        raise DIError("Office 压缩包成员数超过限制 %d" % MAX_OFFICE_MEMBERS)
+    if any(m.file_size > MAX_OFFICE_PART_BYTES for m in members):
+        raise DIError("Office 压缩包单个成员解压大小超过限制 %d 字节" % MAX_OFFICE_PART_BYTES)
+    if sum(m.file_size for m in members) > MAX_OFFICE_TOTAL_BYTES:
+        raise DIError("Office 压缩包解压总大小超过限制 %d 字节" % MAX_OFFICE_TOTAL_BYTES)
+
+
 class Package:
     """docx/xlsx 包：parts 保存原始字节；xml() 解析后的部件在 save() 时序列化。"""
 
     def __init__(self, path=None, data=None):
         self.path = path
-        z = zipfile.ZipFile(io.BytesIO(data) if data is not None else path)
-        self.order = [i.filename for i in z.infolist()]
-        self.parts = {n: z.read(n) for n in self.order}
-        z.close()
+        with zipfile.ZipFile(io.BytesIO(data) if data is not None else path) as archive:
+            validate_package_limits(archive)
+            self.order = archive.namelist()
+            self.parts = {info.filename: archive.read(info) for info in archive.infolist()}
         self._xml = {}
         self._ns = {}
         self._rels = {}

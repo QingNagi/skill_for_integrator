@@ -25,7 +25,7 @@ def cmd_clean(args):
     physical(cache)
     key = r"[0-9a-f]{16}(?:-[0-9a-f]{16})?"
     files = []
-    for name in ("models", "media", "conv"):
+    for name in ("models", "media", "conv", "ocr"):
         directory = cache / name
         if not os.path.lexists(directory):
             continue
@@ -42,6 +42,7 @@ def cmd_clean(args):
                             files.append(path)
             elif stat.S_ISREG(mode):
                 if ((name == "models" and re.fullmatch(key + r"\.json", item.name)) or
+                        (name == "ocr" and re.fullmatch(r"[0-9a-f]{64}\.json", item.name)) or
                         (name == "conv" and re.fullmatch(r".+_[0-9a-f]{10}\.(?:docx|xlsx)", item.name))):
                     files.append(item)
     size = sum(file.stat().st_size for file in files)

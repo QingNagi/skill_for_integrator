@@ -10,19 +10,20 @@ import os
 import re
 import zipfile
 
+from .ooxml import validate_package_limits
 from .safe_xml import parse_xml
 
 from . import tablemap
 from .common import TOOL_AUTHOR, DIError, ensure_dir, file_sha1, short
 from .content import Model
 from .planner import Planner
-from .read_other import col_index, col_letter, split_ref
+from .read_other import col_index, col_letter, si_text, split_ref
 from .target import is_label
 
 S = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 RNS = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
 PKG_RELNS = '{http://schemas.openxmlformats.org/package/2006/relationships}'
-PARSE_VERSION = 2
+PARSE_VERSION = 3
 _MEM = {}
 XLSX_TARGET_EXT = ('.xlsx', '.xlsm', '.xls', '.et', '.ett', '.ods', '.xlsb')
 
@@ -32,19 +33,6 @@ def is_xlsx_target(job):
     return os.path.splitext(job.data['target']['path'])[1].lower() in XLSX_TARGET_EXT
 
 import posixpath  # noqa: E402
-
-
-def si_text(si):
-    '''共享/内联字符串的文字：只取 <t> 与 <r><t>，不含拼音(rPh)。'''
-    out = []
-    for ch in si:
-        if ch.tag == S + 't':
-            out.append(ch.text or '')
-        elif ch.tag == S + 'r':
-            t = ch.find(S + 't')
-            if t is not None:
-                out.append(t.text or '')
-    return ''.join(out)
 
 
 def part_rels(z, names, part):
@@ -127,6 +115,7 @@ def _parse(path, sha):
     except zipfile.BadZipFile:
         raise DIError('不是有效的 xlsx（压缩包损坏）：%s' % os.path.basename(path))
     try:
+        validate_package_limits(z)
         names = set(z.namelist())
         if 'xl/workbook.xml' not in names:
             raise DIError('不是有效的 xlsx（缺少 xl/workbook.xml）：%s' % os.path.basename(path))

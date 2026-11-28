@@ -21,6 +21,7 @@ import os
 import re
 import zipfile
 
+from . import __version__
 from .common import DIError, cache_hasher, ensure_dir, file_sha1, read_json, safe_name, write_json
 from .content import Model, load_model
 
@@ -71,7 +72,7 @@ class Job:
         d = os.path.join(out_root, base_name)
         if name and os.path.exists(os.path.join(d, "job.json")):
             raise DIError("任务目录已存在：%s" % d)
-        data = {"version": 1, "workspace": os.getcwd(), "created": datetime.datetime.now().isoformat(timespec="seconds"), "task": task or "",
+        data = {"version": 1, "skill_version": __version__, "workspace": os.getcwd(), "created": datetime.datetime.now().isoformat(timespec="seconds"), "task": task or "",
                 "target": {"path": target}, "sources": [{"alias": "S%d" % (i + 1), "path": p} for i, p in enumerate(srcs.values())],
                 "profile": profile or "default", "formats": formats or [], "cache": os.path.join(out_root, "_缓存")}
         job = cls(d, data=data)

@@ -20,6 +20,6 @@ Windows 包使用 Python Software Foundation 发布的 CPython 3.14.10 amd64 嵌
 
 ## 离线文字识别与模型
 
-识别引擎 Tesseract 5.5.5 使用 Apache-2.0，图像库 Leptonica 1.87.0 使用 BSD-2-Clause。每个平台的可执行文件由固定的两份源码压缩包和 Zig 0.14.1 编译生成。编译运行库的署名与许可随本包提供。[Tesseract 许可](vendor/licenses/Tesseract-LICENSE.txt) · [Leptonica 许可](vendor/licenses/Leptonica-LICENSE.txt) · [编译运行库索引](vendor/licenses/Native-runtime-notices.txt)
+识别引擎 Tesseract 5.5.5 使用 Apache-2.0，图像库 Leptonica 1.87.0+git.c493a776 使用 BSD-2-Clause。每个平台的可执行文件由固定的两份源码压缩包和 Zig 0.14.1 编译生成。编译运行库的署名与许可随本包提供。[Tesseract 许可](vendor/licenses/Tesseract-LICENSE.txt) · [Leptonica 许可](vendor/licenses/Leptonica-LICENSE.txt) · [编译运行库索引](vendor/licenses/Native-runtime-notices.txt)
 
 简体中文和英文语言模型 chi_sim.traineddata、eng.traineddata 取自 tessdata_fast 的固定提交 87416418657359cb625c412a48b6e1d6d41c29bd，按 Apache-2.0 分发。模型和上游 LICENSE 位于完整包内的 runtime/tessdata/。[模型上游版本](https://github.com/tesseract-ocr/tessdata_fast/tree/87416418657359cb625c412a48b6e1d6d41c29bd)
