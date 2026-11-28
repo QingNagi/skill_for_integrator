@@ -1,0 +1,111 @@
+{
+  "package_sha256": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667",
+  "previous_version": "1.2.0",
+  "overall_status": "passed",
+  "source_gate_passed": true,
+  "publication_status": "incomplete",
+  "quality_grade": "A",
+  "skillspector_risk": {
+    "score": 24,
+    "severity": "MEDIUM",
+    "recommendation": "CAUTION",
+    "max_issue_severity": "MEDIUM"
+  },
+  "applicable_risk_score": 24,
+  "raw_counts": {
+    "CRITICAL": 0,
+    "HIGH": 0,
+    "MEDIUM": 3,
+    "LOW": 0,
+    "INFO": 0
+  },
+  "raw_completeness": "complete",
+  "skillspector_coverage": 100.0,
+  "incomplete_scans": [],
+  "applied_waivers": [],
+  "pii_status": "passed",
+  "harness_not_loaded": [],
+  "validators": {
+    "Schema & Repository Governance": "passed",
+    "Semantic Version Validation": "passed",
+    "Security Scan": "passed",
+    "PII Scan": "passed",
+    "License Compliance": "passed",
+    "Code Risk Analysis": "passed",
+    "Secrets Detection": "passed",
+    "Code Integrity & Hygiene": "passed",
+    "Dependency Vulnerability Audit": "passed",
+    "Unicode Smuggling Detection": "passed",
+    "QUALITY": "passed",
+    "SCRIPT_LINT": "passed",
+    "Harness Compatibility": "passed"
+  },
+  "quality": 100.0,
+  "inspector_findings": [
+    {
+      "id": "LP3",
+      "file": "SKILL.md",
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "AST4",
+      "file": "scripts/dilib/child_process.py",
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "TT2",
+      "file": "scripts/dilib/child_process.py",
+      "severity": "MEDIUM"
+    }
+  ],
+  "scan_waivers_or_suppressions": 0,
+  "antivirus": {
+    "tool": "Microsoft Defender Antivirus",
+    "exit": 0,
+    "time_utc": "2026-11-28T11:24:33.9486925Z",
+    "archive_inputs": 11,
+    "recursive_containers": 183,
+    "regular_files": 17372,
+    "input_hashes": {
+      "deploy.py": "d52240d1dfea4d0bf723de6f80e3a04ac95f289f944206d1cb0900c66e7b1659",
+      "install.ps1": "37bcd00d25748cd6f3d59d3335da9f72fb4baf059e54a18e61daaedb40ab6b01",
+      "install.sh": "00993933b7175012bcb08572f0b2f51fcf937af0b3c138bf99aa8d894a727034",
+      "traced-template-fill-1.3.0-dependencies.zip": "00442878df94b017cd5ea04821ee6b2f3e6f93701b18b018ef5b564f9ece5f0c",
+      "traced-template-fill-1.3.0-source.zip": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667",
+      "traced-template-fill-offline-linux-aarch64.tar.gz": "9329c68dec96e162040047c878e7ccd86791302364e5762f5f714ba6be1650b3",
+      "traced-template-fill-offline-linux-x86_64.tar.gz": "7fd965460ee2fa825b58cec50c4f7dc205d832764f276f483ac5d41dd70fb9f4",
+      "traced-template-fill-offline-win64.zip": "d29d8ba5f3ce665f450df057193c00c0d3613f1819e8e82499e508ccba8a6666",
+      "traced-template-fill-runtime-linux-aarch64.tar.gz": "9039119c53a13dbe3ba0370017df07bab8b05ce98850300962c0832f0ee5c7ba",
+      "traced-template-fill-runtime-linux-x86_64.tar.gz": "9de99fc161c0a5b2d21652ec396f3bc166fd2c4ec54eb673767e07abbff48e52",
+      "traced-template-fill-runtime-win64.zip": "8aa43b318f38c93b77c56decbd6fe47efb13364c1e917535f02e16c24d047308"
+    }
+  },
+  "supply_chain": {
+    "wheel_hashes_checked": 18,
+    "advisory_results": [
+      "PyPI charset_normalizer 3.5.3 0 advisory records",
+      "PyPI pdfminer_six 20260107 0 advisory records",
+      "PyPI pdfplumber 0.11.11 0 advisory records",
+      "PyPI pycparser 3.12 0 advisory records",
+      "PyPI pypdf 6.21.4 0 advisory records",
+      "PyPI typing_extensions 4.16.0 0 advisory records",
+      "PyPI pillow 13.0.0 0 advisory records",
+      "PyPI cffi 2.1.1 0 advisory records",
+      "PyPI cryptography 50.0.2 0 advisory records",
+      "PyPI pypdfium2 5.15.2 0 advisory records",
+      "OSV charset_normalizer 3.5.3 0 records",
+      "OSV pdfminer_six 20260107 0 records",
+      "OSV pdfplumber 0.11.11 0 records",
+      "OSV pycparser 3.12 0 records",
+      "OSV pypdf 6.21.4 0 records",
+      "OSV typing_extensions 4.16.0 0 records",
+      "OSV pillow 13.0.0 0 records",
+      "OSV cffi 2.1.1 0 records",
+      "OSV cryptography 50.0.2 0 records",
+      "OSV pypdfium2 5.15.2 0 records",
+      "OSV PDFium (upstream version only) 159.0.8149.0 0 records",
+      "OSV leptonica c493a776e6bc6cfb1d8d15152a0b74f3d15b33fd 0 records",
+      "OSV tesseract 4292f6890aa86ef64eba32090358f40f69dd6d28 0 records"
+    ]
+  }
+}

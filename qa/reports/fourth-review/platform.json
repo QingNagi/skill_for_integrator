@@ -1,0 +1,339 @@
+{
+  "version": "1.3.0",
+  "source_zip": "traced-template-fill-1.3.0-source.zip",
+  "source_sha256": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667",
+  "source_files": 69,
+  "rebuild": {
+    "all_bytes_match": true,
+    "file_count": 23,
+    "manifest_sha256": "614d4be1af7d478b851904b4b5be9c7e18871d6f2c5625c348521c3e778e759e",
+    "mismatches": []
+  },
+  "checkout_line_endings": {
+    "LF": {
+      "file_count": 69,
+      "source_zip_sha256": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667",
+      "runtime_pairing_manifest_sha256": "834387489b9266048239f80da2332a0c6686b7e3877fd7fb3224eeb2db0c5b5f"
+    },
+    "CRLF": {
+      "file_count": 69,
+      "source_zip_sha256": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667",
+      "runtime_pairing_manifest_sha256": "834387489b9266048239f80da2332a0c6686b7e3877fd7fb3224eeb2db0c5b5f"
+    }
+  },
+  "committed_source": {
+    "source_commit": "bcb8dd188f3508d8a56f302b0a501d98df5bf73b",
+    "source_files": 69,
+    "normalized_skill_bytes_match_archive": true,
+    "tracked_files_and_builders_match_commit": true,
+    "source_sha256": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667"
+  },
+  "windows_user_scope": {
+    "source_sha256": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667",
+    "user_scope": true,
+    "iterations": 2,
+    "legacy_profiles_preserved": 1,
+    "shared_canonical_entry": true
+  },
+  "source_tests": {
+    "windows_full_pdf_and_ocr": {
+      "python": "3.14.4",
+      "discovered": 400,
+      "passed": 400,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "commit": "bcb8dd188f3508d8a56f302b0a501d98df5bf73b"
+    },
+    "linux_x86_64_no_ocr": {
+      "python": "3.14.10",
+      "discovered": 400,
+      "passed": 369,
+      "skipped": 31,
+      "failures": 0,
+      "errors": 0,
+      "commit": "bcb8dd188f3508d8a56f302b0a501d98df5bf73b"
+    },
+    "protected_interview_with_fixture_generators": "passed"
+  },
+  "windows_install": {
+    "install_without_system_python": true,
+    "legacy_backup": true,
+    "repeat": true,
+    "exact_source": true,
+    "no_system_python_doctor_in_both_hosts": true,
+    "short_lived_stage_lock_and_bounded_permanent_denial_tests_passed": 2,
+    "installer_bootstrapped_with_unusable_caller_temp": {
+      "no_system_python": true,
+      "caller_temp_was_regular_file": true,
+      "stage_removed": true,
+      "sentinel_unchanged": true
+    }
+  },
+  "windows_office": {
+    "word": {
+      "docx_producer": "Microsoft Office Word",
+      "pdf_producer": "Microsoft® Word 2010 Microsoft® Word 2010",
+      "originals_unchanged": true,
+      "review_notes_after_doc_roundtrip": 3,
+      "native_edit_and_annotation_retained": true,
+      "pdf_pages": 1,
+      "generated_property_after_editor_save": "draft",
+      "generated_property_after_doc_roundtrip": "draft"
+    },
+    "libreoffice": {
+      "docx_producer": "LibreOffice/26.8.3.1$Windows_X86_64 LibreOffice_project/861effc5289d539f15c4c18d1ba8579ffd78728b",
+      "pdf_producer": "Writer LibreOffice 26.8.3.1 (X86_64)",
+      "originals_unchanged": true,
+      "review_notes_after_doc_roundtrip": 3,
+      "native_edit_and_annotation_retained": true,
+      "pdf_pages": 1,
+      "generated_property_after_editor_save": "draft",
+      "generated_property_after_doc_roundtrip": "draft"
+    }
+  },
+  "linux": {
+    "x86_64": {
+      "offline_qemu_guest": true,
+      "network_adapter": "none",
+      "non_root_user": true,
+      "libc": [
+        "glibc",
+        "2.36"
+      ],
+      "kernel": "6.1.0-50-amd64",
+      "pair_checksum_and_mismatch_test": true,
+      "cold_bilingual_ocr_and_warm_reuse": true,
+      "host_install_backup_links_source_bytes_and_repeat": true,
+      "installer_bootstrapped_without_system_python": true,
+      "docx_draft_read_only_inputs": true,
+      "cold_install_with_read_only_caller_temp": true,
+      "staging_temp_removed": true,
+      "two_concurrent_repairs_preserved_local_rules": true,
+      "parallel_batch_drafts": 2,
+      "qemu_median_ms": {
+        "cold_run": 51189.454,
+        "warm_run": 6606.533,
+        "warm_search": 4276.058,
+        "direct_search": 4173.916
+      },
+      "timing_scope": "new application cache per sample; OS disk cache not flushed",
+      "independent_terminal_handoff": {
+        "jobs": 2,
+        "same_installed_interpreter_and_entry": true,
+        "read_only_originals": true,
+        "cancelled_without_drafts": true,
+        "piped_input_and_hidden_output_refused": true
+      },
+      "office_conversion_backend": "unavailable",
+      "artifacts_sha256": {
+        "traced-template-fill-offline-linux-x86_64.tar.gz": "7fd965460ee2fa825b58cec50c4f7dc205d832764f276f483ac5d41dd70fb9f4",
+        "traced-template-fill-runtime-linux-x86_64.tar.gz": "9de99fc161c0a5b2d21652ec396f3bc166fd2c4ec54eb673767e07abbff48e52",
+        "traced-template-fill-1.3.0-source.zip": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667"
+      }
+    },
+    "aarch64": {
+      "offline_qemu_guest": true,
+      "network_adapter": "none",
+      "non_root_user": true,
+      "libc": [
+        "glibc",
+        "2.36"
+      ],
+      "kernel": "6.1.0-50-arm64",
+      "pair_checksum_and_mismatch_test": true,
+      "cold_bilingual_ocr_and_warm_reuse": true,
+      "host_install_backup_links_source_bytes_and_repeat": true,
+      "installer_bootstrapped_without_system_python": true,
+      "docx_draft_read_only_inputs": true,
+      "cold_install_with_read_only_caller_temp": true,
+      "staging_temp_removed": true,
+      "two_concurrent_repairs_preserved_local_rules": true,
+      "parallel_batch_drafts": 2,
+      "qemu_median_ms": {
+        "cold_run": 50664.026,
+        "warm_run": 6422.09,
+        "warm_search": 4253.851,
+        "direct_search": 4185.508
+      },
+      "timing_scope": "new application cache per sample; OS disk cache not flushed",
+      "independent_terminal_handoff": {
+        "jobs": 2,
+        "same_installed_interpreter_and_entry": true,
+        "read_only_originals": true,
+        "cancelled_without_drafts": true,
+        "piped_input_and_hidden_output_refused": true
+      },
+      "office_conversion_backend": "unavailable",
+      "artifacts_sha256": {
+        "traced-template-fill-offline-linux-aarch64.tar.gz": "9329c68dec96e162040047c878e7ccd86791302364e5762f5f714ba6be1650b3",
+        "traced-template-fill-runtime-linux-aarch64.tar.gz": "9039119c53a13dbe3ba0370017df07bab8b05ce98850300962c0832f0ee5c7ba",
+        "traced-template-fill-1.3.0-source.zip": "5bfc776c5540d4323c2279159d7ce46f6626c6157930c4d777ffca92e33f8667"
+      }
+    }
+  },
+  "host_discovery": {
+    "codex_count": 1,
+    "claude_count": 1,
+    "codex_version": "codex-cli 0.172.0",
+    "claude_version": "2.1.316 (Claude Code)",
+    "claude_entry_resolves_to_same_source": true
+  },
+  "windows_interactive_handoff": {
+    "planned_jobs": 2,
+    "piped_input_refused": true,
+    "frozen_interpreter_and_di_py": true,
+    "no_drafts_or_report_before_handoff": true,
+    "cancelled_without_drafts": true,
+    "hidden_stdout_refused": true,
+    "tty_delivered_two_drafts": true,
+    "delivery_report": true,
+    "read_only_inputs_preserved": true
+  },
+  "project_cache_with_unwritable_temp": {
+    "original_sample_project": true,
+    "ordinary_user": true,
+    "staging_created_in_project_cache": true,
+    "payload_sha256": "42d832f1f315bb9c0121638c3dbbb651feb1dfbe6f95efea09588dbea6922be8",
+    "original_result": {
+      "first_exit": 1,
+      "no_usable_temp": true,
+      "permission_error_explicitly_printed": false
+    },
+    "cases": {
+      "cmd-system-temp": {
+        "cold_exit": 0,
+        "warm_exit": 0,
+        "bilingual_selfcheck_only_once": true,
+        "isolated_temp_removed": true,
+        "embedded_process_temp_probe": {
+          "caller_temp": {
+            "writable": false,
+            "exception": "PermissionError",
+            "errno": 13
+          },
+          "chosen_cache": {
+            "writable": true
+          }
+        }
+      },
+      "cmd-bad-temp": {
+        "cold_exit": 0,
+        "warm_exit": 0,
+        "bilingual_selfcheck_only_once": true,
+        "isolated_temp_removed": true
+      },
+      "powershell-bad-temp": {
+        "cold_exit": 0,
+        "warm_exit": 0,
+        "bilingual_selfcheck_only_once": true,
+        "isolated_temp_removed": true
+      }
+    },
+    "caller_temp_sentinel_unchanged": true,
+    "isolated_probe_removed": true
+  },
+  "same_scanned_pdf_in_three_windows_temp_environments": {
+    "normal": {
+      "outline_exit": 0,
+      "doctor_exit": 0,
+      "private_ocr_temp_cleaned": true,
+      "outline_lists_ocr_page": true,
+      "chinese_ocr": true,
+      "english_ocr": true,
+      "native_voltage": true,
+      "ocr_pages": [
+        2
+      ],
+      "unread": []
+    },
+    "bad-caller-temp": {
+      "outline_exit": 0,
+      "doctor_exit": 0,
+      "private_ocr_temp_cleaned": true,
+      "outline_lists_ocr_page": true,
+      "chinese_ocr": true,
+      "english_ocr": true,
+      "native_voltage": true,
+      "ocr_pages": [
+        2
+      ],
+      "unread": []
+    },
+    "writable-project-temp": {
+      "outline_exit": 0,
+      "doctor_exit": 0,
+      "private_ocr_temp_cleaned": true,
+      "outline_lists_ocr_page": true,
+      "chinese_ocr": true,
+      "english_ocr": true,
+      "native_voltage": true,
+      "ocr_pages": [
+        2
+      ],
+      "unread": []
+    },
+    "same_pdf_sha256_as_candidate_5": "9349b6d76cccb363f22cb8df5fcf4785c87b143112aa26cc32ebc28df6f96249"
+  },
+  "linux_acceptance_script_sha256": "0dce5045708893496ebf7188e8b43c92677338678c055a0254bae34ef05a2efc",
+  "linux_acceptance_script_commit": "7b04eb1e1b96673a7d921adc73236fbe7fc0483f",
+  "windows_project_binding": {
+    "canonical_skill_files": 69,
+    "bound_runtime_core_files_match": 69,
+    "claude_alias_matches_canonical": true,
+    "paired_payload_sha256": "6f53057721203f556967615a9173e25d2ad95a83b17897fab6ba8389881070ff",
+    "complete_kit_payload_sha256": "42d832f1f315bb9c0121638c3dbbb651feb1dfbe6f95efea09588dbea6922be8",
+    "bound_di_py_sha256": "80dd8b39f9817873e39d1a7022b847c65e73130e9ff52c1027a6fbd4efd18855"
+  },
+  "prior_candidate_comparison": {
+    "prior_candidate": "candidate-5",
+    "changed_skill_files": [
+      "scripts/dilib/pdf_ocr.py"
+    ],
+    "all_six_runtime_payloads_preserved_upstream_bytes": true,
+    "individual_runtime_payloads": {
+      "traced-template-fill-offline-linux-aarch64.tar.gz": {
+        "same_as_prior": false,
+        "sha256": "a40ab50eac446a8d3a247ef5fd4618438f857687813f1d4cd9267c7f24332ab8",
+        "changed_files": [
+          "scripts/dilib/pdf_ocr.py"
+        ]
+      },
+      "traced-template-fill-offline-linux-x86_64.tar.gz": {
+        "same_as_prior": false,
+        "sha256": "797bdc649c1d2e7f0dea13a56562f170c4bad9629a3ac59580f5d35209e2fa5d",
+        "changed_files": [
+          "scripts/dilib/pdf_ocr.py"
+        ]
+      },
+      "traced-template-fill-offline-win64.zip": {
+        "same_as_prior": false,
+        "sha256": "42d832f1f315bb9c0121638c3dbbb651feb1dfbe6f95efea09588dbea6922be8",
+        "changed_files": [
+          "scripts/dilib/pdf_ocr.py"
+        ]
+      },
+      "traced-template-fill-runtime-linux-aarch64.tar.gz": {
+        "same_as_prior": false,
+        "sha256": "738e64293c32b41d8e8f758a416c3588e45f9ec760d89e86eb6627dba91b4cbb",
+        "changed_files": [
+          "runtime/skill-files.json"
+        ]
+      },
+      "traced-template-fill-runtime-linux-x86_64.tar.gz": {
+        "same_as_prior": false,
+        "sha256": "c99fe62762421167f0e2426dd257f3131b8d507cea9ae3bf167b501d0c7498a8",
+        "changed_files": [
+          "runtime/skill-files.json"
+        ]
+      },
+      "traced-template-fill-runtime-win64.zip": {
+        "same_as_prior": false,
+        "sha256": "6f53057721203f556967615a9173e25d2ad95a83b17897fab6ba8389881070ff",
+        "changed_files": [
+          "runtime/skill-files.json"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,1630 @@
+{
+  "candidate1": {
+    "batch": [
+      {
+        "trial": 1,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 77,
+        "post_draft_calls": 24,
+        "seconds": 249.40617570000177,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 85,
+        "post_draft_calls": 15,
+        "seconds": 335.30145719999564,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 75,
+        "post_draft_calls": 31,
+        "seconds": 263.43426329999784,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 68,
+        "post_draft_calls": 12,
+        "seconds": 253.4735404000021,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 82,
+        "post_draft_calls": 44,
+        "seconds": 240.30895260000398,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      }
+    ],
+    "excerpt": [
+      {
+        "trial": 1,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 47,
+        "post_draft_calls": 35,
+        "seconds": 218.1473385000063,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 27,
+        "post_draft_calls": 15,
+        "seconds": 81.22590420000051,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 38,
+        "post_draft_calls": 28,
+        "seconds": 116.90685790000134,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 34,
+        "post_draft_calls": 24,
+        "seconds": 123.28576170000451,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 16,
+        "post_draft_calls": 7,
+        "seconds": 49.777132999995956,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      }
+    ],
+    "record": [
+      {
+        "trial": 1,
+        "correct": 142,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 1,
+        "tool_calls": 40,
+        "post_draft_calls": 9,
+        "seconds": 208.44,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 110,
+          "错误填写": 3,
+          "填错": 3,
+          "错误留空": 18
+        },
+        "exit_code": 1
+      },
+      {
+        "trial": 2,
+        "correct": 145,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 1,
+        "tool_calls": 76,
+        "post_draft_calls": 15,
+        "seconds": 354.41,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 113,
+          "错误填写": 12,
+          "填错": 12,
+          "错误留空": 6
+        },
+        "exit_code": 1
+      },
+      {
+        "trial": 3,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 44,
+        "post_draft_calls": 12,
+        "seconds": 168.59,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 33,
+        "post_draft_calls": 6,
+        "seconds": 308.51,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 66,
+        "post_draft_calls": 11,
+        "seconds": 261.43,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      }
+    ]
+  },
+  "candidate2": {
+    "batch": [
+      {
+        "trial": 1,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 62,
+        "post_draft_calls": 14,
+        "seconds": 276.71830300000147,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 66,
+        "post_draft_calls": 5,
+        "seconds": 294.12423000000126,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 63,
+        "post_draft_calls": 24,
+        "seconds": 179.54181399999652,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 61,
+        "post_draft_calls": 12,
+        "seconds": 248.15486690000398,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 54,
+        "post_draft_calls": 19,
+        "seconds": 156.18706250000105,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      }
+    ],
+    "excerpt": [
+      {
+        "trial": 1,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 14,
+        "post_draft_calls": 9,
+        "seconds": 50.74229139999807,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 39,
+        "post_draft_calls": 28,
+        "seconds": 204.58897620000062,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 21,
+        "post_draft_calls": 14,
+        "seconds": 67.23725670000567,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 8,
+        "post_draft_calls": 2,
+        "seconds": 25.845185899997887,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 10,
+        "post_draft_calls": 3,
+        "seconds": 35.36145580000448,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      }
+    ],
+    "record": [
+      {
+        "trial": 1,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 55,
+        "post_draft_calls": 16,
+        "seconds": 320.69,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 41,
+        "post_draft_calls": 5,
+        "seconds": 317.84,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 46,
+        "post_draft_calls": 8,
+        "seconds": 237.47,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 37,
+        "post_draft_calls": 14,
+        "seconds": 293.25,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 61,
+        "post_draft_calls": 14,
+        "seconds": 291.73,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      }
+    ]
+  },
+  "candidate2_natural": {
+    "batch": [
+      {
+        "trial": 1,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 48,
+        "post_draft_calls": 17,
+        "seconds": 248.3778588999994,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      }
+    ],
+    "record": [
+      {
+        "trial": 1,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 2,
+        "tool_calls": 56,
+        "post_draft_calls": 9,
+        "seconds": 279.66,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      }
+    ]
+  },
+  "candidate3": {
+    "batch": [
+      {
+        "trial": 1,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 81,
+        "post_draft_calls": 12,
+        "seconds": 315.7941006999972,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 50,
+        "post_draft_calls": 15,
+        "seconds": 257.09503720000066,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 94,
+        "post_draft_calls": 16,
+        "seconds": 321.47242379999807,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 63,
+        "post_draft_calls": 46,
+        "seconds": 177.5252318999992,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 84,
+        "post_draft_calls": 27,
+        "seconds": 348.51034049999726,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      }
+    ],
+    "excerpt": [
+      {
+        "trial": 1,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 22,
+        "post_draft_calls": 11,
+        "seconds": 67.29562799999985,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 28,
+        "post_draft_calls": 16,
+        "seconds": 151.1164501999956,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 12,
+        "post_draft_calls": 5,
+        "seconds": 39.09082710000075,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 10,
+        "post_draft_calls": 4,
+        "seconds": 23.684704300001613,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 25,
+        "post_draft_calls": 17,
+        "seconds": 84.66960839999956,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      }
+    ],
+    "record": [
+      {
+        "trial": 1,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 26,
+        "post_draft_calls": 10,
+        "seconds": 248.83,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 112,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 1,
+        "tool_calls": 78,
+        "post_draft_calls": 31,
+        "seconds": 870.84,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 80,
+          "错误留空": 51
+        },
+        "exit_code": 125
+      },
+      {
+        "trial": 3,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 47,
+        "post_draft_calls": 10,
+        "seconds": 232.89,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 51,
+        "post_draft_calls": 4,
+        "seconds": 193.57,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 35,
+        "post_draft_calls": 8,
+        "seconds": 305.7,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      }
+    ]
+  },
+  "candidate3_natural": {
+    "batch": [
+      {
+        "trial": 1,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 56,
+        "post_draft_calls": 26,
+        "seconds": 244.15260780000244,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      }
+    ],
+    "record": [
+      {
+        "trial": 1,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 54,
+        "post_draft_calls": 11,
+        "seconds": 347.88,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      }
+    ]
+  },
+  "delivered": {
+    "batch": [
+      {
+        "trial": 1,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 75,
+        "post_draft_calls": 6,
+        "seconds": 396.650350099997,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 106,
+        "post_draft_calls": 9,
+        "seconds": 422.25934069999494,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 57,
+        "post_draft_calls": 6,
+        "seconds": 255.49770960000023,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 99,
+        "post_draft_calls": 15,
+        "seconds": 400.1607734999998,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 84,
+        "post_draft_calls": 18,
+        "seconds": 287.71847040000284,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      }
+    ],
+    "excerpt": [
+      {
+        "trial": 1,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 12,
+        "post_draft_calls": 3,
+        "seconds": 35.97573810000176,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 10,
+        "post_draft_calls": 1,
+        "seconds": 49.06688749999739,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 8,
+        "post_draft_calls": 2,
+        "seconds": 27.061406300003,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 6,
+        "post_draft_calls": 1,
+        "seconds": 29.540802199997415,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 13,
+        "post_draft_calls": 1,
+        "seconds": 57.273757700000715,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      }
+    ],
+    "record": [
+      {
+        "trial": 1,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 70,
+        "post_draft_calls": 16,
+        "seconds": 441.99,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 38,
+        "post_draft_calls": 13,
+        "seconds": 355.41,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 46,
+        "post_draft_calls": 7,
+        "seconds": 311.11,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 47,
+        "post_draft_calls": 5,
+        "seconds": 305.24,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 151,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 1,
+        "tool_calls": 121,
+        "post_draft_calls": 6,
+        "seconds": 599.21,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 119,
+          "错误填写": 9,
+          "填错": 9,
+          "错误留空": 3
+        },
+        "exit_code": 125
+      }
+    ]
+  },
+  "candidate5": {
+    "batch": [
+      {
+        "trial": 1,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 35,
+        "post_draft_calls": 3,
+        "seconds": 124.6019277000014,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 118,
+        "post_draft_calls": 56,
+        "seconds": 488.949566700001,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 121,
+        "post_draft_calls": 33,
+        "seconds": 436.1087781000024,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 63,
+        "post_draft_calls": 23,
+        "seconds": 271.72705359999964,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 200,
+        "model_service_http": null,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": 55,
+        "post_draft_calls": 20,
+        "seconds": 228.4303168999977,
+        "score": {
+          "正确填写": 70,
+          "错误填写": 0,
+          "正确留空": 130,
+          "错误留空": 0
+        },
+        "exit_code": 0
+      }
+    ],
+    "excerpt": [
+      {
+        "trial": 1,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 10,
+        "post_draft_calls": 4,
+        "seconds": 31.451812800005428,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 11,
+        "post_draft_calls": 4,
+        "seconds": 40.022032100001525,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 15,
+        "post_draft_calls": 9,
+        "seconds": 74.91876369999954,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 16,
+        "post_draft_calls": 10,
+        "seconds": 53.52170440000191,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 10,
+        "post_draft_calls": 4,
+        "seconds": 44.06679219999933,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      }
+    ],
+    "record": [
+      {
+        "trial": 1,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 31,
+        "post_draft_calls": 5,
+        "seconds": 374.0,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 37,
+        "post_draft_calls": 6,
+        "seconds": 395.17,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 12,
+        "post_draft_calls": 3,
+        "seconds": 136.98,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 4,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 53,
+        "post_draft_calls": 14,
+        "seconds": 441.43,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 5,
+        "correct": 163,
+        "model_service_http": null,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": 43,
+        "post_draft_calls": 11,
+        "seconds": 210.84,
+        "score": {
+          "保持原样": 5,
+          "正确留空": 26,
+          "可选项通过": 1,
+          "正确填写": 131
+        },
+        "exit_code": 0
+      }
+    ]
+  },
+  "release": {
+    "batch": [
+      {
+        "trial": 1,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 71.46816820000095,
+        "score": {
+          "正确填写": 0,
+          "错误填写": 0,
+          "正确留空": 0,
+          "错误留空": 0
+        },
+        "exit_code": 1
+      },
+      {
+        "trial": 2,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 75.1078989000016,
+        "score": {
+          "正确填写": 0,
+          "错误填写": 0,
+          "正确留空": 0,
+          "错误留空": 0
+        },
+        "exit_code": 1
+      },
+      {
+        "trial": 3,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 7.941200799999933,
+        "score": {
+          "正确填写": 0,
+          "错误填写": 0,
+          "正确留空": 0,
+          "错误留空": 0
+        },
+        "exit_code": 1
+      },
+      {
+        "trial": 4,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 9.166279400000349,
+        "score": {
+          "正确填写": 0,
+          "错误填写": 0,
+          "正确留空": 0,
+          "错误留空": 0
+        },
+        "exit_code": 1
+      },
+      {
+        "trial": 5,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 200,
+        "cli_turns": null,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 6.5491313000020455,
+        "score": {
+          "正确填写": 0,
+          "错误填写": 0,
+          "正确留空": 0,
+          "错误留空": 0
+        },
+        "exit_code": 1
+      }
+    ],
+    "excerpt": [
+      {
+        "trial": 1,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 12,
+        "post_draft_calls": 7,
+        "seconds": 52.42473149999569,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 2,
+        "correct": 24,
+        "model_service_http": null,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": 6,
+        "post_draft_calls": 1,
+        "seconds": 37.320110900000145,
+        "score": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "exit_code": 0
+      },
+      {
+        "trial": 3,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 6.370529899999383,
+        "score": {},
+        "exit_code": 1
+      },
+      {
+        "trial": 4,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 6.975506500006304,
+        "score": {},
+        "exit_code": 1
+      },
+      {
+        "trial": 5,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 24,
+        "cli_turns": null,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 4.020961800000805,
+        "score": {},
+        "exit_code": 1
+      }
+    ],
+    "record": [
+      {
+        "trial": 1,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 163,
+        "cli_turns": 3,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 92.54,
+        "score": {},
+        "exit_code": 1
+      },
+      {
+        "trial": 2,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 163,
+        "cli_turns": 1,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 25.06,
+        "score": {},
+        "exit_code": 1
+      },
+      {
+        "trial": 3,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 163,
+        "cli_turns": 1,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 5.48,
+        "score": {},
+        "exit_code": 1
+      },
+      {
+        "trial": 4,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 163,
+        "cli_turns": 1,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 5.69,
+        "score": {},
+        "exit_code": 1
+      },
+      {
+        "trial": 5,
+        "correct": null,
+        "model_service_http": 402,
+        "expected": 163,
+        "cli_turns": 1,
+        "tool_calls": null,
+        "post_draft_calls": null,
+        "seconds": 3.98,
+        "score": {},
+        "exit_code": 1
+      }
+    ]
+  }
+}
