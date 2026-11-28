@@ -1,6 +1,6 @@
 # Windows 离线技能的完整 Tier 1 复核
 
-[本轮五个交付包的 SHA-256、数据盲测和全流程验收](2026-11-28-数据核对与全流程复验.md) · [上一轮 PDF 后端迁移验收](2026-11-28-离线验收.md)
+[最新 1.1.2 现场验收、Claude 过程与交付件摘要](reports/second-review/README.md) · [历史数据盲测和全流程验收](2026-11-28-数据核对与全流程复验.md) · [上一轮 PDF 后端迁移验收](2026-11-28-离线验收.md)
 
 source 只含业务代码和资源；lite 增加纯 Python wheel；完整包包含解释器、原生 PDF 组件和 OCR 模型。请按实际产物分别复核。历史 Windows 发布包包含 PyMuPDF，复核该历史包时可在评审机使用项目修复版 SkillSpector。安装命令、同包对照结果及仍需复核的发现见 [PyMuPDF 归档扫描修复](skillspector-zip/README.md)。
 

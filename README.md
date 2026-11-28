@@ -6,7 +6,7 @@
 
 Windows x64、Linux x86_64 和 Linux aarch64 各有独立的运行时套装，均使用同一份技能指令。离线套装包括 Python、PDF 后端和中英文 OCR；旧版 Word/Excel 文档转换与 PDF 导出使用目标机已有的办公软件。
 
-**完整包目前供本地验收。** 本轮 Windows 完整包的 SkillSpector 风险评分为 `100/100（CRITICAL）`，Tier 1 发布资格为 `incomplete`。五个交付件均有独立 SHA-256。验收记录列出了真实来件的数据差异、盲测得分、各平台的实测环境和回归结果。[内网使用手册](tools/offline/README.md) · [本轮数据核对、性能与安全结果](qa/2026-11-28-数据核对与全流程复验.md) · [复现安全评审](qa/README.md)
+**当前交付版本为 1.1.2，完整包供本地验收。** 已用本机 Claude Code 和配置的 DeepSeek 实际填写记录、按批注摘抄和处理批量任务。报告分别记录了准确率、漏填、工具调用和判分依据。官方扫描仍有未解决项，公开仓库仅发布源代码。[内网使用手册](tools/offline/README.md) · [第二轮验收与跨平台结果](qa/reports/second-review/README.md) · [官方安全扫描](qa/reports/second-review/official-security.md)
 
 ## 源码安装与调用
 

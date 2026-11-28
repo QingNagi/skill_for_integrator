@@ -1,0 +1,417 @@
+{
+  "functional_commit": "8e4fae03d627b3b605e4a0a71d3d195bd19fe53e",
+  "release": "1.1.2",
+  "record_agent_runs": {
+    "candidate": {
+      "turns": 4,
+      "seconds": 251.68,
+      "calls": 60,
+      "denials": 0,
+      "tokens": {
+        "input_tokens": 112314,
+        "output_tokens": 37703,
+        "cache_read_input_tokens": 4216064
+      },
+      "models": [
+        "deepseek-flash[1m]"
+      ],
+      "snapshot_links": 2,
+      "word_comments": 44,
+      "final_files": 0,
+      "input_sha256_verified": 3,
+      "score": {
+        "保持原样": 5,
+        "正确留空": 26,
+        "可选项通过": 1,
+        "正确填写": 131
+      }
+    },
+    "1.1.1": {
+      "turns": 4,
+      "seconds": 148.15,
+      "calls": 22,
+      "denials": 0,
+      "tokens": {
+        "input_tokens": 44961,
+        "output_tokens": 23786,
+        "cache_read_input_tokens": 590464
+      },
+      "models": [
+        "deepseek-flash[1m]"
+      ],
+      "snapshot_links": 2,
+      "word_comments": 44,
+      "final_files": 0,
+      "input_sha256_verified": 3,
+      "score": {
+        "保持原样": 5,
+        "正确留空": 26,
+        "可选项通过": 1,
+        "正确填写": 131
+      }
+    },
+    "1.1.2": {
+      "turns": 4,
+      "seconds": 178.12,
+      "calls": 21,
+      "denials": 0,
+      "tokens": {
+        "input_tokens": 46658,
+        "output_tokens": 33258,
+        "cache_read_input_tokens": 678912
+      },
+      "models": [
+        "deepseek-flash[1m]"
+      ],
+      "snapshot_links": 2,
+      "word_comments": 44,
+      "final_files": 0,
+      "input_sha256_verified": 3,
+      "score": {
+        "保持原样": 5,
+        "正确留空": 26,
+        "可选项通过": 1,
+        "正确填写": 131
+      }
+    }
+  },
+  "excerpt_agent_runs": {
+    "claude-gold-excerpt": {
+      "seconds": 90.54908109999815,
+      "calls": 23,
+      "failure": 7,
+      "denials": 4,
+      "empty_note_warnings": 4,
+      "score": {
+        "统计": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "内容覆盖率": 1.0,
+        "问题": [],
+        "门槛通过": true
+      },
+      "sources": [
+        "S1:H0",
+        "S1:H1",
+        "S1:H2",
+        "S2:H1",
+        "S1:H3",
+        "S1:H7"
+      ],
+      "tokens": {
+        "input_tokens": 24656,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 454272,
+        "output_tokens": 14484
+      }
+    },
+    "claude-gold-excerpt-1.1.1": {
+      "seconds": 21.040228600002592,
+      "calls": 6,
+      "failure": 0,
+      "denials": 0,
+      "empty_note_warnings": 0,
+      "score": {
+        "统计": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "内容覆盖率": 1.0,
+        "问题": [],
+        "门槛通过": true
+      },
+      "sources": [
+        "S1:H0",
+        "S1:H1",
+        "S1:H2",
+        "S2:H1",
+        "S1:H3",
+        "S1:H7"
+      ],
+      "tokens": {
+        "input_tokens": 12790,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 65408,
+        "output_tokens": 2473
+      }
+    },
+    "claude-gold-excerpt-1.1.2": {
+      "seconds": 24.94438629999786,
+      "calls": 8,
+      "failure": 0,
+      "denials": 0,
+      "empty_note_warnings": 0,
+      "score": {
+        "统计": {
+          "必含通过": 9,
+          "禁含通过": 7,
+          "表格行通过": 7,
+          "顺序通过": 1
+        },
+        "内容覆盖率": 1.0,
+        "问题": [],
+        "门槛通过": true
+      },
+      "sources": [
+        "S1:H0",
+        "S1:H1",
+        "S1:H2",
+        "S2:H1",
+        "S1:H3",
+        "S1:H7"
+      ],
+      "tokens": {
+        "input_tokens": 15946,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 69120,
+        "output_tokens": 3147
+      }
+    }
+  },
+  "qa_tests": 4,
+  "functional_tests": 340,
+  "native_ci": "https://github.com/QingNagi/skill_for_integrator/actions/runs/46110990094",
+  "native_linux": [
+    {
+      "arch": "x86_64",
+      "glibc": [
+        "glibc",
+        "2.39"
+      ],
+      "office_conversion": "converted",
+      "timings_ms": {
+        "cold_run": {
+          "samples": [
+            3421.591,
+            3394.674,
+            3397.928
+          ],
+          "median": 3397.928
+        },
+        "warm_run": {
+          "samples": [
+            391.379,
+            393.073,
+            390.238,
+            387.493,
+            390.476
+          ],
+          "median": 390.476
+        },
+        "warm_search": {
+          "samples": [
+            254.92,
+            251.307,
+            252.277,
+            254.138,
+            252.668
+          ],
+          "median": 252.668
+        },
+        "direct_search": {
+          "samples": [
+            248.031,
+            246.405,
+            247.038,
+            248.211,
+            247.39
+          ],
+          "median": 247.39
+        }
+      }
+    },
+    {
+      "arch": "aarch64",
+      "glibc": [
+        "glibc",
+        "2.39"
+      ],
+      "office_conversion": "converted",
+      "timings_ms": {
+        "cold_run": {
+          "samples": [
+            3206.254,
+            3184.66,
+            3236.259
+          ],
+          "median": 3206.254
+        },
+        "warm_run": {
+          "samples": [
+            454.594,
+            445.841,
+            446.961,
+            450.296,
+            446.794
+          ],
+          "median": 446.961
+        },
+        "warm_search": {
+          "samples": [
+            295.621,
+            289.232,
+            288.08,
+            289.675,
+            292.825
+          ],
+          "median": 289.675
+        },
+        "direct_search": {
+          "samples": [
+            282.947,
+            288.518,
+            286.458,
+            285.278,
+            285.577
+          ],
+          "median": 285.577
+        }
+      }
+    }
+  ],
+  "public_sample_cli": {
+    "filled_correct": 70,
+    "filled_incorrect": 0,
+    "blank_correct": 130,
+    "blank_incorrect": 0
+  },
+  "batch_agent_1_1_2": {
+    "cases": {
+      "示例1": 40,
+      "示例2": 40,
+      "示例3": 40,
+      "示例4": 40,
+      "示例5": 40
+    },
+    "counts": {
+      "正确填写": 70,
+      "错误填写": 0,
+      "正确留空": 130,
+      "错误留空": 0
+    },
+    "elapsed_seconds": 324.71,
+    "calls": 110,
+    "denials": 7,
+    "calls_after_last_draft": 32,
+    "all_drafts_at_call": 78,
+    "tokens": {
+      "input_tokens": 103804,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 7166464,
+      "output_tokens": 51873
+    }
+  },
+  "qemu_linux": {
+    "x86_64": {
+      "arch": "x86_64",
+      "glibc": [
+        "glibc",
+        "2.36"
+      ],
+      "kernel": "6.1.0-50-amd64",
+      "payload_sha256": "497f34fb826545e14c2eb702b5174762e4255d3624b9e8a9a24ef00f29905e88",
+      "libreoffice": "unavailable",
+      "clock": "perf_counter_ns",
+      "cold_condition": "new application cache per sample; OS disk cache not flushed",
+      "timings_ms": {
+        "cold_run": {
+          "samples": [
+            61109.654,
+            62067.608,
+            54795.582
+          ],
+          "median": 61109.654
+        },
+        "warm_run": {
+          "samples": [
+            7478.127,
+            7544.45,
+            7362.431,
+            6452.037,
+            6512.98
+          ],
+          "median": 7362.431
+        },
+        "warm_search": {
+          "samples": [
+            4800.826,
+            4850.648,
+            4896.646,
+            4195.377,
+            4749.396
+          ],
+          "median": 4800.826
+        },
+        "direct_search": {
+          "samples": [
+            4787.41,
+            4719.242,
+            4196.308,
+            4211.939,
+            4478.511
+          ],
+          "median": 4478.511
+        }
+      },
+      "guest_exit": 0
+    },
+    "aarch64": {
+      "arch": "aarch64",
+      "glibc": [
+        "glibc",
+        "2.36"
+      ],
+      "kernel": "6.1.0-50-arm64",
+      "payload_sha256": "f61e84f587ab7418374f7cec0874ef9ba7756cbaa2b8cdcdef7c7e03cdfd9c7e",
+      "libreoffice": "unavailable",
+      "clock": "perf_counter_ns",
+      "cold_condition": "new application cache per sample; OS disk cache not flushed",
+      "timings_ms": {
+        "cold_run": {
+          "samples": [
+            69439.03,
+            64477.845,
+            56908.577
+          ],
+          "median": 64477.845
+        },
+        "warm_run": {
+          "samples": [
+            7210.598,
+            7347.241,
+            7225.568,
+            6152.442,
+            6462.25
+          ],
+          "median": 7210.598
+        },
+        "warm_search": {
+          "samples": [
+            4565.164,
+            4647.695,
+            4602.263,
+            4346.592,
+            4382.254
+          ],
+          "median": 4565.164
+        },
+        "direct_search": {
+          "samples": [
+            4579.936,
+            4999.698,
+            4108.731,
+            4418.072,
+            4384.262
+          ],
+          "median": 4418.072
+        }
+      },
+      "guest_exit": 0
+    }
+  }
+}
