@@ -61,8 +61,11 @@ def source_files():
 
 def skill_bytes(path, rel):
     data = path.read_bytes()
-    # Windows Git checkouts can convert line endings even for POSIX launch scripts.
-    return data.replace(b"\r\n", b"\n") if rel.endswith(".sh") else data
+    if rel == "LICENSE":
+        return data
+    # Only the validated, allowlisted skill text goes through this conversion.
+    lf = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return lf.replace(b"\n", b"\r\n") if rel.endswith(".cmd") else lf
 
 
 def source_manifest():
@@ -86,9 +89,7 @@ def wheel_files(plat, vendor):
         yield path, rel
 
 
-def files(plat, vendor=None):
-    if plat is not None:
-        yield from source_files()
+def dependency_files(plat, vendor=None):
     if plat == "source":
         return
     if plat:
@@ -104,13 +105,15 @@ def build(out, tag, plat, vendor=None):
     with tempfile.TemporaryDirectory(dir=out) as staging:
         clean = Path(staging) / top
         clean.mkdir()
-        for path, rel in files(plat, vendor):
+        if plat is not None:
+            for path, rel in source_files():
+                target = clean / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(skill_bytes(path, rel))
+        for path, rel in dependency_files(plat, vendor):
             target = clean / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            if rel.endswith(".sh"):
-                target.write_bytes(skill_bytes(path, rel))
-            else:
-                shutil.copyfile(path, target)
+            shutil.copyfile(path, target)
         if plat is None:
             requirements, sums, lock = [], [], {}
             snapshot = Path(HERE) / "offline/dependencies-advisories.json"

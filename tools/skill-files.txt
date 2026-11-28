@@ -15,6 +15,7 @@ scripts/batch_pool.py
 scripts/di.py
 scripts/dilib/__init__.py
 scripts/dilib/_bootstrap.py
+scripts/dilib/batch_delivery.py
 scripts/dilib/batch_workflow.py
 scripts/dilib/child_process.py
 scripts/dilib/cleanup.py

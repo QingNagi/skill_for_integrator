@@ -59,6 +59,8 @@ DI batch answer "返回的批量任务.json" B1=2 B2=2 --user-quote "审核人�
 
 返回已有草稿前会重新核对 DOCX 与审核报告的 SHA-256。人工改动、损坏或版本变化时，该项目返回 `review_existing_draft` 并保留文件。已登记的证据文件变动时返回 `review_evidence`；核对后可用 `batch answer 批量任务.json --evidence 项目证据.json --draft --json` 更新相应项目，其他项目保留现有草稿。
 
+整批出稿后，`delivery_report` 指向该批在任务输出根目录内的 Markdown 交付清单，`message` 是可直接转交的摘要。清单提供各份模板、草稿、审核报告、来源快照的链接，列出实测填写、留空及其原因和待人工核对事项。中途重放同一批次会复用内容一致的清单；清单被人工修改时，程序另存新版并保留原文件。在 Windows 中，模板分处不同盘符时使用绝对文件链接。
+
 `batch plan` 显示合并问题及所属任务。只有实际回答适用于所列的每份任务时才用 `batch answer "<批量任务.json>" B1=2` 等命令；按各任务分别核对来源或选项有差异时，用单任务的 `questions` 和 `answer`。收到实际回答后运行 `batch draft` 加批量任务 JSON。各草稿审核完成后，用同一 JSON 运行 `batch final`；查看每个任务的成功或失败信息。
 
 ## 排版

@@ -141,7 +141,7 @@ def advance(jobs, state, path, draft, blocked, replanned=()):
         status, action = "needs_answers", "ask_user"
     elif "blocked" in statuses:
         status, action = "blocked", "resolve_blockers"
-    elif ready == len(results):
+    elif results and ready == len(results):
         status, action = "draft_ready", "deliver_drafts"
     else:
         status, action = "planned", "batch_draft"
@@ -152,8 +152,15 @@ def advance(jobs, state, path, draft, blocked, replanned=()):
         form["jobs"] = [jd for jd, _ in item["jobs"]]
     summary = {k: sum(r.get(k, 0) for r in results) for k in ("fills", "held_measurements", "unfilled", "unread", "unverified")}
     summary.update(total=len(results), drafts=ready, blocked=sum(r["status"] == "blocked" for r in results))
-    return {"status": status, "next_action": action, "batch": str(path), "jobs": results, "pending": len(items),
-            "questions": forms[:4], "all_questions": forms, "summary": summary}
+    response = {"status": status, "next_action": action, "batch": str(path), "jobs": results, "pending": len(items),
+                "questions": forms[:4], "all_questions": forms, "summary": summary}
+    if status == "draft_ready":
+        from .batch_delivery import write_delivery
+        delivery = write_delivery(path, jobs, results)
+        summary.update(measurement_fills=delivery["measurement_fills"], measurement_holds=delivery["measurement_holds"])
+        response.update(delivery_report=delivery["delivery_report"], message=delivery["message"])
+        out(delivery["message"])
+    return response
 
 
 def attachments(a, jobs):

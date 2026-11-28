@@ -29,7 +29,7 @@ metadata:
 |---|---|
 | `needs_answers` | 一次展示 `all_questions` 内需要用户判断的完整问题和原选项编号。四题表单可用 `questions`。用户先前明确给出且对该任务适用的答案可直接登记。尚缺证据时停下来等用户。 |
 | `draft_ready / deliver_draft` | 交付返回的草稿、审核报告和快照路径及未填、未核、未读取数量。此任务已结束。 |
-| `draft_ready / deliver_drafts` | 整批完成。按返回的模板与草稿对照表、各任务的 `verification` 和交付路径直接向用户汇总。 |
+| `draft_ready / deliver_drafts` | 整批完成。把 `message` 和 `delivery_report` 交给用户。清单已列出每份模板、草稿、报告、快照链接、实测填入及留空数、遗留原因。可以直接用这份清单答复。 |
 | `draft_ready / review_then_deliver` | 对照返回的 `review_excerpts` 中源文件的原文和警告，说明待人工核对的内容，交付三个路径。只有条目含 `error` 时才用一次 `DI show 任务目录 引用… --full` 回读该任务的缺项。 |
 | `review_existing_draft` 或 `review_evidence` | 批次复用时发现已交付文件或证据发生变化。保留现有草稿，核对返回的任务、变更文件和需要用户确认的内容。 |
 | `blocked` | 说明具体拦截原因，处理要求的原件、证据、授权或 Word 批注。 |

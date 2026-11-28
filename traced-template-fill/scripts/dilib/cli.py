@@ -25,7 +25,7 @@ from .decisions import answer_binding, protected_question, record_decision, requ
 from .draft_review import check_with_office, pending, run_selfcheck, write_report
 from .input_paths import cmd_find, expand_pattern, join_paths, split_paths
 from .job import Job
-from .workflow import ask_form, plan_result, review_excerpts, review_references, timed
+from .workflow import ask_form, plan_result, planned_text, review_excerpts, review_references, review_summary, timed
 from .manual_ops import record_ops, validate_ops
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -143,6 +143,10 @@ def do_plan(job, quiet=False, extra_answers=None):
     plan["questions"] = qs
     plan["stale_answers"] = stale_ans
     evidence.save_plan_facts(job, plan, {**reused, **answers}, manifest)
+    report = plan["report"]
+    if "measurement_targets" in report:
+        report["measurement_written"] = {cell: value for cell, value in planned_text(plan["ops"]).items()
+                                         if cell in report["measurement_targets"]}
     job.write("plan.json", plan)
     job.write("questions.json", qs)
     write_questions_md(job, qs)
@@ -668,7 +672,7 @@ def generate_draft(job, *, defaults=False, check=False, raw_snapshot=False, disc
             "stale": len(report.get("stale", [])), "unread": unread,
             "fills": len(report["fills"]), "unfilled": len(report["unfilled"]), "unverified": unresolved_count,
             "structure": "incomplete" if checked is None else "failed" if checked.has_errors() else "passed",
-            "verification": delivery_check,
+            "verification": delivery_check, "review_summary": review_summary(report, unv),
             "warnings": list(dict.fromkeys(report["warnings"] + warns))}
     if not result["warnings"] and not any((unread, unv, result["stale"], result["unfilled"])) and result["structure"] == "passed":
         result["next_action"] = "deliver_draft"

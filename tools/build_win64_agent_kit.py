@@ -61,6 +61,7 @@ def build_kit(output, sources, vendor=None, runtime_only=False):
                           "runtime/python/LICENSE.txt", vendor)
         payload = stage / "payload.zip"
         source = list(bundle.source_files())
+        source_names = {rel for _, rel in source}
         with zipfile.ZipFile(payload, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             top = bundle.TOP + "/"
             if runtime_only:
@@ -109,7 +110,8 @@ def build_kit(output, sources, vendor=None, runtime_only=False):
                 if (root / "LICENSE").is_file():
                     docs.append(root / "LICENSE")
                 for file in docs + sorted((root / "references").glob("*.md")):
-                    put(archive, top + file.relative_to(root).as_posix(), file)
+                    rel = file.relative_to(root).as_posix()
+                    put(archive, top + rel, bundle.skill_bytes(file, rel) if rel in source_names else file)
             put(archive, top + "payload.zip", payload, zipfile.ZIP_STORED)
             put(archive, top + "payload.sha256", digest + "\r\n")
         package_sha = bundle.fv.sha256_of(kit)

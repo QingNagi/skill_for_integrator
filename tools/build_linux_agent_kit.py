@@ -200,7 +200,10 @@ def build_kit(arch, out, sources, vendor, runtime_only=False):
         with compressed_tar(kit, level=1) as archive:
             put_bytes(archive, top + "runtime-bom.cdx.json", bom)
             for rel in ([] if runtime_only else public_docs):
-                put_file(archive, top + rel, ROOT / rel)
+                if rel in files:
+                    put_bytes(archive, top + rel, skill_bytes(files[rel], rel))
+                else:
+                    put_file(archive, top + rel, ROOT / rel)
             readme = "runtime.md" if runtime_only else "README.md"
             put_file(archive, top + "README.md", REPO / "tools/offline" / readme)
             put_bytes(archive, top + "run.sh", launcher.encode("utf-8"), 0o755)

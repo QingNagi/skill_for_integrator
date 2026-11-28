@@ -60,6 +60,9 @@ class BlindVariants(unittest.TestCase):
                 step = run(*submission)
                 self.assertEqual(run(*submission), step)
             self.assertEqual(step["summary"]["drafts"], 2)
+            handoff = Path(step["delivery_report"]).read_text("utf-8")
+            self.assertIn("实测已填 36 格、留空 30 格", handoff)
+            self.assertTrue(all(j["review_summary"]["hold_reasons"] for j in step["jobs"]))
             for j, c in zip(step["jobs"], cases):
                 key = read_key(vault / (c.name + ".json"), vault / (c.name + ".sha256"))
                 scored = metrics(key, Path(j["draft"]))

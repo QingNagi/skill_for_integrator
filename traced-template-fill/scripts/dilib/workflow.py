@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from contextlib import contextmanager
 
 from .common import short
@@ -53,6 +54,46 @@ def review_references(report):
         if item.get("cell"):
             refs.append("T:" + item["cell"])
     return list(dict.fromkeys(refs))[:5]
+
+
+def planned_text(operations):
+    """Final plain text requested for each explicitly written block or cell, in operation order."""
+    values = {}
+    for op in operations:
+        if op["op"] == "set_cell" and op.get("cell"):
+            values[op["cell"]] = "".join(run[0] for run in op.get("runs", []))
+        elif op["op"] == "set_text" and (op.get("cell") or op.get("block")):
+            values[op.get("cell") or op["block"]] = op["text"]
+    return values
+
+
+def review_summary(report, unresolved):
+    """Explain flagged measurements and account separately for retained template values."""
+    filled = {row["target"] for row in report.get("fills", []) if "source_sample" in row and row.get("value")}
+    held = report.get("held_measurements", [])
+    targets = report.get("measurement_targets")
+    reasons = Counter(item.get("detail") or item.get("name") or item.get("kind") or "待核"
+                      for item in unresolved if not item.get("spec_question"))
+    holds = Counter(row.get("check") or row.get("how") or "来源未确认" for row in held)
+    coverage = "registered_only"
+    retained = 0
+    if targets is None:
+        # Old plans only recorded cells explicitly held by a matching source.
+        filled_count, blank_count = len(filled), len(held)
+    else:
+        coverage = "mapped_template_cells"
+        writes = report.get("measurement_written", {})
+        blanks = {cid for cid, original in targets.items() if not writes.get(cid, original).strip()}
+        classified = {row["target"] for row in held}
+        if blanks - classified:
+            holds["没有可写入的对应实测值"] += len(blanks - classified)
+        filled_count = sum(bool(value.strip()) for value in writes.values())
+        blank_count = len(blanks)
+        retained = len(targets.keys() - writes.keys() - blanks)
+    return {"measurement_fills": filled_count, "measurement_holds": blank_count,
+            "measurement_retained": retained, "coverage": coverage,
+            "unverified_reasons": [{"reason": s, "count": n} for s, n in reasons.items()],
+            "hold_reasons": [{"reason": s, "count": n} for s, n in holds.items()]}
 
 
 def review_excerpts(job, references):

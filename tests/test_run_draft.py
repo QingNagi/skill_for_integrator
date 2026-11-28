@@ -129,9 +129,33 @@ class RunDraftTests(unittest.TestCase):
         drafts = {j["draft"] for j in result["jobs"]}
         self.assertEqual(len(drafts), 2)
         self.assertTrue(all(Path(path).is_file() for path in drafts))
+        report = Path(result["delivery_report"])
+        self.assertEqual(report.parent, self.root / "整合输出")
+        self.assertIn(report.name, result["message"])
+        original_report = report.read_bytes()
+        self.assertEqual(original_report.decode("utf-8").count("## J"), 2)
         for call in (args, ("batch", "answer", result["batch"], "--draft", "--json")):
             retry = json.loads(self.invoke(*call))
             self.assertEqual({j["draft"] for j in retry["jobs"]}, drafts)
+            self.assertEqual(retry["delivery_report"], str(report))
+            self.assertEqual(report.read_bytes(), original_report)
+        saved = Path(result["batch"])
+        older = json.loads(saved.read_text("utf-8"))
+        for receipt in older["drafts"].values():
+            receipt["result"].pop("review_summary", None)
+        saved.write_text(json.dumps(older), encoding="utf-8")
+        self.assertEqual(json.loads(self.invoke(*args))["delivery_report"], str(report))
+        report.write_text("人工交付说明", encoding="utf-8")
+        refreshed = json.loads(self.invoke(*args))
+        self.assertNotEqual(refreshed["delivery_report"], str(report))
+        self.assertEqual(report.read_text("utf-8"), "人工交付说明")
+        self.assertEqual(Path(refreshed["delivery_report"]).read_bytes(), original_report)
+        self.assertEqual(json.loads(self.invoke(*args))["delivery_report"], refreshed["delivery_report"])
+        from urllib.parse import unquote
+        import re
+        links = re.findall(r"\]\(([^)]+)\)", original_report.decode("utf-8"))
+        self.assertEqual(len(links), 8)
+        self.assertTrue(all(not Path(unquote(link)).is_absolute() and (report.parent / unquote(link)).exists() for link in links))
         self.assertEqual(len(list((self.root / "整合输出").glob("*/草稿/*.docx"))), 2)
         changed = result["jobs"][0]
         for field in ("draft", "report"):
@@ -143,6 +167,22 @@ class RunDraftTests(unittest.TestCase):
             self.assertEqual(blocked["jobs"][0]["next_action"], "review_existing_draft")
             self.assertEqual(path.read_bytes(), original + "审核人修改".encode())
             path.write_bytes(original)
+
+    def test_batch_handoff_escapes_supplied_titles_and_review_reasons(self):
+        from dilib.batch_delivery import write_delivery
+        from types import SimpleNamespace
+        folder = self.root / "output"
+        folder.mkdir()
+        j = SimpleNamespace(dir=str(folder / "J1"))
+        result = {"id": "J1", "template": str(self.root / "[A] (test).docx"), "draft": str(folder / "draft.docx"),
+                  "report": str(folder / "report.md"), "snapshots": str(folder / "snapshots"), "unverified": 1,
+                  "review_summary": {"measurement_fills": 3, "measurement_holds": 2, "hold_reasons": [],
+                                     "unverified_reasons": [{"count": 1, "reason": "\n# [伪链接](x) <img>"}]}}
+        ret = write_delivery(folder / "state.json", [j], [result])
+        data = Path(ret["delivery_report"]).read_text("utf-8")
+        self.assertIn("待核（1 处）", data)
+        self.assertIn(r"\# \[伪链接\]\(x\) &lt;img&gt;", data)
+        self.assertIn("%5BA%5D%20%28test%29.docx", data)
 
     def test_parallel_batch_uses_one_restricted_pool_and_keeps_ordered_statuses(self):
         from dilib import child_process

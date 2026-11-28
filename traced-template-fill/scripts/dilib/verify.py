@@ -416,15 +416,17 @@ def _readback(plan, draft, res, template=None):
     if kinds & {'add_rows', 'insert_section'}:
         res['notes'].append('计划含加行/插入章节，块编号会移位，草稿回读已跳过')
         return
-    want = {}
-    for o in plan['ops']:
-        if o['op'] == 'set_cell' and o.get('cell'):
-            want[o['cell']] = ''.join(r[0] for r in o.get('runs', []))
+    from .workflow import planned_text
+    want = planned_text(plan['ops'])
     for item in plan.get('report', {}).get('held_measurements', []):
         cid = item['target']
         original = template.get(cid) if template is not None else None
         if original is not None:
             want.setdefault(cid, original['text'])
+    # Unmapped measurements have no entry in held_measurements. Also verify that
+    # these stayed blank or retained the exact text already in the template.
+    for cid, original in plan.get('report', {}).get('measurement_targets', {}).items():
+        want.setdefault(cid, original)
     if not want:
         return
     try:

@@ -1,4 +1,6 @@
 """Offline bundle and dependency integrity regressions."""
+import hashlib
+import json
 import shutil
 import sys
 import tempfile
@@ -27,6 +29,48 @@ class VendorIntegrityTests(unittest.TestCase):
         self.assertIn("config/wheels.lock.json", paths)
         self.assertFalse(any(p.startswith(("assets/", "vendor/")) for p in paths))
         self.assertFalse(any(p.endswith(".whl") or p.startswith(("runtime/", "tools/", "tests/", "qa/")) for p in paths))
+
+    def test_source_zip_and_pair_manifest_are_identical_in_lf_and_crlf_checkouts(self):
+        releases = []
+        license_text = b"License text\r\nPreserve these exact bytes.\r\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            for style in ("lf", "crlf"):
+                checkout = Path(tmp) / style
+                skill = checkout / bundle.TOP
+                shutil.copytree(bundle.ROOT, skill)
+                with patch.object(bundle, "ROOT", str(skill)):
+                    for path, _ in list(bundle.source_files()):
+                        normalized = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                        path.write_bytes(normalized if style == "lf" else normalized.replace(b"\n", b"\r\n"))
+                    (skill / "LICENSE").write_bytes(license_text)
+                    archive, _ = bundle.build(checkout, "same", "source")
+                    manifest = bundle.source_manifest()
+                    releases.append((Path(archive).read_bytes(), manifest))
+                    with zipfile.ZipFile(archive) as zip_file:
+                        entries = {n.split("/", 1)[1]: zip_file.read(n) for n in zip_file.namelist()}
+                        self.assertEqual(entries.pop("LICENSE"), license_text)
+                        for name, data in entries.items():
+                            newline = b"\r\n" if name.endswith(".cmd") else b"\n"
+                            self.assertEqual(data, data.replace(b"\r\n", b"\n").replace(b"\r", b"\n").replace(b"\n", newline), name)
+                        self.assertEqual(json.loads(manifest),
+                                         {n.split("/", 1)[1]: hashlib.sha256(zip_file.read(n)).hexdigest()
+                                          for n in zip_file.namelist()})
+        self.assertEqual(releases[0], releases[1], "Checkout line endings changed the source ZIP or runtime pair")
+
+    def test_platform_dependencies_keep_upstream_and_binary_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            license_file = root / "LICENSE.txt"
+            license_file.write_bytes(b"upstream line\r\nsecond line\r\n")
+            binary = root / "sample.png"
+            binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+            originals = [(license_file, "vendor/licenses/original.txt"), (binary, "assets/offline-ocr.png")]
+            with patch.object(bundle, "runtime_support", return_value=originals), \
+                    patch.object(bundle, "wheel_specs", return_value=[]):
+                archive, _ = bundle.build(tmp, "test", "win_amd64", root)
+            with zipfile.ZipFile(archive) as zipped:
+                for original, name in originals:
+                    self.assertEqual(zipped.read(bundle.TOP + "/" + name), original.read_bytes())
 
     def test_unlisted_files_and_nontext_are_excluded_or_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

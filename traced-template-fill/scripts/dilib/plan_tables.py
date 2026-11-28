@@ -256,6 +256,13 @@ class TablePlanningMixin:
                 self.mark_stale(t, rows, {sid: col}, set())
         if not sid_col:
             return
+        grid = self.report.setdefault("measurement_targets", {})
+        for row in rows:
+            for column in sid_col.values():
+                key = "%s.R%d.C%d" % (t["id"], row["row"], column)
+                original = self.T.get(key)
+                if original is not None:
+                    grid[key] = original["text"]
         sheets = self.sheet_sources()
         if not sheets:
             self.report["unfilled"].append("实测值列（%s）：没有提供测试数据文件（属于“指定来源没提供”，不等于没有数据）" % rg["id"])
